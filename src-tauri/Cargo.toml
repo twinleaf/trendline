@@ -10,7 +10,7 @@ build = "build.rs"
 
 [dependencies]
 tauri = { version = "1.8.0", features = [ "shell-open"] }
-twinleaf = { git = "ssh://git@github.com/twinleaf/twinleaf-rust-dev.git", branch = "dev", version = "0.1.0" }
+twinleaf = "1.0.0"
 getopts = "0.2"
 bytemuck = "1.9"
 pancurses = "0.17"
