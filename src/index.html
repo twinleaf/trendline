@@ -5,7 +5,6 @@
     <link rel="stylesheet" href="./styles.css" />
     <meta name ="viewport" content=""width=device-width, initial-scales="1.0">
     <script src="./uplot.js"></script> 
-    <!--<script src="./armplot.js"></script>-->
     <img src="Lily/src-tauri/icons/twinleaf.png"/>
   </head>
 
@@ -16,19 +15,23 @@
       <div class = "dropdown-content" id= "please">
         <!--<input type="checkbox" id= "all", class = "checkboxes">Select all<br />-->
       </div>
+      <div class = "RPC List">
+        <p>Space for RPC commands </p>
+      </div>
     </div>
   </div>
 
   <body>
 
-    <h1 id ="header">Welcome to Lily :> </h1>
-
-    <div id = "charts-container">
-      <button id = "start" class = "dropbtn">Start</button>
-      <button id= "pause" class = "dropbtn">Pause</button>
-    </div>
-
     <main id="canvases" style = "resize: both ">      
+
+      <h1 id ="header">Welcome to Lily :> </h1>
+
+      <div id = "charts-container">
+        <button id = "start" class = "dropbtn" >Start</button>
+        <button id= "pause" class = "dropbtn">Pause</button>
+      </div>
+
       <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
       <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
          

@@ -67,7 +67,7 @@ fn get_serial() -> String{
 
 #[tauri::command]
 fn graphs(window: Window) {
-    let mut args: Vec<String> = env::args().collect();
+    let args: Vec<String> = env::args().collect();
     //let mut args: Vec<String> = vec!["-r".to_string()];
     //let value = get_serial();
     //push the found serial to string
@@ -96,8 +96,7 @@ fn graphs(window: Window) {
     thread::spawn(move || { 
         //let (_tx, rx) = proxy.full_port().unwrap();
         let start_time = Instant::now();
-        let mut count = 0;
-
+        
         match devname.as_str(){
             "VMR" => {
                 for pkt in proxy.tree_full().unwrap().iter() {
@@ -111,15 +110,20 @@ fn graphs(window: Window) {
             }
             //armstrong temp 
             "USBSERIAL" => {
+                let mut current_name: String = String::new();
                 loop{
                     let sample = device.next();
                     let mut names: Vec<String> = Vec::new();
                     let mut values: Vec<f32> = Vec::new();
             
                     match sample.stream.stream_id{
-                        0x01 => {
+                        1 => {
                             for column in &sample.columns{
-                                names.push(column.desc.name.clone());
+                                let name = column.desc.name.clone();
+                                if name != current_name && !(names.contains(&name)){
+                                    names.push(column.desc.name.clone());
+                                    current_name = name.clone();
+                                }
                                 values.push(match column.value {
                                     ColumnData::Int(x) => x as f32,
                                     ColumnData::UInt(x) => x as f32,
@@ -127,6 +131,7 @@ fn graphs(window: Window) {
                                     ColumnData::Unknown => 0.0,
                                 });
                             }
+                            //let _ = window.emit("graphing", (&values, &names));
 
                         }
                         0x02 => {
@@ -139,15 +144,18 @@ fn graphs(window: Window) {
                                     ColumnData::Unknown => 0.0,
                                 });
                             }
-        
                             let _ = window.emit("graphing", (&values, &names));
+        
+                            
                         }
                         _ => {}
    
                     };
+                   
                     for (name, value) in names.iter().zip(values.iter()){
                         println!("{}: {}", name, value);
                     }
+                    //let _ = window.emit("graphing", (&values, &names));
                 }
                 
             }
@@ -156,12 +164,6 @@ fn graphs(window: Window) {
             
     }); 
 }
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}!", name)
-}
-
   
 fn main(){
     tauri::Builder::default()
@@ -171,8 +173,6 @@ fn main(){
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
-            //dump_by_id,
             graphs])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,5 @@
 #canvases {
-  position: absolute;
+  position: relative;
   padding: 2vh;
 }
 
@@ -13,7 +13,6 @@
 
 }
 
-
 h1{
   border-radius: 6px;
   border: 1px solid transparent;
@@ -21,22 +20,29 @@ h1{
   
 }
 
+main {
+  margin-left: 300px;
+} 
+
 /* navigation */
 .sidebar {
-  width: auto;
+  position: fixed;
+  width: 250px;
+  height: 800px;
+  display: block;
   background-color: white;
   padding: 5px;
   border: 1px solid #ccc;
   border-width: 10px;
   border-color: #4CAF50;
   border-radius: 20px;
-  position: relative;
+
 }
 
 /* Style the nav links and the dropdown button */
 .dropdown {
   position: relative;
-  display: inline-block;
+  display: block;
 }
 
 .dropbtn {
@@ -49,10 +55,11 @@ h1{
   position: relative;
 }
 
-.dropdown-content {
+.dropdown-content{
   display: none;
-  position: sticky;
-    right: -5%;
+  align-items: center;
+  /*position: sticky;
+    right: -5%;*/
   width: auto;
   color: white;
   background-color: #4CAF50;
@@ -64,7 +71,7 @@ h1{
 }
 
 .dropdown:hover .dropdown-content {
-  display: block;
+  display: inline-block;
 }
 
-.show {display:block;}
+.show {display: inline-block;}

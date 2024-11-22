@@ -63,11 +63,8 @@ window.onload = () => {
     });
 
     setTimeout(() => {
-        console.log(columns)
-        console.log(columns.length)
         //Iterate values for all charts 
         for (let i = 0; i < columns.length; i++) {
-            console.log("timeout");
             const checkboxesContainer = document.getElementById('please');
             const canvasesContainer = document.getElementById('canvases');
 
@@ -104,7 +101,7 @@ window.onload = () => {
             //uplot graph styling
             let options = {
                 width: 800, 
-                height: 600,
+                height: 300,
                 series: [
                     {   
                         value: (u, v) => v,
@@ -112,7 +109,8 @@ window.onload = () => {
                     { 
                         label: columns[i],
                         stroke: 'red',
-                        points: { show: false },         
+                        points: { show: false },
+                        spanGaps: false,         
     
                     },
                 ],
@@ -126,7 +124,8 @@ window.onload = () => {
                 scales: {
                     x: {
                     distr: 2,
-                    }
+                    auto: true,
+                    },
                 }
             }
 
