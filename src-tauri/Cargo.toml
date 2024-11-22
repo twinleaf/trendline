@@ -24,9 +24,6 @@ tauri-build = { version = "1.0", features = [] }
 name = "cli"
 path = "src/cli.rs"
 
-[[bin]]
-name = "connect"
-path = "src/connect.rs"
 
 
 
