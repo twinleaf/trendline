@@ -20,9 +20,6 @@ byteorder = "1.4"
 [build-dependencies]
 tauri-build = { version = "1.0", features = [] }
 
-[[bin]]
-name = "cli"
-path = "src/cli.rs"
 
 
 
