@@ -10,7 +10,7 @@ build = "build.rs"
 
 [dependencies]
 tauri = { version = "1.8.0", features = [ "shell-open"] }
-twinleaf = "1.0.0"
+twinleaf = "1.1.0"
 getopts = "0.2"
 bytemuck = "1.9"
 pancurses = "0.17"
