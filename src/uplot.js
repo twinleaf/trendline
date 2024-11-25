@@ -14,6 +14,7 @@ window.onload = () => {
     window.__TAURI__.event.listen('graphing', (event) => {
         const [values, name, info] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
+        console.log(elapsed)
         
         //push names to canvas
         if (!gotNames) {
@@ -34,7 +35,8 @@ window.onload = () => {
                 chart.data[0].shift();
                 chart.data[1].shift();
             }
-
+            
+            
             chart.setData(chart.data);
             chart.redraw(true, true);
         })
@@ -103,11 +105,7 @@ window.onload = () => {
                     },
                 ],
                 axes: [
-                    { scale: 'x',
-                    values: (u, data) => {
-                        return data.map(d => (Date.now() - startTime) /1000)
-                    }
-                    },
+                    { },
                     {
                         tick: {show: true,},
                         grid: {show: true}
@@ -116,9 +114,10 @@ window.onload = () => {
                 scales: {
                     x: {
                     time: true,
+                    min:0,
+                    max:1000,
                     distr: 2,
                     auto: true,
-                    range: [0,19]
                     },
                 }
             }
@@ -133,7 +132,7 @@ window.onload = () => {
             const targetResize = interact(targetElement);
 
             targetResize.resizable({
-                edges: {left: true, right: true, bottom: true, top:true},
+                edges: {left: false, right: false, bottom: true, top:true},
                 inertia: true,
                 listeners: {
                     move(event) {
@@ -153,7 +152,7 @@ window.onload = () => {
                     }),
                     
                     interact.modifiers.restrictSize({
-                        min: {width: 300, height: 200}
+                        min: {height: 200}
                     })
                 ]
             })

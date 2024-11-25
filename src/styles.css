@@ -6,6 +6,8 @@
 .canvas-container{
   border-style: dotted;
   border-color: black;
+  border-width: 1px; 
+  display: flex;
   overflow: auto;
   margin: auto;
   padding: 10px;
