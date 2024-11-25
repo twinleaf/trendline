@@ -93,7 +93,7 @@ fn graphs(window: Window) {
                 let mut current_name: String = String::new();
                 loop{
                     let sample = device.next();
-                    let info = format!("Device Name: {}  Serial: {}   Session ID: {}", sample.device.name, sample.device.serial_number, sample.device.session_id);
+                    let info = format!("Connected to: {}   Serial: {}   Session ID: {}", sample.device.name, sample.device.serial_number, sample.device.session_id);
                     let mut names: Vec<String> = Vec::new();
                     let mut values: Vec<f32> = Vec::new();
             
@@ -125,7 +125,7 @@ fn graphs(window: Window) {
                                     ColumnData::Unknown => 0.0,
                                 });
                             }
-                            let _ = window.emit("graphing", (&values, &names));
+                            let _ = window.emit("graphing", (&values, &names, &info ));
         
                             
                         }

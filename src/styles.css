@@ -13,20 +13,20 @@
 
 }
 
-h1{
-  border-radius: 6px;
-  border: 1px solid transparent;
+.header{
   text-align: center;
-  
+  font-family: 'Times New Roman';
 }
 
 main {
   margin-left: 300px;
+  font-family: 'Times New Roman';
 } 
 
 /* navigation */
 .sidebar {
   position: fixed;
+  font-family: 'Times New Roman';
   width: 250px;
   height: 800px;
   display: block;

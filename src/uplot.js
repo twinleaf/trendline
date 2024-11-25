@@ -5,21 +5,22 @@ invoke('graphs');
 window.onload = () => {
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
+    var serial = [];
 
     let startTime = Date.now();
     //let seconds = startTime.getSeconds()
        
     gotNames = false;
     window.__TAURI__.event.listen('graphing', (event) => {
-        const [values, name] = event.payload;
+        const [values, name, info] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
-        console.log(elapsed);
         
         //push names to canvas
         if (!gotNames) {
             for (let i = 0; i< name.length; i++) {
                 columns.push(name[i])
             }
+            serial.push(info)
             gotNames = true;
             } 
 
@@ -42,6 +43,14 @@ window.onload = () => {
     });
 
     setTimeout(() => {
+        //Push Sensor information to display
+        const deviceinfo = document.getElementById('sensorinfo');
+        const display = document.createElement('info');
+        display.type = "paragraph";
+        display.innerText= serial[0];
+
+        deviceinfo.appendChild(display);
+
         //Iterate values for all charts 
         for (let i = 0; i < columns.length; i++) {
             const checkboxesContainer = document.getElementById('please');
