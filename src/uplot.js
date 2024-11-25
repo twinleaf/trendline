@@ -29,7 +29,7 @@ window.onload = () => {
             chart.data[0].push(elapsed)
             chart.data[1].push(values[index])
 
-            maxPoints = 10;
+            maxPoints = 20;
             if (chart.data[0].length > maxPoints){
                 chart.data[0].shift();
                 chart.data[1].shift();
@@ -116,10 +116,9 @@ window.onload = () => {
                 scales: {
                     x: {
                     time: true,
-                    min:0,
-                    max:1000,
                     distr: 2,
                     auto: true,
+                    range: [0,19]
                     },
                 }
             }
