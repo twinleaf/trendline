@@ -5,36 +5,16 @@ invoke('graphs');
 window.onload = () => {
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
-    
 
-    let startTime = new Date();
-    const start = document.getElementById('start')
-    const stop = document.getElementById('pause')
-    let isPaused = true;
-
-    stop.addEventListener("click", function() {
-        stop.disabled = true;
-        isPaused = true;
-        start.disabled = false;
-        
-    })
-
-    start.addEventListener("click", function() {
-        start.disabled = true;
-        isPaused = false;
-        stop.disabeled = false;
-
-    })
+    let startTime = Date.now();
+    //let seconds = startTime.getSeconds()
        
     gotNames = false;
     window.__TAURI__.event.listen('graphing', (event) => {
         const [values, name] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
-
-        if (!isPaused) {
-            addData(values, elapsed)
-        }
-
+        console.log(elapsed);
+        
         //push names to canvas
         if (!gotNames) {
             for (let i = 0; i< name.length; i++) {
@@ -43,23 +23,22 @@ window.onload = () => {
             gotNames = true;
             } 
 
-        function addData(data, time) {
-            graphs.forEach((chart, index) => { //iterate through each graph
-    
-                chart.data[0].push(time)
-                chart.data[1].push(data[index])
-    
-                maxPoints = 10;
-                if (chart.data[0].length > maxPoints){
-                    chart.data[0].shift();
-                    chart.data[1].shift();
-                }
-    
-                chart.setData(chart.data);
-                chart.redraw(true, true);
-            })
+        graphs.forEach((chart, index) => { //iterate through each graph
+
+            chart.data[0].push(elapsed)
+            chart.data[1].push(values[index])
+
+            maxPoints = 10;
+            if (chart.data[0].length > maxPoints){
+                chart.data[0].shift();
+                chart.data[1].shift();
+            }
+
+            chart.setData(chart.data);
+            chart.redraw(true, true);
+        })
             
-        }
+        
     });
 
     setTimeout(() => {
@@ -115,7 +94,11 @@ window.onload = () => {
                     },
                 ],
                 axes: [
-                    {},
+                    { scale: 'x',
+                    values: (u, data) => {
+                        return data.map(d => (Date.now() - startTime) /1000)
+                    }
+                    },
                     {
                         tick: {show: true,},
                         grid: {show: true}
@@ -123,6 +106,9 @@ window.onload = () => {
                 ],
                 scales: {
                     x: {
+                    time: true,
+                    min:0,
+                    max:1000,
                     distr: 2,
                     auto: true,
                     },
