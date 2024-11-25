@@ -50,30 +50,9 @@ fn tio_parseopts(opts: Options, args: &[String]) -> (getopts::Matches, String, D
     (matches, root, route)
 }
 
-fn get_serial() -> String{
-    let ports = serialport::available_ports().expect("No ports found");
-    let mut port = String::new();
-    //iterates through possible serial ports
-    for p in ports {
-        //matches to macOS usbserial 
-        if p.port_name.starts_with("/dev/cu.usb"){
-            println!("Connecting to:{}", p.port_name);
-            port = p.port_name
-        }
-    }
-    port
-}
-
-
 #[tauri::command]
 fn graphs(window: Window) {
-    let args: Vec<String> = env::args().collect();
-    //let mut args: Vec<String> = vec!["-r".to_string()];
-    //let value = get_serial();
-    //push the found serial to string
-    //args.push(value.to_string());
-    //args.push("-s".to_string());
-    //args.push("/0".to_string());    
+    let args: Vec<String> = env::args().collect();   
     
     let opts = tio_opts();
     let (_matches, root, route) = tio_parseopts(opts, &args);
@@ -81,7 +60,7 @@ fn graphs(window: Window) {
     let proxy = proxy::Interface::new(&root);
     
     let device = proxy.device_full(route).unwrap();
-    //let devname: String = device.get("dev.name").unwrap();
+    //TODO: Fix hardcoded devname for two types of streaming ports
     let devname: String = "USBSERIAL".to_string();
     let mut device = Device::new(device);
 
@@ -92,6 +71,7 @@ fn graphs(window: Window) {
             names.push(name.to_string());
         }
     }
+    
 
     thread::spawn(move || { 
         //let (_tx, rx) = proxy.full_port().unwrap();
@@ -113,6 +93,7 @@ fn graphs(window: Window) {
                 let mut current_name: String = String::new();
                 loop{
                     let sample = device.next();
+                    let info = format!("Device Name: {}  Serial: {}   Session ID: {}", sample.device.name, sample.device.serial_number, sample.device.session_id);
                     let mut names: Vec<String> = Vec::new();
                     let mut values: Vec<f32> = Vec::new();
             
