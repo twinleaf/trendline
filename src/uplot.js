@@ -113,11 +113,10 @@ window.onload = () => {
                 ],
                 scales: {
                     x: {
-                    time: true,
-                    min:0,
-                    max:1000,
+                    time: false,
                     distr: 2,
                     auto: true,
+                    range: [0,19]
                     },
                 }
             }
