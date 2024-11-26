@@ -8,7 +8,7 @@ use getopts::Options;
 use bytemuck::cast_slice;
 use twinleaf::data::{ColumnData, Device};
 
-use tauri::{Window, Manager};
+use tauri::{Window, Manager, Emitter};
 use std::time::Instant;
 use std::thread;
 use std::env;
@@ -149,7 +149,7 @@ fn graphs(window: Window) {
 fn main(){
     tauri::Builder::default()
         .setup(|app| {
-            let _window = app.get_window("main").unwrap();
+            let _window = app.get_webview_window("main").unwrap();
 
             Ok(())
         })

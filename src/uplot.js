@@ -1,20 +1,21 @@
-const { invoke } = window.__TAURI__.tauri
+const { invoke } = window.__TAURI__.core
+const { listen } = window.__TAURI__.event;
+const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 
 invoke('graphs');
-
 window.onload = () => {
+
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
     var serial = [];
 
     let startTime = Date.now();
-    //let seconds = startTime.getSeconds()
        
     gotNames = false;
-    window.__TAURI__.event.listen('graphing', (event) => {
+
+    listen("graphing", (event) => {
         const [values, name, info] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
-        console.log(elapsed)
         
         //push names to canvas
         if (!gotNames) {
@@ -39,9 +40,7 @@ window.onload = () => {
             
             chart.setData(chart.data);
             chart.redraw(true, true);
-        })
-            
-        
+        }) 
     });
 
     setTimeout(() => {
