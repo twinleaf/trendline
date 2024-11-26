@@ -1,8 +1,12 @@
 const { invoke } = window.__TAURI__.core
 const { listen } = window.__TAURI__.event;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
+const { WebviewWindow, Window } = window.__TAURI__.window;
+
 
 invoke('graphs');
+
+value = getCurrentWebviewWindow();
 window.onload = () => {
 
     var graphs = []; //store graphs for display
@@ -13,7 +17,7 @@ window.onload = () => {
        
     gotNames = false;
 
-    listen("graphing", (event) => {
+    value.listen("graphing", (event) => {
         const [values, name, info] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
         

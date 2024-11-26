@@ -1,5 +1,4 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 use tio::proto::DeviceRoute;
 use tio::proxy;
 use tio::util;
@@ -8,7 +7,8 @@ use getopts::Options;
 use bytemuck::cast_slice;
 use twinleaf::data::{ColumnData, Device};
 
-use tauri::{Window, Manager, Emitter};
+use tauri::{Window, Emitter};
+use tauri::{LogicalPosition, LogicalSize, WebviewUrl};
 use std::time::Instant;
 use std::thread;
 use std::env;
@@ -149,8 +149,19 @@ fn graphs(window: Window) {
 fn main(){
     tauri::Builder::default()
         .setup(|app| {
-            let _window = app.get_webview_window("main").unwrap();
+            //let window = app.get_webview_window("main").unwrap();
 
+            let window = tauri::window::WindowBuilder::new(app, "main")
+                .inner_size(800., 600.)
+                .build()?;
+
+            let _webview1 = window.add_child(
+                tauri::webview::WebviewBuilder::new("lily", WebviewUrl::App(Default::default()))
+                    .auto_resize(),
+                    LogicalPosition::new(0., 0.),
+                    LogicalSize::new(800., 600.),
+                )?;
+            
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
