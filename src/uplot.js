@@ -1,12 +1,11 @@
 const { invoke } = window.__TAURI__.core
 const { listen } = window.__TAURI__.event;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
-const { WebviewWindow, Window } = window.__TAURI__.window;
-
 
 invoke('graphs');
 
-value = getCurrentWebviewWindow();
+webpage = getCurrentWebviewWindow();
+
 window.onload = () => {
 
     var graphs = []; //store graphs for display
@@ -17,7 +16,7 @@ window.onload = () => {
        
     gotNames = false;
 
-    value.listen("graphing", (event) => {
+    webpage.listen("graphing", (event) => {
         const [values, name, info] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
         
@@ -167,6 +166,21 @@ window.onload = () => {
     drop.addEventListener("click", function() {
         const content = document.getElementById('please')
         content.classList.toggle("show");
+    })
+
+    //page tabbing logic
+    document.querySelectorAll('.tabs div').forEach(tab => {
+        tab.addEventListener('click', function() {
+            //deactivate visibility
+            document.querySelectorAll('.tabs div').forEach(tab => tab.classList.remove('active'));
+            
+            //activate tab visibility
+            tab.classList.add('active');
+            
+            const webviewShow = tab.id;
+            webpage.emit('toggle', webviewShow)
+             
+        })
     })
 
     /*

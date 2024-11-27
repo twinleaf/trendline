@@ -20,6 +20,25 @@
   font-family: 'Times New Roman';
 }
 
+.tabs{
+  display: flex;
+  position: relative;
+  background-color: #040604;
+  border-radius: 10px;
+  color: white;
+  padding: 10px;
+  border: none;
+  cursor: pointer;
+  width: auto;
+}
+
+.tabs div {
+  padding: 2px 5px;
+  background-color: black;
+  cursor: pointer;
+  user-select: none;
+}
+
 main {
   margin-left: 300px;
   font-family: 'Times New Roman';

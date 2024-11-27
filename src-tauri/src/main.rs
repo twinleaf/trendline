@@ -7,7 +7,7 @@ use getopts::Options;
 use bytemuck::cast_slice;
 use twinleaf::data::{ColumnData, Device};
 
-use tauri::{Window, Emitter};
+use tauri::{Window, Emitter, Listener};
 use tauri::{LogicalPosition, LogicalSize, WebviewUrl};
 use std::time::Instant;
 use std::thread;
@@ -155,17 +155,47 @@ fn main(){
                 .inner_size(800., 600.)
                 .build()?;
 
-            let _webview1 = window.add_child(
+            let webview1 = window.add_child(
                 tauri::webview::WebviewBuilder::new("lily", WebviewUrl::App(Default::default()))
                     .auto_resize(),
                     LogicalPosition::new(0., 0.),
                     LogicalSize::new(800., 600.),
                 )?;
             
+            let webview2 = window.add_child(
+                tauri::webview::WebviewBuilder::new(
+                    "desc",
+                    WebviewUrl::App("desc.html".parse().unwrap()),
+                )
+                .auto_resize(),
+                LogicalPosition::new(0., 0.),
+                LogicalSize::new(800., 600.),
+                )?;
+
+            //listen on backend for which webview to show
+            webview1.show().unwrap();
+            webview2.hide().unwrap();
+
+            app.listen("toggle",  move |event| {
+                let webpage: String = serde_json::from_str(event.payload()).unwrap();
+
+                match webpage.as_str() {
+                    "lily" => {
+                        webview1.show().unwrap();
+                        webview2.hide().unwrap();
+                    }
+                    "desc" => {
+                        webview1.hide().unwrap();
+                        webview2.show().unwrap();
+                    }
+                    _ => {}
+                }
+
+            });  
+            
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            graphs])
+        .invoke_handler(tauri::generate_handler![graphs])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
     
