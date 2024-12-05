@@ -11,6 +11,7 @@ window.onload = () => {
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
     var serial = [];
+    let points = 20;
 
     let startTime = Date.now();
        
@@ -27,20 +28,18 @@ window.onload = () => {
             }
             serial.push(info)
             gotNames = true;
-            } 
+        } 
 
         graphs.forEach((chart, index) => { //iterate through each graph
-
             chart.data[0].push(elapsed)
             chart.data[1].push(values[index])
 
-            maxPoints = 20;
+            //TODO: Graph shifting as points filter in on change
+            let maxPoints = points;
             if (chart.data[0].length > maxPoints){
                 chart.data[0].shift();
                 chart.data[1].shift();
             }
-            
-            
             chart.setData(chart.data);
             chart.redraw(true, true);
         }) 
@@ -128,7 +127,6 @@ window.onload = () => {
             const uplot = new uPlot(options, data, document.getElementById(canvas.id))
             graphs.push(uplot)
 
-
             const targetElement = document.getElementById(canvas.id)
             const targetResize = interact(targetElement);
 
@@ -183,15 +181,20 @@ window.onload = () => {
         })
     })
 
-    /*
-    const toggleAll = document.getElementById('all')
-    toggleAll.addEventListener("click", (source) => {
-        canvas = document.getElementsByTagName('canvas')
-        for ( let i = 0; i <canvas.length; i++)
-            canvas[i].style.display = source.target.checked ? 'block': 'none';
+    const timeSpan = document.getElementById('timeSpan');
+    timeSpan.addEventListener('input', () => {
+        const value = parseFloat(timeSpan.value);
+        const min = parseFloat(timeSpan.min)
+        const max = parseFloat(timeSpan.max)
 
-    })*/
-
+        if (isNaN(value) || value < min) {
+            points = min;
+        } else if (value > max) {
+            points = max;
+        } else {
+            points = value;
+        }
+    })
 
 };
 

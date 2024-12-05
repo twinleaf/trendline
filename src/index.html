@@ -11,16 +11,21 @@
     <div class = "tabs">
       <div id = "lily" class = "active">Main</div> 
       <div id = "desc" >Desc</div>
+      <div id = "field">Field</div>
     </div>
 
     <h2 id ="header">Welcome to Lily :> </h2>
     <div class = "dropdown">
       <button class = "dropbtn" id="drop">Select Graphs</button>
-      <div class = "dropdown-content" id= "please">
-        <!--<input type="checkbox" id= "all", class = "checkboxes">Select all<br />-->
-      </div>
+      <div class = "dropdown-content" id= "please"></div>
+
       <div class = "RPC List">
-        <p>Space for RPC commands </p>
+        <div>
+            <br>
+            <label id = "timeSpanVal">Time Span</label>
+            <input type = "number" id = "timeSpan" min ="5" max = "100" value = "20"/>
+          <br>
+        </div>
       </div>
     </div>
   </div>
@@ -34,7 +39,6 @@
       <script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.11/dist/uPlot.min.css" />
       <script src = "https://cdn.jsdelivr.net/npm/uplot@1.6.11/dist/uPlot.iife.min.js"></script>
-
 
     </main>
 
