@@ -1,36 +1,29 @@
 # Lily
+Graphing tool for sensor stream data. Utilizes twinleaf-rust crate to read out metadata
 
-## Name
-VMR Sensor Graphing Tool
+### Development
+On linux, there is a dependency on libudev; to install it use:
 
-## Description
-Provides basic graphing of stream data via resizable uPlot graphs. The project uses a Rust backend and Vanilla Javascript on the Tauri frontend. The cli tool can be used within conjunction of the connect tool to run a live stream monitor of the incoming sensor data.
+	sudo apt install libudev-dev  # debian linux
 
-## Installation
-To run the GUI, you can run two options in the terminal 
+### Installation
+Be sure to confirm all twinleaf-rust crate dependencies are satisfied.
 
-Within src-tauri:
-`cargo run --bin lily`
+To run: 
 
-Or within target debug run:
-`./target/debug/lily`
+Connect the sensor to a proxy via twinleaf-rust proxy tool
 
-Below is an example of what the GUI should look like
-![Alt text](Lily/src-tauri/icons/demo.png)
+    tio-proxy --auto
 
+When there are more than one serial port available, it is necessary to specify the port
 
+    [linux]> tio-proxy -r /dev/ttyACM0
+	[macOS]> tio-proxy -r /dev/cu.usbserialXXXXXX
+	[wsl1] > tio-proxy -r COM3
 
-To use the live stream monitor: (**in progress tool)
+Run Lily application:
 
-1) Connect to the sensor 
-`cargo run --bin connect`
+    cargo run
 
-2) In a new terminal run the below command with "stream" or "arm" (armstrong) depending on sensor:
-`cargo run --bin cli {}` 
-
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
+### Project status
 Development in progress
