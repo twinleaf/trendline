@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="./styles.css" />
+    <meta name ="viewport" content=""width=device-width, initial-scales="1.0">
+    <script src="./field.js"></script> 
+  </head>
+
+  <body>
+    <div class = "sidebar">
+      <div class = "tabs">
+        <div id = "lily" class = "active">Main</div> 
+        <div id = "desc" >Desc</div>
+        <div id = "field">Field</div>
+      </div>
+
+      
+      <h2 id ="header">Welcome to Lily :> </h2>
+      <div class = "RPC List">
+        <div>
+          <br>
+          <label id = "timeSpanVal">Time Span </label>
+          <input type = "number" id = "timeSpan" name= "timeSpan" min ="5" max = "1000" value = "20"></input>
+          <br>
+        </div>
+      </div>
+    </div>
+
+    <main id="canvases" style = "resize: both ">      
+
+      <div id = "sensorinfo"></div>
+         
+      <script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
+      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.11/dist/uPlot.min.css" />
+      <script src = "https://cdn.jsdelivr.net/npm/uplot@1.6.11/dist/uPlot.iife.min.js"></script>
+
+    </main>
+
+  </body>
+</html>
