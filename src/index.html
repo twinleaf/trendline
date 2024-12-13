@@ -21,44 +21,33 @@
     </div>
 
     <div class = "RPCCommands">
-      <br>
-        <label id = "timeSpanVal">Time Span</label>
-        <input type = "number" id = "timeSpan" class = "time" min ="5" max = "100" value = "10"/>
-      <br>
-
+      <label id = "timeSpanVal">Time Span<input type = "number" id = "timeSpan" class = "time" min ="1" max = "100" value = "10"/></label><br>
+    
       <div id = "cell.therm" class = "controls" style = "display: none">
- 
-        <button id = "dev.name" class = "buttonCommands">Device Name</button><br>
-        <input id = "cell.therm.control.enable" type = "checkbox" class = "checkCommands">Cell Therm Control Enable</input><br>
+        <label>Cell Therm Control Enable <input id = "cell.therm.control.enable" type = "checkbox" class = "checkCommands"></input></label><br>
 
-        <label id = "Kp">Kp</label>
-        <input type ="number" id = "cell.therm.control.Kp" min = "1" max = "1.3" class = "InputCommands"/><br>
-        <label id = "Ki">Ki</label>
-        <input type ="number" id = "cell.therm.control.Ki" min = "1" max = "1.3" class = "InputCommands"/><br>
-        <label id = "setpoint">Setpoint</label>
-        <input type ="number" id = "cell.therm.control.setpoint" min = "1" max = "1.3" class = "InputCommands"/>
+        <label id = "Kp">Kp <input type ="number" id = "cell.therm.control.Kp" min = "1" max = "1.3" class = "InputCommands"/></label><br>
+        <label id = "Ki">Ki <input type ="number" id = "cell.therm.control.Ki" min = "1" max = "1.3" class = "InputCommands"/></label><br>
+        <label id = "setpoint">Setpoint <input type ="number" id = "cell.therm.control.setpoint" min = "0" max = "82" class = "InputCommands"/></label>
       </div>
 
       <div id = "laser.therm.control" class = "controls" style = "display: none">
-        <input id = "laser.therm.control.enable" type = "checkbox" class = "checkCommands">Laser Therm Control Enable</input><br>
+        <label>Laser Therm Control Enable <input id = "laser.therm.control.enable" type = "checkbox" class = "checkCommands"></input></label><br>
         <button id = "laser.therm.control.reset" type = "button" class= "buttonCommands">Reset</button><br>
 
-        <label id = "Kp">Kp</label>
-        <input type ="number" id = "laser.therm.control.Kp" min = "0.1" max = "1.3" class = "InputCommands"/><br>
-        <label id = "Ki">Ki</label>
-        <input type ="number" id = "laser.therm.control.Ki" min = "0.1" max = "1.3" class = "InputCommands"/><br>
-        <label id = "setpoint">Setpoint</label>
-        <input type ="number" id = "laser.therm.control.setpoint" min = "1" max = "1.3" class = "InputCommands"/><br>
+        <label id = "Kp">Kp <input type ="number" id = "laser.therm.control.Kp" min = "0.1" max = "1.3" class = "InputCommands"/></label><br>
+        <label id = "Ki">Ki <input type ="number" id = "laser.therm.control.Ki" min = "0.1" max = "1.3" class = "InputCommands"/></label><br>
+        <label id = "setpoint">Setpoint <input type ="number" id = "laser.therm.control.setpoint" min = "1" max = "1.3" class = "InputCommands"/></label><br>
       </div>
+
     </div>
   </div>
 
   <body>
-
     <main id="canvases" style = "resize: both ">      
 
       <div id = "sensorinfo"></div>
-         
+  
       <script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.11/dist/uPlot.min.css" />
       <script src = "https://cdn.jsdelivr.net/npm/uplot@1.6.11/dist/uPlot.iife.min.js"></script>

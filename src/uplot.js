@@ -3,7 +3,6 @@ const { listen } = window.__TAURI__.event;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 
 invoke('graphs');
-//invoke('rpc_control')
 
 webpage = getCurrentWebviewWindow();
 
@@ -13,6 +12,7 @@ window.onload = () => {
     var serial = []; //store device serial information
     let timePoints = 10;
     const inputChange = document.querySelectorAll('.InputCommands');
+    const rpcType = document.querySelectorAll('.controls');
     
     let startTime = Date.now();
     gotNames = false; //bool determines if graph information is set up
@@ -31,18 +31,35 @@ window.onload = () => {
             gotNames = true;
         } 
 
-        graphs.forEach((chart, index) => { //iterate through each graph
+        //push data to each graph
+        graphs.forEach((chart, index) => {
             chart.data[0].push(elapsed)
             chart.data[1].push(values[index])
 
-            //TODO: Fix graph shifting as points filter in on change (buggy)
+            const timeSpan = document.getElementById('timeSpan');
+            timeSpan.addEventListener('keypress', function(e) { //adjust graph time span
+                if (e.key == "Enter") {
+                    timePoints = in_range(timeSpan);
+                    if (chart.data[0].length> timePoints) {
+                        while (chart.data[0].length > timePoints) {
+                            chart.data[0].shift();
+                            chart.data[1].shift();
+                            chart.redraw();
+                        }
+                    } else{chart.redraw()}; 
+                    timeSpan.innerHTML = timePoints;
+                        timeSpan.value = timePoints;
+                }
+            }) 
+
             let maxPoints = timePoints;
             if (chart.data[0].length > maxPoints){
                 chart.data[0].shift();
                 chart.data[1].shift();
+                console.log("shifting", maxPoints, chart.data[0].length)
             }
             chart.setData(chart.data);
-            chart.redraw(true, true);
+            chart.redraw();
         }) 
     });
 
@@ -71,7 +88,7 @@ window.onload = () => {
 
         deviceinfo.appendChild(display);
 
-        //Iterate values for all charts 
+        //write out a chart for each column 
         for (let i = 0; i < columns.length; i++) {
             const checkboxesContainer = document.getElementById('dropdown');
             const canvasesContainer = document.getElementById('canvases');
@@ -106,8 +123,9 @@ window.onload = () => {
                 const canvas = document.getElementById(`canvas${i}`)
                 canvas.style.display = event.target.checked ? 'block' : 'none';
 
-                document.querySelectorAll('.controls').forEach(rpcControl => {
-                    if (label.innerText.includes(rpcControl.id)){
+                //TODO: fix those logic where on a change it somehow has to check all the instances
+                rpcType.forEach(rpcControl => {
+                    if (label.innerText.includes(rpcControl.id)) {
                         rpcControl.style.display = event.target.checked? 'inline-block' : 'none';
                     }
                 });
@@ -140,11 +158,10 @@ window.onload = () => {
             }
 
             const data = [[],[]]
-
             const uplot = new uPlot(options, data, document.getElementById(canvas.id))
             graphs.push(uplot)
 
-            //interact js to resize charts
+            //interact js to resize chart height
             const targetElement = document.getElementById(canvas.id)
             const targetResize = interact(targetElement);
 
@@ -188,10 +205,9 @@ window.onload = () => {
     //page tabbing
     document.querySelectorAll('.tabs div').forEach(tab => {
         tab.addEventListener('click', function() {
-            //deactivate visibility
+            //deactivate all visibility
             document.querySelectorAll('.tabs div').forEach(tab => tab.classList.remove('active'));
-
-            //activate tab visibility
+            //activate specified tab
             tab.classList.add('active');
             
             const webviewShow = tab.id;
@@ -226,11 +242,11 @@ window.onload = () => {
     toggleChange.forEach(clickToggle => {
         clickToggle.addEventListener("click", function(e) {
             if (e.checked) {
-                webpage.emit('returningRPC', clickToggle.id);
+                call = [clickToggle.id, clickToggle.value]; 
+                webpage.emit('returningRPC', call);
             }
         })
     })
-
 
     //returns all rpc values to corresponding input field
     webpage.listen("returnRPC", (event) => {
@@ -242,18 +258,10 @@ window.onload = () => {
                 rpccall.innerHTML = inputValue;
             }
         })
-    });
-    
-    const timeSpan = document.getElementById('timeSpan');
-    timeSpan.addEventListener('keypress', function(e) {
-        if (e.key == "Enter") {
-            timePoints = in_range(timeSpan)
-        }
-    })
-    
+    });     
 };
 
-//test if rpc input is within range
+//function tests if input is within specified range
 function in_range(fillValue) {
     const value = parseFloat(fillValue.value);
     const min = parseFloat(fillValue.min)

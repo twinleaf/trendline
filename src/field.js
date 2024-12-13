@@ -35,6 +35,21 @@ window.onload = () => {
             chart.data[0].push(elapsed)
             chart.data[1].push(values[index])
 
+            const timeSpan = document.getElementById('timeSpan');
+            timeSpan.addEventListener('keypress', function(e) { //adjust graph time span
+                if (e.key == "Enter") {
+                    timePoints = in_range(timeSpan);
+                    if (chart.data[0].length> timePoints) {
+                        while (chart.data[0].length > timePoints) {
+                            chart.data[0].shift();
+                            chart.data[1].shift();
+                            chart.redraw();}
+                    } else{chart.redraw()}   
+                    timeSpan.innerHTML = timePoints;
+                    timeSpan.value = timePoints;
+                }
+            }) 
+
             let maxPoints = points;
             if (chart.data[0].length > maxPoints){
                 chart.data[0].shift();
@@ -54,8 +69,6 @@ window.onload = () => {
         display.innerText= serial[0];
 
         deviceinfo.appendChild(display);
-
-        //push rpc command info 
 
         //Iterate values for all charts 
         for (let i = 0; i < columns.length; i++) {
@@ -102,10 +115,8 @@ window.onload = () => {
             }
 
             const data = [[],[]]
-
             const uplot = new uPlot(options, data, document.getElementById(canvas.id))
             graphs.push(uplot)
-
 
             const targetElement = document.getElementById(canvas.id)
             const targetResize = interact(targetElement);
@@ -139,21 +150,6 @@ window.onload = () => {
 
     }, 1000);
 
-    const timeSpan = document.getElementById('timeSpan');
-    timeSpan.addEventListener('input', () => {
-        const value = parseFloat(timeSpan.value);
-        const min = parseFloat(timeSpan.min)
-        const max = parseFloat(timeSpan.max)
-
-        if (isNaN(value) || value < min) {
-            points = min;
-        } else if (value > max) {
-            points = max;
-        } else {
-            points = value;
-        }
-    })
-
     //page tabbing logic
     document.querySelectorAll('.tabs div').forEach(tab => {
         tab.addEventListener('click', function() {
@@ -167,9 +163,24 @@ window.onload = () => {
             webpage.emit('toggle', webviewShow)
              
         })
-    })
-    
+    }) 
 };
+
+//function tests if input is within specified range
+function in_range(fillValue) {
+    const value = parseFloat(fillValue.value);
+    const min = parseFloat(fillValue.min)
+    const max = parseFloat(fillValue.max)
+
+    if (isNaN(value) || value < min) {
+        withinRange = min;
+    } else if (value > max) {
+        withinRange = max;
+    } else {
+        withinRange = value;
+    }
+    return withinRange
+}
 
 
     
