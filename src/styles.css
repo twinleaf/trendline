@@ -1,18 +1,15 @@
-#canvases {
-  position: relative;
-  padding: 2vh;
-}
-
-.canvas-container{
-  border-style: dotted;
-  border-color: black;
-  border-width: 1px; 
-  display: flex;
-  overflow: auto;
-  margin: auto;
-  padding: 10px;
-  position: relative;
-
+/* navigation */
+.sidebar {
+  position: fixed;
+  width: 250px;
+  height: auto;
+  display: block;
+  background-color: white;
+  padding: 5px;
+  border: 1px solid #ccc;
+  border-width: 10px;
+  border-color: #4CAF50;
+  border-radius: 20px;
 }
 
 .header{
@@ -39,27 +36,6 @@
   user-select: none;
 }
 
-main {
-  margin-left: 300px;
-  font-family: 'Times New Roman';
-} 
-
-/* navigation */
-.sidebar {
-  position: fixed;
-  font-family: 'Times New Roman';
-  width: 250px;
-  height: auto;
-  display: block;
-  background-color: white;
-  padding: 5px;
-  border: 1px solid #ccc;
-  border-width: 10px;
-  border-color: #4CAF50;
-  border-radius: 20px;
-
-}
-
 /* Style the nav links and the dropdown button */
 .dropdown {
   position: relative;
@@ -78,17 +54,85 @@ main {
 
 .dropdown-content{
   display: none;
-  align-items: center;
-  /*position: sticky;
-    right: -5%;*/
-  width: auto;
+  width: 80%;
   color: white;
   background-color: #4CAF50;
   border-color: white;
   border-radius: 10px;
-  z-index: 1;
-  padding: 10px;
-  
+  padding-left: 16px;
+  padding-top: 25px;
 }
 
-.show {display: inline-block;}
+.checkboxes{
+  display:block;
+  margin-block: -51px;
+  margin-top:-11.5px;
+}
+
+.dropdown-content label{
+  display: flex;
+  margin-left: 17px;
+  margin-top:32px;
+}
+
+.show {display: inline-block;
+       flex-direction: column;}
+
+/*RPC Commands*/
+.RPCCommands{
+  border: 5px;
+  padding: 10px;
+}
+
+.controls{
+  margin-top: 10px;
+  border-top-style: double;
+  border-bottom-style: double;
+}
+
+.buttonCommands{
+background-color: white;
+color: black;
+border-radius: 5px;
+border-color: black;
+margin: 3px;
+cursor: pointer;
+position: relative;
+}
+
+.InputCommands{
+  padding: 5px;
+  position:relative;
+  border-color: black;
+  margin-top: 5px;
+  margin-bottom: 5px;
+}
+
+.checkCommands{ 
+  cursor: pointer;
+  margin-top: 5px;
+  margin-bottom: 5px;
+}
+
+      
+/*Graphs and main body*/
+main {
+  margin-left: 300px;
+} 
+
+#canvases {
+  position: relative;
+  padding: 2vh;
+}
+
+.canvas-container{
+  border-style: dotted;
+  border-color: black;
+  border-width: 1px; 
+  display: flex;
+  overflow: auto;
+  margin: auto;
+  padding: 10px;
+  position: relative;
+
+}
