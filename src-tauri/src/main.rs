@@ -210,7 +210,6 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
             _ => panic!("Invalid type"),
         };
         result = reply_str.clone();
-        //println!("Reply: {}", reply_str.clone());
     }
     drop(proxy);
     for s in proxy_status.iter() {
@@ -223,6 +222,7 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
 
 
 #[tauri::command]
+//main tauri function where stream data gets emitted to graphs on frontend
 fn graphs(window: Window) {
     let args: Vec<String> = env::args().collect();   
     let opts = tio_opts();
@@ -234,7 +234,7 @@ fn graphs(window: Window) {
         let mut device = Device::new(device); 
 
         //armstrong temp 
-        //TODO:: Need dynamic streams that will load in graphs in all instances (**targeting armstrong stream 1 field)
+        //TODO:: Need set up following flexible number of streams
         let mut current_name: String = String::new();
         loop{
             let sample = device.next();
@@ -337,29 +337,30 @@ fn main(){
                 }
             }); 
 
+            //TODO: simplify logic between listening on load and on a regular logic
+            //App listens for the RPC call and returns the result to the specified window
             let main_window = app.get_webview("aux").unwrap();
             let new_window = app.get_webview("aux").unwrap();
             app.listen("returningRPCName", move |event| {
-                let mut arg: Vec<String> = env::args().collect();   
-                _ = &arg.push("rpc".to_string());
+                let mut arg: Vec<String> = vec![env::args().collect(), "rpc".to_string()];   
                 let rpccall: Vec<String> = serde_json::from_str(event.payload()).unwrap();
-                let _ = &arg.push(rpccall[0].to_string());
-                let _ = &arg.push(rpccall[1].to_string());
-
+                for command in &rpccall {
+                    let _ = &arg.push(command.to_string());
+                }
                 if let Ok(passed) = rpc(&arg[2..]) {
-                    println!("Returning {} {}", rpccall[0].to_string(), passed.clone());
-                    let _ = main_window.emit("returnRPC", (rpccall[0].to_string(), passed.clone()));
+                    println!("Returning {} {}", rpccall[0], passed.clone());
+                    let _ = main_window.emit("returnRPC", (rpccall[0].clone(), passed.clone()));
                 }
             });
 
+            //on load the current rpc values are loaded into the corresponding input fields
             app.listen("onLoad", move |event| {
-                let mut arg: Vec<String> = env::args().collect();   
-                _ = &arg.push("rpc".to_string());
+                let mut arg: Vec<String> = vec![env::args().collect(), "rpc".to_string()];   
                 let rpccall: String = serde_json::from_str(event.payload()).unwrap();
-                let _ = &arg.push(rpccall.to_string());
+                let _ = &arg.push(rpccall.clone());
 
                 if let Ok(passed) = rpc(&arg[2..]) {
-                    let _ = new_window.emit("returnOnLoad", (rpccall.to_string(), passed.clone()));
+                    let _ = new_window.emit("returnOnLoad", (rpccall.clone(), passed.clone()));
                 }
             });
 

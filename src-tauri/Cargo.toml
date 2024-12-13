@@ -1,8 +1,8 @@
 [package]
 name = "lily"
 version = "0.1.0"
-description = "CLI App"
-authors = ["you"]
+description = "Sensor graph monitor app"
+authors = ["Ilysia Krzywonos"]
 edition = "2021"
 build = "build.rs"
 
