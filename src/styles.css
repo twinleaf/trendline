@@ -103,6 +103,7 @@ position: relative;
 .InputCommands{
   padding: 5px;
   position:relative;
+  width: 30%;
   border-color: black;
   margin-top: 5px;
   margin-bottom: 5px;

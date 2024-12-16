@@ -40,13 +40,13 @@ window.onload = () => {
             timeSpan.addEventListener('keypress', function(e) { //adjust graph time span
                 if (e.key == "Enter") {
                     timePoints = in_range(timeSpan);
+                    chart.setScale('x',{min: 1, max: timePoints});
                     if (chart.data[1].length> timePoints) {
                         while (chart.data[0].length > timePoints) {
                             chart.data[0].shift();
                             chart.data[1].shift();
                             chart.setData(chart.data);
                             chart.redraw();
-                            console.log("shifting after enter", chart.data[1].length);
                         }
                     } else{chart.redraw()
                         console.log(chart.data[1].length)
@@ -60,8 +60,8 @@ window.onload = () => {
             if (chart.data[1].length > maxPoints){
                 chart.data[0].shift();
                 chart.data[1].shift();
-                //console.log("shifting", maxPoints, chart.data[0].length)
             }
+            console.log("moving", maxPoints, chart.data[0].length, chart.data[1].length)
             chart.setData(chart.data);
             chart.redraw();
         }) 
@@ -155,14 +155,14 @@ window.onload = () => {
                     x: {
                     time: false,
                     distr: 2,
-                    auto: true,
-                    range: [0,49]
-                    },
+                    range: (min, max) => [min, max]
+                    }
                 }
             }
 
             const data = [[],[]]
             const uplot = new uPlot(options, data, document.getElementById(canvas.id))
+            uplot.setScale('x',{min: 1, max: timePoints});
             graphs.push(uplot)
 
             //interact js to resize chart height
