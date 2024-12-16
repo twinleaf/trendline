@@ -10,7 +10,7 @@ window.onload = () => {
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
     var serial = []; //store device serial information
-    let timePoints = 10;
+    let timePoints = 50;
     const inputChange = document.querySelectorAll('.InputCommands');
     const rpcType = document.querySelectorAll('.controls');
     
@@ -48,7 +48,7 @@ window.onload = () => {
                         }
                     } else{chart.redraw()}; 
                     timeSpan.innerHTML = timePoints;
-                        timeSpan.value = timePoints;
+                    timeSpan.value = timePoints;
                 }
             }) 
 
@@ -152,7 +152,7 @@ window.onload = () => {
                     x: {
                     time: false,
                     distr: 2,
-                    range: (min, max) => [min, max]
+                    range: [0, 49]
                     }
                 }
             }
