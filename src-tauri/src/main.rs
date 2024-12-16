@@ -233,6 +233,8 @@ fn graphs(window: Window) {
         let device = proxy.device_full(route.clone()).unwrap();
         let mut device = Device::new(device); 
 
+        thread::sleep(std::time::Duration::from_millis(100));
+
         //armstrong temp 
         //TODO:: Need set up following flexible number of streams
         let mut current_name: String = String::new();
@@ -310,12 +312,10 @@ fn main(){
                     LogicalSize::new(800., 600.),
                 )?;
 
-            let desc = window.add_child(
-                tauri::webview::WebviewBuilder::new("desc", WebviewUrl::App("power.html".parse().unwrap()),)
-                .auto_resize(),
-                LogicalPosition::new(0., 0.),
-                LogicalSize::new(800., 600.),
-                )?;
+            let desc = tauri::WebviewWindowBuilder::new(app, "desc", WebviewUrl::App("power.html".parse().unwrap()))
+                .title("Power Monitor")
+                .inner_size(750., 550.)
+                .build()?;
 
             let field = tauri::WebviewWindowBuilder::new(app, "field", WebviewUrl::App("field.html".parse().unwrap()))
                 .title("Field")
@@ -333,11 +333,13 @@ fn main(){
                 match webpage.as_str() {
                     "lily" => {
                         aux.show().unwrap();
-                        desc.hide().unwrap();
                     }
                     "desc" => {
-                        aux.hide().unwrap();
-                        desc.show().unwrap();
+                        if desc.is_visible().expect("Not visible") {
+                            desc.hide().unwrap();
+                        } else {
+                            desc.show().unwrap();
+                        } 
                     }
                     "field" => {
                         if field.is_visible().expect("Not visible") {

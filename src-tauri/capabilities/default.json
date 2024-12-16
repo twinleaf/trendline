@@ -5,6 +5,7 @@
     "windows": [
         "main",
         "lily",
+        "desc",
         "field"],
     "permissions": [
       "core:default",
