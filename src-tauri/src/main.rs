@@ -304,7 +304,7 @@ fn main(){
                 LogicalSize::new(800., 600.),
                 )?;
 
-            let field = tauri::WebviewWindowBuilder::new(app, "Power monitor", WebviewUrl::App("field.html".parse().unwrap()))
+            let field = tauri::WebviewWindowBuilder::new(app, "PowerMon", WebviewUrl::App("field.html".parse().unwrap()))
                 .title("Field")
                 .inner_size(750., 550.)
                 .build()?;
