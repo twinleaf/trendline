@@ -34,7 +34,6 @@ window.onload = () => {
 
             chart.data[0].push(elapsed)
             chart.data[1].push(values[index])
-            console.log(values)
 
             const timeSpan = document.getElementById('timeSpan');
             timeSpan.addEventListener('keypress', function(e) { //adjust graph time span
@@ -93,13 +92,11 @@ window.onload = () => {
                     { 
                         label: columns[i],
                         stroke: 'red',
-                        points: { show: false },
-                        spanGaps: false,         
-    
+                        points: { show: false },     
                     },
                 ],
                 axes: [
-                    { },
+                    {},
                     {
                         tick: {show: true,},
                         grid: {show: true}
@@ -109,7 +106,6 @@ window.onload = () => {
                     x: {
                     time: false,
                     distr: 2,
-                    auto: true,
                     range: [0,99]
                     },
                 }

@@ -291,7 +291,7 @@ fn graphs(window: Window) {
         }  
 
     });
-    println!("Panicking 2");
+    println!("Panicking");
 }
 
 fn main(){

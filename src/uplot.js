@@ -21,7 +21,6 @@ window.onload = () => {
     webpage.listen("graphing", (event) => {
         const [values, name, header] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
-        console.log(values)
         
         //push names to canvas
         if (!gotNames) {
@@ -142,9 +141,7 @@ window.onload = () => {
                     { 
                         label: columns[i],
                         stroke: 'red',
-                        points: { show: false },
-                        spanGaps: true,         
-    
+                        points: { show: false },        
                     },
                 ],
                 scales: {
@@ -240,11 +237,17 @@ window.onload = () => {
     //on checkbox change call rpc command
     const toggleChange = document.querySelectorAll('.checkCommands') 
     toggleChange.forEach(clickToggle => {
-        clickToggle.addEventListener("click", function(e) {
-            if (e.checked) {
-                call = [clickToggle.id, clickToggle.value]; 
-                webpage.emit('returningRPC', call);
+        clickToggle.addEventListener("change", (event)=>{
+            let num = 0;
+            if (event.target.checked) {
+                num = 1;
+                call = [clickToggle.id, num.toString()]; 
+            } else{
+                num = 0;
+                call = [clickToggle.id, num.toString()]; 
             }
+            console.log(call);
+            webpage.emit('returningRPCName', call);
         })
     })
 
