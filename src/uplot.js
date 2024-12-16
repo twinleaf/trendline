@@ -10,7 +10,7 @@ window.onload = () => {
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
     var serial = []; //store device serial information
-    let timePoints = 50;
+    let timePoints = 10;
     const inputChange = document.querySelectorAll('.InputCommands');
     const rpcType = document.querySelectorAll('.controls');
     
@@ -19,8 +19,8 @@ window.onload = () => {
 
     //emit rust data and push to uplot graphs 
     webpage.listen("graphing", (event) => {
-        const elapsed = (Date.now() - startTime) /1000;
         const [values, name, header] = event.payload;
+        const elapsed = (Date.now() - startTime) /1000;
         
         //push names to canvas
         if (!gotNames) {
@@ -40,26 +40,23 @@ window.onload = () => {
             timeSpan.addEventListener('keypress', function(e) { //adjust graph time span
                 if (e.key == "Enter") {
                     timePoints = in_range(timeSpan);
-                    chart.setScale('x',{min: 1, max: timePoints});
-                    if (chart.data[1].length> timePoints) {
+                    if (chart.data[0].length> timePoints) {
                         while (chart.data[0].length > timePoints) {
                             chart.data[0].shift();
                             chart.data[1].shift();
-                            chart.setData(chart.data);
                             chart.redraw();
                         }
-                    } else{chart.redraw()
-                        console.log(chart.data[1].length)
-                    }; 
+                    } else{chart.redraw()}; 
                     timeSpan.innerHTML = timePoints;
-                    timeSpan.value = timePoints;
+                        timeSpan.value = timePoints;
                 }
             }) 
 
             let maxPoints = timePoints;
-            if (chart.data[1].length > maxPoints){
+            if (chart.data[0].length > maxPoints){
                 chart.data[0].shift();
                 chart.data[1].shift();
+                console.log("shifting", maxPoints, chart.data[0].length)
             }
             console.log("moving", maxPoints, chart.data[0].length, chart.data[1].length)
             chart.setData(chart.data);

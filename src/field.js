@@ -11,7 +11,7 @@ window.onload = () => {
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
     var serial = [];
-    let points = 100;
+    let points = 20;
 
     let startTime = Date.now();
        
@@ -109,7 +109,7 @@ window.onload = () => {
                     time: false,
                     distr: 2,
                     auto: true,
-                    range: [0,99]
+                    range: [0,19]
                     },
                 }
             }
