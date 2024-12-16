@@ -271,6 +271,18 @@ fn graphs(window: Window) {
                     }
                     let _ = window.emit("graphing", (&values, &names, &header));                         
                 }
+                3 => {
+                    for column in &sample.columns{
+                        names.push(column.desc.name.clone());
+                        values.push(match column.value {
+                            ColumnData::Int(x) => x as f32,
+                            ColumnData::UInt(x) => x as f32,
+                            ColumnData::Float(x) => x as f32,
+                            ColumnData::Unknown => 0.0,
+                        });
+                    }
+                    let _ = window.emit("power", (&values, &names, &header));                         
+                }
                 _ => {}
             };
             /*for (name, value) in names.iter().zip(values.iter()){
@@ -298,7 +310,7 @@ fn main(){
                 )?;
 
             let desc = window.add_child(
-                tauri::webview::WebviewBuilder::new("desc", WebviewUrl::App("desc.html".parse().unwrap()),)
+                tauri::webview::WebviewBuilder::new("desc", WebviewUrl::App("power.html".parse().unwrap()),)
                 .auto_resize(),
                 LogicalPosition::new(0., 0.),
                 LogicalSize::new(800., 600.),
