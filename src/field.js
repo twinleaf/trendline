@@ -20,6 +20,7 @@ window.onload = () => {
     webpage.listen("field", (event) => {
         const [values, name, info] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
+        console.log(values)
         
         //push names to canvas
         if (!gotNames) {

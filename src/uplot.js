@@ -21,6 +21,7 @@ window.onload = () => {
     webpage.listen("graphing", (event) => {
         const [values, name, header] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
+        console.log(values)
         
         //push names to canvas
         if (!gotNames) {
@@ -56,9 +57,7 @@ window.onload = () => {
             if (chart.data[0].length > maxPoints){
                 chart.data[0].shift();
                 chart.data[1].shift();
-                console.log("shifting", maxPoints, chart.data[0].length)
             }
-            console.log("moving", maxPoints, chart.data[0].length, chart.data[1].length)
             chart.setData(chart.data);
             chart.redraw();
         }) 

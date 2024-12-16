@@ -243,7 +243,7 @@ fn graphs(window: Window) {
             let mut values: Vec<f32> = Vec::new();
     
             match sample.stream.stream_id{
-                3 => {
+                1 => {
                     for column in &sample.columns{
                         let name = column.desc.name.clone();
                         if name != current_name && !(names.contains(&name)){
@@ -291,6 +291,7 @@ fn graphs(window: Window) {
         }  
 
     });
+    println!("Panicking 2");
 }
 
 fn main(){
@@ -316,7 +317,7 @@ fn main(){
                 LogicalSize::new(800., 600.),
                 )?;
 
-            let field = tauri::WebviewWindowBuilder::new(app, "PowerMon", WebviewUrl::App("field.html".parse().unwrap()))
+            let field = tauri::WebviewWindowBuilder::new(app, "field", WebviewUrl::App("field.html".parse().unwrap()))
                 .title("Field")
                 .inner_size(750., 550.)
                 .build()?;

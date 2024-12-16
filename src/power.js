@@ -11,7 +11,7 @@ window.onload = () => {
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
     var serial = [];
-    let points = 20;
+    let points = 100;
 
     let startTime = Date.now();
        
@@ -34,6 +34,7 @@ window.onload = () => {
 
             chart.data[0].push(elapsed)
             chart.data[1].push(values[index])
+            console.log(values)
 
             const timeSpan = document.getElementById('timeSpan');
             timeSpan.addEventListener('keypress', function(e) { //adjust graph time span
@@ -109,7 +110,7 @@ window.onload = () => {
                     time: false,
                     distr: 2,
                     auto: true,
-                    range: [0,19]
+                    range: [0,99]
                     },
                 }
             }
