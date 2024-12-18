@@ -41,8 +41,6 @@ window.onload = () => {
                 }
             }
   
-            
-
             const timeSpan = document.getElementById('timeSpan');
             timeSpan.addEventListener('keypress', function(e) { //adjust graph time span
                 if (e.key == "Enter") {
@@ -88,22 +86,21 @@ window.onload = () => {
                 width: 800, 
                 height: 300,
                 series: [
-                    {   
-                        value: (u, v) => v,
-                    },
+                    {},
                     { 
                         label: columns[i],
                         stroke: 'red',
                         points: { show: false },
-                        spanGaps: false,         
+                        spanGaps: false,      
+                        value: (u, v) => v.toPrecision(3),   
     
                     },
                 ],
                 axes: [
-                    { },
+                    {},
                     {
-                        tick: {show: false},
-                        grid: {show: true}
+                        size: 90,
+                        values: (u, v) => v.map(v => v.toPrecision(3)),
                     }
                 ],
                 scales: {
@@ -182,4 +179,36 @@ function in_range(fillValue) {
         withinRange = value;
     }
     return withinRange
+}
+
+function autoPadRight(self, side, sidesWithAxes, cycleNum) {
+    let xAxis = self.axes[0];
+
+    let xVals = xAxis._values;
+
+    if (xVals != null) {
+        // bail out, force convergence
+        if (cycleNum > 2)
+            return self._padding[1];
+
+        let xSplits = xAxis._splits;
+        let rightSplit = xSplits[xSplits.length - 1];
+        let rightSplitCoord = self.valToPos(rightSplit, "x");
+        let leftPlotEdge = (self.bbox.left / devicePixelRatio);
+        let rightPlotEdge = leftPlotEdge + (self.bbox.width / devicePixelRatio);
+        let rightChartEdge = rightPlotEdge + self._padding[1];
+
+        let pxPerChar    = 8;
+        let rightVal     = xVals[xVals.length - 1] + "";
+        let valHalfWidth = pxPerChar * (rightVal.length / 2);
+
+        let rightValEdge = leftPlotEdge + rightSplitCoord + valHalfWidth;
+
+        if (rightValEdge >= rightChartEdge) {
+            return rightValEdge - rightPlotEdge;
+        }
+    }
+
+    // default size
+    return 8;
 }

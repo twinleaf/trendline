@@ -137,31 +137,29 @@ window.onload = () => {
                 width: 800, 
                 height: 300,
                 series: [
-                    {label: 'Time'},
+                    {},
                     { 
                         label: columns[i],
                         stroke: 'red',
-                        points: { show: false },     
+                        points: { show: false },
+                        spanGaps: false,      
+                        value: (u, v) => v.toPrecision(3),   
+    
                     },
                 ],
                 axes: [
+                    {},
                     {
-                        ticks: {
-                            formatter: (u, v) => u.toFixed(1)
-                        }
-                    },
-                    {
-                        tick: {
-                            formatter: (u, v) => v< 0.01 ? v.toFixed(4) : v.toFixed(2),
-                            show: true,},
-                        grid: {show: true}
+                        size: 80,
+                        values: (u, v) => v.map(v => v.toPrecision(3)),
                     }
                 ],
                 scales: {
                     x: {
                     time: false,
                     distr: 2,
-                    range: [0, 49]
+                    auto: true,
+                    range: [0,1009]
                     },
                 }
             }
