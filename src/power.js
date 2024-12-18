@@ -92,15 +92,9 @@ window.onload = () => {
                     },
                 ],
                 axes: [
+                    {},
                     {
-                        ticks: {
-                            formatter: (u, v) => u.toFixed(1)
-                        }
-                    },
-                    {
-                        tick: {
-                            formatter: (u, v) => v< 0.01 ? v.toFixed(4) : v.toFixed(2),
-                            show: true,},
+                        tick: {show: true,},
                         grid: {show: true}
                     }
                 ],

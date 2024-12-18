@@ -231,8 +231,8 @@ fn graph_data(window: Window) {
         let proxy = proxy::Interface::new(&root);
         let device = proxy.device_full(route.clone()).unwrap();
         let mut device = Device::new(device); 
+        let mut stream1: Vec<Vec<f32>> = Vec::new();
         
-        thread::sleep(std::time::Duration::from_millis(100));
         //armstrong temp 
         //TODO:: Need set up following flexible number of streams
         loop{
@@ -240,7 +240,7 @@ fn graph_data(window: Window) {
             let header = format!("Connected to: {}   Serial: {}   Session ID: {}", sample.device.name, sample.device.serial_number, sample.device.session_id);
             let mut names: Vec<String> = Vec::new();
             let mut values: Vec<f32> = Vec::new();
-
+            
             match sample.stream.stream_id{
                 1 => {
                     for column in &sample.columns{
@@ -252,7 +252,13 @@ fn graph_data(window: Window) {
                             ColumnData::Unknown => 0.0,
                         });
                     }
-                    let _ = window.emit("field", (&values, &names, &header));
+                    stream1.push(values);
+                    if stream1.len() >= 50{
+                        let _ = window.emit("field", (&stream1, &names, &header));
+                        stream1.clear();
+                    }
+                    //let _ = window.emit("field", (&values, &names, &header));
+                
                 }
                 2 => {
                     for column in &sample.columns{
@@ -305,8 +311,8 @@ fn main(){
                 .inner_size(750., 550.)
                 .build()?;
 
-            let field = tauri::WebviewWindowBuilder::new(app, "field", WebviewUrl::App("field.html".parse().unwrap()))
-                .title("Field")
+            let field = tauri::WebviewWindowBuilder::new(app, "field", WebviewUrl::App("stream1.html".parse().unwrap()))
+                .title("Lockin")
                 .inner_size(750., 550.)
                 .build()?;
 

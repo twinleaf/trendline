@@ -10,14 +10,12 @@ window.onload = () => {
     let timePoints = 10;
 
     let startTime = Date.now();
-       
     gotNames = false;
 
     webpage.listen("field", (event) => {
-        setTimeout(() => {}, 100)
         const [values, name, info] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
-        
+
         //push names to canvas
         if (!gotNames) {
             for (let i = 0; i< name.length; i++) {
@@ -29,11 +27,21 @@ window.onload = () => {
 
         graphs.forEach((chart, index) => { //iterate through each graph
             
-            chart.data[0].push(elapsed)
-            chart.data[1].push(values[index])
+            for (let i = 0; i < values.length; i++) {
+                chart.data[0].push(elapsed)
+                chart.data[1].push(values[i][index])
 
-            let firstLogTime = chart.data[0][0]
-            let recentLogTime = chart.data[0][chart.data[0].length -1] //last timestamp
+                let firstLogTime = chart.data[0][0]
+                let recentLogTime = chart.data[0][chart.data[0].length -1] //last timestamp
+
+                let maxPoints = timePoints;
+                if ((recentLogTime - firstLogTime) > maxPoints){
+                    chart.data[0].shift();
+                    chart.data[1].shift();
+                }
+            }
+  
+            
 
             const timeSpan = document.getElementById('timeSpan');
             timeSpan.addEventListener('keypress', function(e) { //adjust graph time span
@@ -48,13 +56,7 @@ window.onload = () => {
                     timeSpan.innerHTML = timePoints;
                     timeSpan.value = timePoints;
                 }
-            }) 
-
-            let maxPoints = timePoints;
-            if ((recentLogTime - firstLogTime) > maxPoints){
-                chart.data[0].shift();
-                chart.data[1].shift();
-            }
+            })  
             
             chart.setData(chart.data);
             chart.redraw(true, true);
@@ -100,7 +102,7 @@ window.onload = () => {
                 axes: [
                     { },
                     {
-                        tick: {show: true,},
+                        tick: {show: false},
                         grid: {show: true}
                     }
                 ],
@@ -181,6 +183,3 @@ function in_range(fillValue) {
     }
     return withinRange
 }
-
-
-    
