@@ -38,7 +38,7 @@ window.onload = () => {
             timeSpan.addEventListener('keypress', function(e) {
                 if (e.key == "Enter") {
                     timePoints = in_range(timeSpan);
-                    if (chart.data[0].length> timePoints) {
+                    if ((recentLogTime - firstLogTime)> timePoints) {
                         while ((recentLogTime - firstLogTime) > timePoints) {
                             chart.data[0].shift();
                             chart.data[1].shift();
@@ -49,7 +49,6 @@ window.onload = () => {
                 }
             }) 
     
-            console.log(recentLogTime, firstLogTime, recentLogTime - firstLogTime)
             if ((recentLogTime - firstLogTime) > timePoints){
                 chart.data[0].shift();
                 chart.data[1].shift();

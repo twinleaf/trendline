@@ -7,7 +7,7 @@ window.onload = () => {
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
     var serial = [];
-    let points = 100;
+    let timePoints = 10;
 
     let startTime = Date.now();
        
@@ -32,12 +32,15 @@ window.onload = () => {
             chart.data[0].push(elapsed)
             chart.data[1].push(values[index])
 
+            let firstLogTime = chart.data[0][0]
+            let recentLogTime = chart.data[0][chart.data[0].length -1] //last timestamp
+
             const timeSpan = document.getElementById('timeSpan');
             timeSpan.addEventListener('keypress', function(e) { //adjust graph time span
                 if (e.key == "Enter") {
                     timePoints = in_range(timeSpan);
-                    if (chart.data[0].length> timePoints) {
-                        while (chart.data[0].length > timePoints) {
+                    if ((recentLogTime - firstLogTime) > timePoints) {
+                        while ((recentLogTime - firstLogTime) > timePoints) {
                             chart.data[0].shift();
                             chart.data[1].shift();
                             chart.redraw();}
@@ -48,7 +51,7 @@ window.onload = () => {
             }) 
 
             let maxPoints = points;
-            if (chart.data[0].length > maxPoints){
+            if ((recentLogTime - firstLogTime) > maxPoints){
                 chart.data[0].shift();
                 chart.data[1].shift();
             }

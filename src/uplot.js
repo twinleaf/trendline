@@ -19,7 +19,7 @@ window.onload = () => {
     //emit rust data and push to uplot graphs 
     webpage.listen("graphing", (event) => {
         const [values, name, header] = event.payload;
-        const elapsed = (Date.now() - startTime) /100;
+        const elapsed = (Date.now() - startTime) /1000;
         
         //push names to canvas
         if (!gotNames) {
@@ -35,12 +35,15 @@ window.onload = () => {
             chart.data[0].push(elapsed)
             chart.data[1].push(values[index])
 
+            let firstLogTime = chart.data[0][0]
+            let recentLogTime = chart.data[0][chart.data[0].length -1] //last timestamp
+
             const timeSpan = document.getElementById('timeSpan');
             timeSpan.addEventListener('keypress', function(e) { //adjust graph time span
                 if (e.key == "Enter") {
                     timePoints = in_range(timeSpan);
-                    if (chart.data[0].length> timePoints) {
-                        while (chart.data[0].length > timePoints) {
+                    if ((recentLogTime - firstLogTime) > timePoints) {
+                        while ((recentLogTime - firstLogTime) > timePoints) {
                             chart.data[0].shift();
                             chart.data[1].shift();
                             chart.redraw();
@@ -52,7 +55,7 @@ window.onload = () => {
             }) 
 
             let maxPoints = timePoints;
-            if (chart.data[0].length > maxPoints){
+            if ((recentLogTime - firstLogTime) > maxPoints){
                 chart.data[0].shift();
                 chart.data[1].shift();
             }
@@ -134,21 +137,32 @@ window.onload = () => {
                 width: 800, 
                 height: 300,
                 series: [
-                    {   
-                        value: (u, v) => v,
-                    },
+                    {label: 'Time'},
                     { 
                         label: columns[i],
                         stroke: 'red',
-                        points: { show: false },        
+                        points: { show: false },     
                     },
+                ],
+                axes: [
+                    {
+                        ticks: {
+                            formatter: (u, v) => u.toFixed(1)
+                        }
+                    },
+                    {
+                        tick: {
+                            formatter: (u, v) => v< 0.01 ? v.toFixed(4) : v.toFixed(2),
+                            show: true,},
+                        grid: {show: true}
+                    }
                 ],
                 scales: {
                     x: {
                     time: false,
                     distr: 2,
-                    range: [0, timePoints -1]
-                    }
+                    range: [0, 109]
+                    },
                 }
             }
 
