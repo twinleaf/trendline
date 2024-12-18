@@ -1,17 +1,13 @@
-const { invoke } = window.__TAURI__.core
 const { listen } = window.__TAURI__.event;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 
-invoke('graphs');
-
 webpage = getCurrentWebviewWindow();
-
 window.onload = () => {
 
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
     var serial = [];
-    let points = 100;
+    let timePoints = 10;
 
     let startTime = Date.now();
        
@@ -35,12 +31,15 @@ window.onload = () => {
             chart.data[0].push(elapsed)
             chart.data[1].push(values[index])
 
+            let firstLogTime = chart.data[0][0]
+            let recentLogTime = chart.data[0][chart.data[0].length -1] //last timestamp
+
             const timeSpan = document.getElementById('timeSpan');
-            timeSpan.addEventListener('keypress', function(e) { //adjust graph time span
+            timeSpan.addEventListener('keypress', function(e) {
                 if (e.key == "Enter") {
                     timePoints = in_range(timeSpan);
                     if (chart.data[0].length> timePoints) {
-                        while (chart.data[0].length > timePoints) {
+                        while ((recentLogTime - firstLogTime) > timePoints) {
                             chart.data[0].shift();
                             chart.data[1].shift();
                             chart.redraw();}
@@ -49,9 +48,9 @@ window.onload = () => {
                     timeSpan.value = timePoints;
                 }
             }) 
-
-            let maxPoints = points;
-            if (chart.data[0].length > maxPoints){
+    
+            console.log(recentLogTime, firstLogTime, recentLogTime - firstLogTime)
+            if ((recentLogTime - firstLogTime) > timePoints){
                 chart.data[0].shift();
                 chart.data[1].shift();
             }
@@ -86,9 +85,7 @@ window.onload = () => {
                 width: 800, 
                 height: 300,
                 series: [
-                    {   
-                        value: (u, v) => v,
-                    },
+                    {label: 'Time'},
                     { 
                         label: columns[i],
                         stroke: 'red',
@@ -96,9 +93,15 @@ window.onload = () => {
                     },
                 ],
                 axes: [
-                    {},
                     {
-                        tick: {show: true,},
+                        ticks: {
+                            formatter: (u, v) => u.toFixed(1)
+                        }
+                    },
+                    {
+                        tick: {
+                            formatter: (u, v) => v< 0.01 ? v.toFixed(4) : v.toFixed(2),
+                            show: true,},
                         grid: {show: true}
                     }
                 ],
@@ -106,7 +109,7 @@ window.onload = () => {
                     x: {
                     time: false,
                     distr: 2,
-                    range: [0,99]
+                    range: [0, 109]
                     },
                 }
             }
@@ -119,7 +122,7 @@ window.onload = () => {
             const targetResize = interact(targetElement);
 
             targetResize.resizable({
-                edges: {left: false, right: false, bottom: true, top:true},
+                edges: {left: true, right: true, bottom: true, top:true},
                 inertia: true,
                 listeners: {
                     move(event) {
@@ -139,7 +142,7 @@ window.onload = () => {
                     }),
                     
                     interact.modifiers.restrictSize({
-                        min: {height: 200}
+                        min: {width: 400, height: 200}
                     })
                 ]
             })

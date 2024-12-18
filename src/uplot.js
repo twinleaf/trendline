@@ -2,10 +2,9 @@ const { invoke } = window.__TAURI__.core
 const { listen } = window.__TAURI__.event;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 
-invoke('graphs');
+invoke('graph_data');
 
 webpage = getCurrentWebviewWindow();
-
 window.onload = () => {
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
@@ -20,7 +19,7 @@ window.onload = () => {
     //emit rust data and push to uplot graphs 
     webpage.listen("graphing", (event) => {
         const [values, name, header] = event.payload;
-        const elapsed = (Date.now() - startTime) /1000;
+        const elapsed = (Date.now() - startTime) /100;
         
         //push names to canvas
         if (!gotNames) {
@@ -101,8 +100,8 @@ window.onload = () => {
             //create labels for checkboxes
             const label = document.createElement('label');
             label.htmlFor = checkbox.id;
-            label.innerText = columns[i];
-
+            label.innerText = columns[i]
+    
             const lineBreak = document.createElement('br');
 
             //create canvas
@@ -148,14 +147,13 @@ window.onload = () => {
                     x: {
                     time: false,
                     distr: 2,
-                    range: [0, 49]
+                    range: [0, timePoints -1]
                     }
                 }
             }
 
             const data = [[],[]]
             const uplot = new uPlot(options, data, document.getElementById(canvas.id))
-            uplot.setScale('x',{min: 1, max: timePoints});
             graphs.push(uplot)
 
             //interact js to resize chart height
@@ -163,7 +161,7 @@ window.onload = () => {
             const targetResize = interact(targetElement);
 
             targetResize.resizable({
-                edges: {left: false, right: false, bottom: true, top:true},
+                edges: {left: true, right: true, bottom: true, top:true},
                 inertia: true,
                 listeners: {
                     move(event) {
@@ -183,7 +181,7 @@ window.onload = () => {
                     }),
                     
                     interact.modifiers.restrictSize({
-                        min: {height: 200}
+                        min: {width: 400, height: 200}
                     })
                 ]
             })
@@ -246,7 +244,6 @@ window.onload = () => {
                 num = 0;
                 call = [clickToggle.id, num.toString()]; 
             }
-            console.log(call);
             webpage.emit('returningRPCName', call);
         })
     })

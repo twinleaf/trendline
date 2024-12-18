@@ -1,26 +1,22 @@
-const { invoke } = window.__TAURI__.core
 const { listen } = window.__TAURI__.event;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 
-invoke('graphs');
-
 webpage = getCurrentWebviewWindow();
-
 window.onload = () => {
 
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
     var serial = [];
-    let points = 20;
+    let points = 100;
 
     let startTime = Date.now();
        
     gotNames = false;
 
     webpage.listen("field", (event) => {
+        setTimeout(() => {}, 100)
         const [values, name, info] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
-        console.log(values)
         
         //push names to canvas
         if (!gotNames) {
@@ -32,7 +28,7 @@ window.onload = () => {
             } 
 
         graphs.forEach((chart, index) => { //iterate through each graph
-
+            
             chart.data[0].push(elapsed)
             chart.data[1].push(values[index])
 
@@ -110,7 +106,7 @@ window.onload = () => {
                     time: false,
                     distr: 2,
                     auto: true,
-                    range: [0,19]
+                    range: [0,99]
                     },
                 }
             }
@@ -123,7 +119,7 @@ window.onload = () => {
             const targetResize = interact(targetElement);
 
             targetResize.resizable({
-                edges: {left: false, right: false, bottom: true, top:true},
+                edges: {left: true, right: true, bottom: true, top:true},
                 inertia: true,
                 listeners: {
                     move(event) {
@@ -143,7 +139,7 @@ window.onload = () => {
                     }),
                     
                     interact.modifiers.restrictSize({
-                        min: {height: 200}
+                        min: {width: 400, height: 200}
                     })
                 ]
             })
