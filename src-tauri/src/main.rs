@@ -223,35 +223,28 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
 
 #[tauri::command]
 //main tauri function where stream data gets emitted to graphs on frontend
-fn graphs(window: Window) {
+fn graph_data(window: Window) {
     let args: Vec<String> = env::args().collect();   
     let opts = tio_opts();
     let (_matches, root, route) = tio_parseopts(opts, &args);
-    
     thread::spawn(move || {  
         let proxy = proxy::Interface::new(&root);
         let device = proxy.device_full(route.clone()).unwrap();
         let mut device = Device::new(device); 
-
+        
         thread::sleep(std::time::Duration::from_millis(100));
-
         //armstrong temp 
         //TODO:: Need set up following flexible number of streams
-        let mut current_name: String = String::new();
         loop{
             let sample = device.next();
             let header = format!("Connected to: {}   Serial: {}   Session ID: {}", sample.device.name, sample.device.serial_number, sample.device.session_id);
             let mut names: Vec<String> = Vec::new();
             let mut values: Vec<f32> = Vec::new();
-    
+
             match sample.stream.stream_id{
                 1 => {
                     for column in &sample.columns{
-                        let name = column.desc.name.clone();
-                        if name != current_name && !(names.contains(&name)){
-                            names.push(column.desc.name.clone());
-                            current_name = name.clone();
-                        }
+                        names.push(column.desc.name.clone());
                         values.push(match column.value {
                             ColumnData::Int(x) => x as f32,
                             ColumnData::UInt(x) => x as f32,
@@ -287,13 +280,9 @@ fn graphs(window: Window) {
                 }
                 _ => {}
             };
-            /*for (name, value) in names.iter().zip(values.iter()){
-                println!("{}: {}", name, value);
-            }*/
         }  
-
     });
-    println!("Panicking");
+    println!("panicked")
 }
 
 fn main(){
@@ -381,8 +370,7 @@ fn main(){
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            graphs])
+        .invoke_handler(tauri::generate_handler![graph_data])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
     
