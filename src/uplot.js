@@ -9,7 +9,7 @@ window.onload = () => {
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
     var serial = []; //store device serial information
-    let timePoints = 50;
+    let timePoints = 10;
     const inputChange = document.querySelectorAll('.InputCommands');
     const rpcType = document.querySelectorAll('.controls');
     
@@ -161,7 +161,7 @@ window.onload = () => {
                     x: {
                     time: false,
                     distr: 2,
-                    range: [0, 109]
+                    range: [0, 49]
                     },
                 }
             }

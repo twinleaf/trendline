@@ -109,7 +109,7 @@ window.onload = () => {
                     time: false,
                     distr: 2,
                     auto: true,
-                    range: [0,99]
+                    range: [0,1009]
                     },
                 }
             }
