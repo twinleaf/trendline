@@ -282,7 +282,6 @@ fn graph_data(window: Window) {
             };
         }  
     });
-    println!("panicked")
 }
 
 fn main(){
