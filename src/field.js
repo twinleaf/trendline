@@ -50,7 +50,7 @@ window.onload = () => {
                 }
             }) 
 
-            let maxPoints = points;
+            let maxPoints = timePoints;
             if ((recentLogTime - firstLogTime) > maxPoints){
                 chart.data[0].shift();
                 chart.data[1].shift();
