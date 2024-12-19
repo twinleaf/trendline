@@ -87,7 +87,7 @@ window.onload = () => {
             })
             toggleChange.forEach(toggle => {
                 if (toggle.id == name && inputValue == 1){
-                    toggle.style.display == 'checked';
+                    toggle.checked = true;
                 }
             })
         });
