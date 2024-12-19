@@ -53,6 +53,7 @@ window.onload = () => {
             }
 
             chart.setData(chart.data, true);
+            chart.setScales(); //bad logic!
             chart.redraw();
         }) 
     });
