@@ -40,24 +40,27 @@ window.onload = () => {
                     chart.data[1].shift();
                 }
             }
-  
             const timeSpan = document.getElementById('timeSpan');
             timeSpan.addEventListener('keypress', function(e) { //adjust graph time span
                 if (e.key == "Enter") {
                     timePoints = in_range(timeSpan);
-                    if ((recentLogTime - firstLogTime) > timePoints) {
-                        while ((recentLogTime - firstLogTime) > timePoints) {
-                            chart.data[0].shift();
-                            chart.data[1].shift();
-                            chart.redraw();}
-                    } else{chart.redraw()}   
+                    let firstLogTime = chart.data[0][0]
+                    let recentLogTime = chart.data[0][chart.data[0].length -1] //last timestamp
+                    while ((recentLogTime - firstLogTime)> timePoints) {
+                        chart.data[0].shift();
+                        chart.data[1].shift();
+                        chart.redraw(true)
+                        firstLogTime = chart.data[0][0]
+                        recentLogTime = chart.data[0][chart.data[0].length -1]
+                    } 
                     timeSpan.innerHTML = timePoints;
                     timeSpan.value = timePoints;
                 }
             })  
             
-            chart.setData(chart.data);
-            chart.redraw(true, true);
+            chart.setData(chart.data, true);
+            chart.setScale('x', chart.data[0]);
+            chart.redraw(true, true)
         }) 
     });
 
@@ -86,7 +89,7 @@ window.onload = () => {
                 width: 800, 
                 height: 300,
                 series: [
-                    {},
+                    {label: 'Time'},
                     { 
                         label: columns[i],
                         stroke: 'red',
@@ -108,7 +111,6 @@ window.onload = () => {
                     time: false,
                     distr: 2,
                     auto: true,
-                    range: [0,1009]
                     },
                 }
             }

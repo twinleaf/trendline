@@ -11,6 +11,7 @@ window.onload = () => {
     var serial = []; //store device serial information
     let timePoints = 10;
     const inputChange = document.querySelectorAll('.InputCommands');
+    const toggleChange = document.querySelectorAll('.checkCommands') 
     const rpcType = document.querySelectorAll('.controls');
     
     let startTime = Date.now();
@@ -39,28 +40,30 @@ window.onload = () => {
             let recentLogTime = chart.data[0][chart.data[0].length -1] //last timestamp
 
             const timeSpan = document.getElementById('timeSpan');
-            timeSpan.addEventListener('keypress', function(e) { //adjust graph time span
+            timeSpan.addEventListener('keypress', function(e) {
                 if (e.key == "Enter") {
                     timePoints = in_range(timeSpan);
-                    if ((recentLogTime - firstLogTime) > timePoints) {
-                        while ((recentLogTime - firstLogTime) > timePoints) {
-                            chart.data[0].shift();
-                            chart.data[1].shift();
-                            chart.redraw();
-                        }
-                    } else{chart.redraw()}; 
+                    while ((recentLogTime - firstLogTime)> timePoints) {
+                        chart.data[0].shift();
+                        chart.data[1].shift();
+                        chart.setData(chart.data, true);
+                        chart.redraw()
+                        firstLogTime = chart.data[0][0]
+                        recentLogTime = chart.data[0][chart.data[0].length -1]
+                    } 
                     timeSpan.innerHTML = timePoints;
                     timeSpan.value = timePoints;
                 }
             }) 
-
-            let maxPoints = timePoints;
-            if ((recentLogTime - firstLogTime) > maxPoints){
+    
+            if ((recentLogTime - firstLogTime) > timePoints){
                 chart.data[0].shift();
                 chart.data[1].shift();
             }
-            chart.setData(chart.data);
-            chart.redraw();
+            
+            chart.setData(chart.data, true);
+            chart.setScale('x', chart.data[0]);
+            chart.redraw(true, true);
         }) 
     });
 
@@ -68,6 +71,9 @@ window.onload = () => {
         //display rpc values on load
         inputChange.forEach(rpccall => {
             webpage.emit('onLoad', rpccall.id);    
+        })
+        toggleChange.forEach(toggle => {
+            webpage.emit('onLoad', toggle.id)
         })
 
         webpage.listen("returnOnLoad", (event) => {
@@ -77,6 +83,11 @@ window.onload = () => {
                     rpccall.value = inputValue;
                     rpccall.textContent = inputValue;
                     rpccall.innerHTML = inputValue;
+                }
+            })
+            toggleChange.forEach(toggle => {
+                if (toggle.id == name && inputValue == 1){
+                    toggle.style.display == 'checked';
                 }
             })
         });
@@ -137,7 +148,7 @@ window.onload = () => {
                 width: 800, 
                 height: 300,
                 series: [
-                    {},
+                    {label: 'Time'},
                     { 
                         label: columns[i],
                         stroke: 'red',
@@ -158,8 +169,7 @@ window.onload = () => {
                     x: {
                     time: false,
                     distr: 2,
-                    auto: true,
-                    range: [0,1009]
+                    auto: false,
                     },
                 }
             }
@@ -245,7 +255,6 @@ window.onload = () => {
     })
 
     //on checkbox change call rpc command
-    const toggleChange = document.querySelectorAll('.checkCommands') 
     toggleChange.forEach(clickToggle => {
         clickToggle.addEventListener("change", (event)=>{
             let num = 0;

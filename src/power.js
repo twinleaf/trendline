@@ -27,7 +27,6 @@ window.onload = () => {
             } 
 
         graphs.forEach((chart, index) => { //iterate through each graph
-
             chart.data[0].push(elapsed)
             chart.data[1].push(values[index])
 
@@ -38,12 +37,13 @@ window.onload = () => {
             timeSpan.addEventListener('keypress', function(e) {
                 if (e.key == "Enter") {
                     timePoints = in_range(timeSpan);
-                    if ((recentLogTime - firstLogTime)> timePoints) {
-                        while ((recentLogTime - firstLogTime) > timePoints) {
-                            chart.data[0].shift();
-                            chart.data[1].shift();
-                            chart.redraw();}
-                    } else{chart.redraw()}   
+                    while ((recentLogTime - firstLogTime)> timePoints) {
+                        chart.data[0].shift();
+                        chart.data[1].shift();
+                        chart.redraw()
+                        firstLogTime = chart.data[0][0]
+                        recentLogTime = chart.data[0][chart.data[0].length -1]
+                    } 
                     timeSpan.innerHTML = timePoints;
                     timeSpan.value = timePoints;
                 }
@@ -53,9 +53,12 @@ window.onload = () => {
                 chart.data[0].shift();
                 chart.data[1].shift();
             }
+
             
-            chart.setData(chart.data);
-            chart.redraw(true, true);
+            chart.setData(chart.data, true);
+            chart.setScales();
+            chart.redraw();
+            
         }) 
     });
 
@@ -84,7 +87,9 @@ window.onload = () => {
                 width: 800, 
                 height: 300,
                 series: [
-                    {},
+                    {
+                        label: 'Time'
+                    },
                     { 
                         label: columns[i],
                         stroke: 'red',
@@ -106,7 +111,6 @@ window.onload = () => {
                     time: false,
                     distr: 2,
                     auto: true,
-                    range: [0,1009]
                     },
                 }
             }
