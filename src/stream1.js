@@ -112,14 +112,6 @@ window.onload = () => {
                     auto: true,
                     },
                 },
-                hooks: {
-                    setSelect: [
-						u => {
-							// zoom to selection
-							u.setScale('x', {min, max});
-						}
-					]
-                }
             }
 
             const data = [[],[]]

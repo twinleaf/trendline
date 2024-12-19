@@ -10,6 +10,9 @@
   border-width: 10px;
   border-color: #4CAF50;
   border-radius: 20px;
+  top: 0;
+  bottom: 0;
+  overflow-y: scroll
 }
 
 .header{

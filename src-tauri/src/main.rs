@@ -227,12 +227,13 @@ fn graph_data(window: Window) {
     let args: Vec<String> = env::args().collect();   
     let opts = tio_opts();
     let (_matches, root, route) = tio_parseopts(opts, &args);
+    
     thread::spawn(move || {  
         let proxy = proxy::Interface::new(&root);
         let device = proxy.device_full(route.clone()).unwrap();
         let mut device = Device::new(device); 
         let mut stream1: Vec<Vec<f32>> = Vec::new();
-        
+ 
         //armstrong temp 
         //TODO:: Need set up following flexible number of streams
         loop{
@@ -257,8 +258,6 @@ fn graph_data(window: Window) {
                         let _ = window.emit("field", (&stream1, &names, &header));
                         stream1.clear();
                     }
-                    //let _ = window.emit("field", (&values, &names, &header));
-                
                 }
                 2 => {
                     for column in &sample.columns{
