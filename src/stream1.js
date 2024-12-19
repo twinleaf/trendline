@@ -59,8 +59,7 @@ window.onload = () => {
             })  
             
             chart.setData(chart.data, true);
-            chart.setScale('x', chart.data[0]);
-            chart.redraw(true, true)
+            chart.redraw(true)
         }) 
     });
 
@@ -95,7 +94,7 @@ window.onload = () => {
                         stroke: 'red',
                         points: { show: false },
                         spanGaps: false,      
-                        value: (u, v) => v.toPrecision(3),   
+                        value: (u, v) => v,   
     
                     },
                 ],
@@ -103,7 +102,7 @@ window.onload = () => {
                     {},
                     {
                         size: 90,
-                        values: (u, v) => v.map(v => v.toPrecision(3)),
+                        values: (u, v) => v,
                     }
                 ],
                 scales: {
@@ -112,6 +111,14 @@ window.onload = () => {
                     distr: 2,
                     auto: true,
                     },
+                },
+                hooks: {
+                    setSelect: [
+						u => {
+							// zoom to selection
+							u.setScale('x', {min, max});
+						}
+					]
                 }
             }
 

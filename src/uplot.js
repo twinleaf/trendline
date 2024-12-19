@@ -46,7 +46,6 @@ window.onload = () => {
                     while ((recentLogTime - firstLogTime)> timePoints) {
                         chart.data[0].shift();
                         chart.data[1].shift();
-                        chart.setData(chart.data, true);
                         chart.redraw()
                         firstLogTime = chart.data[0][0]
                         recentLogTime = chart.data[0][chart.data[0].length -1]
@@ -154,7 +153,7 @@ window.onload = () => {
                         stroke: 'red',
                         points: { show: false },
                         spanGaps: false,      
-                        value: (u, v) => v.toPrecision(3),   
+                        value: (u, v) => v  
     
                     },
                 ],
@@ -162,7 +161,7 @@ window.onload = () => {
                     {},
                     {
                         size: 80,
-                        values: (u, v) => v.map(v => v.toPrecision(3)),
+                        values: (u, v) => v
                     }
                 ],
                 scales: {

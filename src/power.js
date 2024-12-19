@@ -3,14 +3,12 @@ const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 
 webpage = getCurrentWebviewWindow();
 window.onload = () => {
-
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
     var serial = [];
     let timePoints = 10;
 
     let startTime = Date.now();
-       
     gotNames = false;
 
     webpage.listen("power", (event) => {
@@ -54,11 +52,8 @@ window.onload = () => {
                 chart.data[1].shift();
             }
 
-            
             chart.setData(chart.data, true);
-            chart.setScales();
             chart.redraw();
-            
         }) 
     });
 
@@ -95,7 +90,7 @@ window.onload = () => {
                         stroke: 'red',
                         points: { show: false },
                         spanGaps: false,      
-                        value: (u, v) => v.toPrecision(3),   
+                        value: (u, v) => v
     
                     },
                 ],
@@ -103,7 +98,7 @@ window.onload = () => {
                     {},
                     {
                         size: 80,
-                        values: (u, v) => v.map(v => v.toPrecision(3)),
+                        values: (u, v) => v
                     }
                 ],
                 scales: {
@@ -112,7 +107,7 @@ window.onload = () => {
                     distr: 2,
                     auto: true,
                     },
-                }
+                },
             }
 
             const data = [[],[]]
