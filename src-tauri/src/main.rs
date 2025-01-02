@@ -269,7 +269,7 @@ fn graph_data(window: Window) {
                             ColumnData::Unknown => 0.0,
                         });
                     }
-                    let _ = window.emit("graphing", (&values, &names, &header));                         
+                    let _ = window.emit("graphing", (&values, &names, &header));                        
                 }
                 3 => {
                     for column in &sample.columns{
@@ -360,15 +360,14 @@ fn main(){
                     let _ = main_window.emit("returnRPC", (rpccall[0].clone(), passed.clone()));
                 }
             });
-
+            
             //on load the current rpc values are loaded into the corresponding input fields
-            app.listen("onLoad", move |event| {
-                let mut arg: Vec<String> = vec![env::args().collect(), "rpc".to_string()];   
+            let _2 = app.listen("onLoad", move |event| {
+                let mut arg: Vec<String> = vec![env::args().collect(), "rpc".to_string()]; 
                 let rpccall: String = serde_json::from_str(event.payload()).unwrap();
                 let _ = &arg.push(rpccall.clone());
-
                 if let Ok(passed) = rpc(&arg[2..]) {
-                    let _ = new_window.emit("returnOnLoad", (rpccall.clone(), passed.clone()));
+                    let _ = new_window.emit("returnOnLoad", (rpccall.clone(), passed.clone())).unwrap();
                 }
             });
 

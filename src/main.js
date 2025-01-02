@@ -66,17 +66,58 @@ window.onload = () => {
         }) 
     });
 
+    //on button click return rpc
+    const buttonChange = document.querySelectorAll('.buttonCommands');
+    buttonChange.forEach(clickButton => {
+        clickButton.addEventListener("click", function() {   
+            call = [clickButton.id, clickButton.value];     
+            webpage.emit('returningRPCName', call);      
+        })
+    })
+
+    //on input change call rpc command
+    inputChange.forEach(rpccall => {
+        rpccall.addEventListener('keypress', function(e) {
+            value = in_range(rpccall).toString()
+            if (e.key == "Enter") {
+                call= [rpccall.id, value];
+                webpage.emit('returningRPCName', call);    
+            }
+        })
+    })
+
+    //on checkbox change call rpc command
+    toggleChange.forEach(clickToggle => {
+        clickToggle.addEventListener("change", (event)=>{
+            let num = 0;
+            if (event.target.checked) {
+                num = 1;
+                call = [clickToggle.id, num.toString()]; 
+            } else{
+                num = 0;
+                call = [clickToggle.id, num.toString()]; 
+            }
+            webpage.emit('returningRPCName', call);
+        })
+    })
+
+    //returns all rpc values to corresponding input field
+    webpage.listen("returnRPC", (event) => {
+        let [name, inputValue] = event.payload;
+        inputChange.forEach(rpccall => {
+            if (rpccall.id == name) {
+                rpccall.value = inputValue;
+                rpccall.textContent = inputValue;
+                rpccall.innerHTML = inputValue;
+            }
+        })
+    }); 
+
     setTimeout(() => {
         //display rpc values on load
-        inputChange.forEach(rpccall => {
-            webpage.emit('onLoad', rpccall.id);    
-        })
-        toggleChange.forEach(toggle => {
-            webpage.emit('onLoad', toggle.id)
-        })
-
         webpage.listen("returnOnLoad", (event) => {
             let [name, inputValue] = event.payload;
+            console.log(name, inputValue)
             inputChange.forEach(rpccall => {
                 if (rpccall.id == name) {
                     rpccall.value = inputValue;
@@ -90,16 +131,16 @@ window.onload = () => {
                 }
             })
         });
-
+        
         //Push Sensor information to display
         const deviceinfo = document.getElementById('sensorinfo');
         const display = document.createElement('info');
         display.type = "paragraph";
         display.innerText= serial[0];
-
         deviceinfo.appendChild(display);
 
         //write out a chart for each column 
+        let lastLabel = "none";
         for (let i = 0; i < columns.length; i++) {
             const checkboxesContainer = document.getElementById('dropdown');
             const canvasesContainer = document.getElementById('canvases');
@@ -141,6 +182,23 @@ window.onload = () => {
                     }
                 });
             });
+            rpcType.forEach(rpcDiv => {
+                if (label.innerText.includes(lastLabel)) {} //pass;
+                else{
+                    inputChange.forEach(rpccall => {
+                        if (label.innerText.includes(rpcDiv.id) && rpccall.parentNode.parentNode == rpcDiv){
+                            webpage.emit('onLoad', rpccall.id)
+                            lastLabel = rpcDiv.id
+                            console.log(lastLabel)
+                        } 
+                    })
+                    toggleChange.forEach(toggleChange => {
+                        if (label.innerText.includes(rpcDiv.id) && toggleChange.parentNode.parentNode == rpcDiv){
+                            webpage.emit('onLoad', toggleChange.id)
+                        } 
+                    })
+                }
+            })
 
             //uplot graph styling
             let options = {
@@ -206,10 +264,10 @@ window.onload = () => {
                     })
                 ]
             })
-
         }
+        
 
-    }, 1000);
+    }, 2000);
     
     //SIDE BAR LOGIC
     const drop = document.getElementById('drop')
@@ -229,56 +287,7 @@ window.onload = () => {
             const webviewShow = tab.id;
             webpage.emit('toggle', webviewShow)
         })
-    })
-
-    //on button click return rpc
-    const buttonChange = document.querySelectorAll('.buttonCommands');
-    buttonChange.forEach(clickButton => {
-        clickButton.addEventListener("click", function() {   
-            call = [clickButton.id, clickButton.value];     
-            webpage.emit('returningRPCName', call);      
-        })
-    })
-
-    //on input change call rpc command
-    inputChange.forEach(rpccall => {
-        rpccall.addEventListener('keypress', function(e) {
-            value = in_range(rpccall).toString()
-            if (e.key == "Enter") {
-                //TODO: Determine whether to simply make the id the rpc name 
-                //or it needs to be something more private
-                call= [rpccall.id, value];
-                webpage.emit('returningRPCName', call);    
-            }
-        })
-    })
-
-    //on checkbox change call rpc command
-    toggleChange.forEach(clickToggle => {
-        clickToggle.addEventListener("change", (event)=>{
-            let num = 0;
-            if (event.target.checked) {
-                num = 1;
-                call = [clickToggle.id, num.toString()]; 
-            } else{
-                num = 0;
-                call = [clickToggle.id, num.toString()]; 
-            }
-            webpage.emit('returningRPCName', call);
-        })
-    })
-
-    //returns all rpc values to corresponding input field
-    webpage.listen("returnRPC", (event) => {
-        let [name, inputValue] = event.payload;
-        inputChange.forEach(rpccall => {
-            if (rpccall.id == name) {
-                rpccall.value = inputValue;
-                rpccall.textContent = inputValue;
-                rpccall.innerHTML = inputValue;
-            }
-        })
-    });     
+    })    
 };
 
 //function tests if input is within specified range
