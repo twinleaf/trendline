@@ -46,7 +46,6 @@ window.onload = () => {
                     while ((recentLogTime - firstLogTime)> timePoints) {
                         chart.data[0].shift();
                         chart.data[1].shift();
-                        chart.redraw()
                         firstLogTime = chart.data[0][0]
                         recentLogTime = chart.data[0][chart.data[0].length -1]
                     } 
@@ -61,8 +60,6 @@ window.onload = () => {
             }
             
             chart.setData(chart.data, true);
-            chart.setScale('x', chart.data[0]);
-            chart.redraw(true, true);
         }) 
     });
 
@@ -189,7 +186,6 @@ window.onload = () => {
                         if (label.innerText.includes(rpcDiv.id) && rpccall.parentNode.parentNode == rpcDiv){
                             webpage.emit('onLoad', rpccall.id)
                             lastLabel = rpcDiv.id
-                            console.log(lastLabel)
                         } 
                     })
                     toggleChange.forEach(toggleChange => {
@@ -209,8 +205,7 @@ window.onload = () => {
                     { 
                         label: columns[i],
                         stroke: 'red',
-                        points: { show: false },
-                        spanGaps: false,      
+                        points: { show: false },    
                         value: (u, v) => v  
     
                     },
@@ -226,8 +221,8 @@ window.onload = () => {
                     x: {
                     time: false,
                     distr: 2,
-                    auto: false,
-                    },
+                    auto: true,
+                    }
                 }
             }
 

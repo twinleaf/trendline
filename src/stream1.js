@@ -49,7 +49,6 @@ window.onload = () => {
                     while ((recentLogTime - firstLogTime)> timePoints) {
                         chart.data[0].shift();
                         chart.data[1].shift();
-                        chart.redraw(true)
                         firstLogTime = chart.data[0][0]
                         recentLogTime = chart.data[0][chart.data[0].length -1]
                     } 
@@ -59,7 +58,6 @@ window.onload = () => {
             })  
             
             chart.setData(chart.data, true);
-            chart.redraw(true)
         }) 
     });
 
