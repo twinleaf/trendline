@@ -230,7 +230,7 @@ fn graph_data(window: Window) {
     
     thread::spawn(move || {  
         let proxy = proxy::Interface::new(&root);
-        let device = proxy.device_full(route.clone()).unwrap();
+        let device = proxy.device_full(route).unwrap();
         let mut device = Device::new(device); 
         let mut stream1: Vec<Vec<f32>> = Vec::new();
  
@@ -345,7 +345,6 @@ fn main(){
                 }
             }); 
 
-            //TODO: simplify logic between listening on load and on a regular logic
             //App listens for the RPC call and returns the result to the specified window
             let main_window = app.get_webview("aux").unwrap();
             let new_window = app.get_webview("aux").unwrap();

@@ -167,16 +167,20 @@ window.onload = () => {
             checkboxesContainer.appendChild(label);
             checkboxesContainer.appendChild(lineBreak);
             
-            //event listener to display canvas on click
+            //event listener to display canvas/RPC div on click
             checkbox.addEventListener("change", (event) => {
                 const canvas = document.getElementById(`canvas${i}`)
                 canvas.style.display = event.target.checked ? 'block' : 'none';
 
-                //TODO: fix those logic where on a change it somehow has to check all the instances
                 rpcType.forEach(rpcControl => {
-                    if (label.innerText.includes(rpcControl.id)) {
-                        rpcControl.style.display = event.target.checked? 'inline-block' : 'none';
-                    }
+                    const checkboxes = document.querySelectorAll('.checkboxes');
+                    let stayDisplayed = false;
+                    checkboxes.forEach(checkbox => {
+                        if (checkbox.labels[0].innerText.includes(rpcControl.id) && checkbox.checked) {
+                            shouldDisplay = true; 
+                        }
+                        rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
+                    });
                 });
             });
             rpcType.forEach(rpcDiv => {
