@@ -3,9 +3,9 @@ use twinleaf::{tio, data::{ColumnData, Device}};
 use tio::{proto::DeviceRoute, proxy, util};
 use getopts::Options;
 
-use tauri::{Emitter, Listener, LogicalPosition, LogicalSize, WebviewUrl, Window, Manager};
-use std::{env, thread};
-
+use tauri::{Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window};
+use welch_sde::{Build, SpectralDensity};
+use std::{env, thread, time::Instant};
 struct RpcMeta {
     arg_type: String,
     size: usize,
@@ -52,7 +52,6 @@ impl RpcMeta {
         }
     }
 }
-
 
 fn tio_opts() -> Options {
     let mut opts = Options::new();
@@ -220,6 +219,15 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
     Ok(result)
 }
 
+fn match_value(data: ColumnData) -> f32 {
+    let data_type = match data {
+        ColumnData::Int(x) => x as f32,
+        ColumnData::UInt(x) => x as f32,
+        ColumnData::Float(x) => x as f32,
+        ColumnData::Unknown => 0.0,
+    };
+    data_type
+}
 
 #[tauri::command]
 //main tauri function where stream data gets emitted to graphs on frontend
@@ -231,10 +239,22 @@ fn graph_data(window: Window) {
     thread::spawn(move || {  
         let proxy = proxy::Interface::new(&root);
         let device = proxy.device_full(route).unwrap();
-        let mut device = Device::new(device); 
-        let mut stream1: Vec<Vec<f32>> = Vec::new();
+        let mut device = Device::new(device);
+        
+        //metadata for sampling and decimation rate
+        let meta = device.get_metadata();
+        let mut sampling = Vec::new();
+
+        for (_id, stream) in &meta.streams {
+            sampling.push(stream.segment.sampling_rate);
+            sampling.push(stream.segment.decimation);
+        }
  
-        //armstrong temp 
+        let mut stream1: Vec<Vec<f32>> = Vec::new();
+        let mut signal: Vec<f32> = Vec::with_capacity(1000);
+        let mut signal1: Vec<f32> = Vec::with_capacity(1000);
+        let mut elapsed = Instant::now();
+
         //TODO:: Need set up following flexible number of streams
         loop{
             let sample = device.next();
@@ -242,44 +262,121 @@ fn graph_data(window: Window) {
             let mut names: Vec<String> = Vec::new();
             let mut values: Vec<f32> = Vec::new();
             
+            //TODO: Question of how to standardize rates?
             match sample.stream.stream_id{
                 1 => {
                     for column in &sample.columns{
                         names.push(column.desc.name.clone());
-                        values.push(match column.value {
-                            ColumnData::Int(x) => x as f32,
-                            ColumnData::UInt(x) => x as f32,
-                            ColumnData::Float(x) => x as f32,
-                            ColumnData::Unknown => 0.0,
-                        });
+                        values.push(match_value(column.value.clone()));
+                        signal.push(match_value(column.value.clone())); 
+
+                        if signal.len() > 500 {
+                            signal.remove(0);
+                        }
+
+                        if stream1.len() >= 100{
+                            stream1.clear();
+                        } 
+    
+                        if elapsed.elapsed() >= std::time::Duration::from_secs(1){
+                            elapsed = Instant::now();
+                            if signal.len() <= 500{
+                                //TODO: Determine correct decimation and sampling rates
+                                let decimation_rate = sampling[1] as f32;
+                                let mut fs = sampling[0] as f32;
+                                fs = fs/ decimation_rate;
+             
+                                let welch: SpectralDensity<f32> =
+                                    SpectralDensity::<f32>::builder(&signal, fs).build();
+                                let sd = welch.periodogram();
+                
+                                let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
+                                let mut power_spectrum: Vec<f32> = sd.to_vec();
+                                
+                                for value in &mut power_spectrum {
+                                    *value = value.sqrt();
+                                }
+            
+                                let _= window.emit("fft", (frequencies, power_spectrum));  
+                            }
+                        }
                     }
                     stream1.push(values);
                     if stream1.len() >= 50{
                         let _ = window.emit("field", (&stream1, &names, &header));
                         stream1.clear();
                     }
+
                 }
                 2 => {
                     for column in &sample.columns{
                         names.push(column.desc.name.clone());
-                        values.push(match column.value {
-                            ColumnData::Int(x) => x as f32,
-                            ColumnData::UInt(x) => x as f32,
-                            ColumnData::Float(x) => x as f32,
-                            ColumnData::Unknown => 0.0,
-                        });
+                        values.push(match_value(column.value.clone()));
+                        signal1.push(match_value(column.value.clone())); 
+
+                        if signal1.len() > 500 {
+                            signal1.remove(0);
+                        }
+
+                        if stream1.len() >= 100{
+                            stream1.clear();
+                        } 
+    
+                        if column.desc.name.clone() == "pump1.therm.heater.power"{
+                            if elapsed.elapsed() >= std::time::Duration::from_millis(500){
+                                elapsed = Instant::now();
+                                if signal.len() <= 500{
+                                    //TODO: Determine correct decimation and sampling rates
+                                    let decimation_rate = sampling[1] as f32;
+                                    let mut fs = sampling[0] as f32;
+                                    fs = fs/ decimation_rate;
+                 
+                                    let welch: SpectralDensity<f32> =
+                                        SpectralDensity::<f32>::builder(&signal1, fs).build();
+                                    let sd = welch.periodogram();
+                    
+                                    let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
+                                    let mut power_spectrum: Vec<f32> = sd.to_vec();
+                                    
+                                    for value in &mut power_spectrum {
+                                        *value = value.sqrt();
+                                    }
+                                    
+                                    let _= window.emit("pump1", (frequencies, power_spectrum));
+                                }
+                            }
+                        } else if column.desc.name.clone() == "pump2.therm.heater.power"{
+                            if elapsed.elapsed() >= std::time::Duration::from_millis(500){
+                                elapsed = Instant::now();
+                                if signal.len() <= 500{
+                                    //TODO: Determine correct decimation and sampling rates
+                                    let decimation_rate = sampling[1] as f32;
+                                    let mut fs = sampling[0] as f32;
+                                    fs = fs/ decimation_rate;
+                 
+                                    let welch: SpectralDensity<f32> =
+                                        SpectralDensity::<f32>::builder(&signal1, fs).build();
+                                    let sd = welch.periodogram();
+                    
+                                    let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
+                                    let mut power_spectrum: Vec<f32> = sd.to_vec();
+                                    
+                                    for value in &mut power_spectrum {
+                                        *value = value.sqrt();
+                                    }
+                                    
+                                    let _= window.emit("pump2", (frequencies, power_spectrum));
+                                }
+                            }
+                        }
                     }
-                    let _ = window.emit("graphing", (&values, &names, &header));                        
+
+                    let _ = window.emit("aux", (&values, &names, &header));                        
                 }
                 3 => {
                     for column in &sample.columns{
                         names.push(column.desc.name.clone());
-                        values.push(match column.value {
-                            ColumnData::Int(x) => x as f32,
-                            ColumnData::UInt(x) => x as f32,
-                            ColumnData::Float(x) => x as f32,
-                            ColumnData::Unknown => 0.0,
-                        });
+                        values.push(match_value(column.value.clone()));
                     }
                     let _ = window.emit("power", (&values, &names, &header));                         
                 }
@@ -288,6 +385,70 @@ fn graph_data(window: Window) {
         }  
     });
 }
+
+#[tauri::command]
+fn create_window(app_handle: tauri::AppHandle){
+    let fftWindow = tauri::WebviewWindowBuilder::new(&app_handle, "fft", WebviewUrl::App("FFTGraphs/fft.html".parse().unwrap()))
+        .title("FFT")
+        .inner_size(800., 400.)
+        .build()
+        .unwrap();
+
+    fftWindow.show().unwrap();
+}
+
+#[tauri::command]
+fn pump1_win(app_handle: tauri::AppHandle){
+    let fftWindow = tauri::WebviewWindowBuilder::new(&app_handle, "fft_1", WebviewUrl::App("FFTGraphs/pump1.html".parse().unwrap()))
+        .title("FFT")
+        .inner_size(800., 400.)
+        .build()
+        .unwrap();
+
+    fftWindow.show().unwrap();
+}
+#[tauri::command]
+fn pump2_win(app_handle: tauri::AppHandle){
+    let fftWindow = tauri::WebviewWindowBuilder::new(&app_handle, "fft_2", WebviewUrl::App("FFTGraphs/pump2.html".parse().unwrap()))
+        .title("FFT")
+        .inner_size(800., 400.)
+        .build()
+        .unwrap();
+
+    fftWindow.show().unwrap();
+}
+
+//TODO apply fft calculation to standard format
+/*fn calc_fft(mut signal: Vec<f32>, sampling: Vec<u32>) -> (Vec<f32>, Vec<f32>) {
+    let mut elapsed = Instant::now();
+    if signal.len() > 500 {
+        signal.remove(0);
+    }
+
+    if elapsed.elapsed() >= std::time::Duration::from_secs(1){
+        elapsed = Instant::now();
+        if signal.len() <= 500{
+            //TODO: Determine correct decimation and sampling rates
+            let decimation_rate = sampling[1] as f32;
+            let fs = sampling[0] as f32/ decimation_rate;
+
+            let welch: SpectralDensity<f32> =
+                SpectralDensity::<f32>::builder(&signal, fs).build();
+            let sd = welch.periodogram();
+
+            let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
+            let mut power_spectrum: Vec<f32> = sd.to_vec();
+            
+            for value in &mut power_spectrum {
+                *value = value.sqrt();
+            }
+
+            return (frequencies, power_spectrum)
+            //let _= window.emit("fft", (frequencies, power_spectrum));  
+        }
+    } 
+    (vec![], vec![])
+}*/
 
 fn main(){
     tauri::Builder::default()
@@ -323,6 +484,7 @@ fn main(){
             app.listen("toggle",  move |event| {
                 let webpage: String = serde_json::from_str(event.payload()).unwrap();
 
+                //TODO: Standardize window hiding logic
                 match webpage.as_str() {
                     "lily" => {
                         aux.show().unwrap();
@@ -372,7 +534,11 @@ fn main(){
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![graph_data])
+        .invoke_handler(tauri::generate_handler![
+            graph_data, 
+            create_window,
+            pump1_win,
+            pump2_win])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
     

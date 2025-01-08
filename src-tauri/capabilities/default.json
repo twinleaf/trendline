@@ -6,7 +6,11 @@
         "main",
         "lily",
         "desc",
-        "field"],
+        "field",
+        "fft",
+        "fft_0", 
+        "fft_1", 
+        "fft_2"],
     "permissions": [
       "core:default",
       "core:event:allow-listen",
@@ -14,6 +18,8 @@
       "core:event:allow-unlisten",
       "core:event:allow-emit",
       "core:event:allow-emit-to", 
+      "core:webview:allow-create-webview",
+      "core:webview:allow-create-webview-window",
       "shell:allow-open"
     ]
   }

@@ -1,24 +1,26 @@
-const { invoke } = window.__TAURI__.core
+const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
+const { Window } = window.__TAURI__.window;
+const { Webview } = window.__TAURI__.webview;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 
-invoke('graph_data');
+invoke('graph_data', {data: 'data'}).then((data) => {});
 
 webpage = getCurrentWebviewWindow();
 window.onload = () => {
     var graphs = []; //store graphs for display
     var columns = []; //store names for canvases
-    var serial = []; //store device serial information
+    var serial = []; 
     let timePoints = 10;
     const inputChange = document.querySelectorAll('.InputCommands');
     const toggleChange = document.querySelectorAll('.checkCommands') 
     const rpcType = document.querySelectorAll('.controls');
     
     let startTime = Date.now();
-    gotNames = false; //bool determines if graph information is set up
+    gotNames = false;
 
     //emit rust data and push to uplot graphs 
-    webpage.listen("graphing", (event) => {
+    webpage.listen("aux", (event) => {
         const [values, name, header] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
         
@@ -114,7 +116,6 @@ window.onload = () => {
         //display rpc values on load
         webpage.listen("returnOnLoad", (event) => {
             let [name, inputValue] = event.payload;
-            console.log(name, inputValue)
             inputChange.forEach(rpccall => {
                 if (rpccall.id == name) {
                     rpccall.value = inputValue;
@@ -177,7 +178,7 @@ window.onload = () => {
                     let stayDisplayed = false;
                     checkboxes.forEach(checkbox => {
                         if (checkbox.labels[0].innerText.includes(rpcControl.id) && checkbox.checked) {
-                            shouldDisplay = true; 
+                            stayDisplayed = true; 
                         }
                         rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
                     });
@@ -265,7 +266,6 @@ window.onload = () => {
             })
         }
         
-
     }, 2000);
     
     //SIDE BAR LOGIC
@@ -274,6 +274,20 @@ window.onload = () => {
         const content = document.getElementById('dropdown')
         content.classList.toggle("show");
     })
+
+    var ffts = ['pump1', 'pump2']
+    const pop = document.getElementById(ffts[0])
+    const pop2 = document.getElementById(ffts[1])
+
+    pop.addEventListener("click", function() {
+        invoke('pump1_win')
+        .then(() => {console.log("window created")})
+        .catch((error) => {console.log("error", error)})
+    })
+    pop2.addEventListener("click", function() {
+        invoke('pump2_win')
+        .then(() => {console.log("window created")})
+        .catch((error) => {console.log("error", error)})})
 
     //page tabbing
     document.querySelectorAll('.tabs div').forEach(tab => {
@@ -289,6 +303,12 @@ window.onload = () => {
     })    
 };
 
+/*function popWindow(){
+    invoke('create_window')
+        .then(() => {console.log("window created")})
+        .catch((error) => {console.log("error", error)})
+}*/
+
 //function tests if input is within specified range
 function in_range(fillValue) {
     const value = parseFloat(fillValue.value);
@@ -299,9 +319,8 @@ function in_range(fillValue) {
         withinRange = min;
     } else if (value > max) {
         withinRange = max;
-    } else {
-        withinRange = value;
-    }
+    } 
+    else {withinRange = value;}
     return withinRange
 }
 

@@ -1,5 +1,6 @@
 const { listen } = window.__TAURI__.event;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
+const { invoke } = window.__TAURI__.core;
 
 webpage = getCurrentWebviewWindow();
 window.onload = () => {
@@ -116,37 +117,17 @@ window.onload = () => {
             const uplot = new uPlot(options, data, document.getElementById(canvas.id))
             graphs.push(uplot)
 
-            const targetElement = document.getElementById(canvas.id)
-            const targetResize = interact(targetElement);
-
-            targetResize.resizable({
-                edges: {left: true, right: true, bottom: true, top:true},
-                inertia: true,
-                listeners: {
-                    move(event) {
-                        const target = event.target;
-                        let width = event.rect.width;
-                        let height = event.rect.height;
-
-                        target.style.width = `${width}px`
-                        target.style.height = `${height}px`
-
-                        uplot.setSize({width, height});
-                    }
-                },
-                modifiers: [
-                    interact.modifiers.restrict({
-                        restriction: 'parent'
-                    }),
-                    
-                    interact.modifiers.restrictSize({
-                        min: {width: 400, height: 200}
-                    })
-                ]
-            })
+            makeResizable(canvas.id, uplot)
         }
-
     }, 1000);
+
+    //Popout Window
+    const pop = document.getElementById('pop')
+    pop.addEventListener("click", function() {
+        invoke('create_window')
+            .then(() => {console.log("window created")})
+            .catch((error) => {console.log("error", error)})
+    });
 
     //page tabbing logic
     document.querySelectorAll('.tabs div').forEach(tab => {
@@ -164,6 +145,35 @@ window.onload = () => {
     }) 
 };
 
+function makeResizable(elementId, uplotResize){
+    const element = document.getElementById(elementId);
+    interact(element).resizable({
+        edges: {left: true, right: true, bottom: true, top:true},
+        inertia: true,
+        listeners: {
+            move(event) {
+                const target = event.target;
+                let width = event.rect.width;
+                let height = event.rect.height;
+
+                target.style.width = `${width}px`
+                target.style.height = `${height}px`
+
+                uplotResize.setSize({width, height});
+            }
+        },
+        modifiers: [
+            interact.modifiers.restrict({
+                restriction: 'parent'
+            }),
+            
+            interact.modifiers.restrictSize({
+                min: {width: 400, height: 200}
+            })
+        ]
+    })
+}
+
 //function tests if input is within specified range
 function in_range(fillValue) {
     const value = parseFloat(fillValue.value);
@@ -178,36 +188,4 @@ function in_range(fillValue) {
         withinRange = value;
     }
     return withinRange
-}
-
-function autoPadRight(self, side, sidesWithAxes, cycleNum) {
-    let xAxis = self.axes[0];
-
-    let xVals = xAxis._values;
-
-    if (xVals != null) {
-        // bail out, force convergence
-        if (cycleNum > 2)
-            return self._padding[1];
-
-        let xSplits = xAxis._splits;
-        let rightSplit = xSplits[xSplits.length - 1];
-        let rightSplitCoord = self.valToPos(rightSplit, "x");
-        let leftPlotEdge = (self.bbox.left / devicePixelRatio);
-        let rightPlotEdge = leftPlotEdge + (self.bbox.width / devicePixelRatio);
-        let rightChartEdge = rightPlotEdge + self._padding[1];
-
-        let pxPerChar    = 8;
-        let rightVal     = xVals[xVals.length - 1] + "";
-        let valHalfWidth = pxPerChar * (rightVal.length / 2);
-
-        let rightValEdge = leftPlotEdge + rightSplitCoord + valHalfWidth;
-
-        if (rightValEdge >= rightChartEdge) {
-            return rightValEdge - rightPlotEdge;
-        }
-    }
-
-    // default size
-    return 8;
 }

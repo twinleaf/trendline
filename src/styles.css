@@ -92,7 +92,7 @@
   border-bottom-style: double;
 }
 
-.buttonCommands{
+.buttonCommands, .fft{
 background-color: white;
 color: black;
 border-radius: 5px;
@@ -128,7 +128,7 @@ main {
   padding: 2vh;
 }
 
-.canvas-container{
+.canvas-container {
   border-style: dotted;
   border-color: black;
   border-width: 1px; 
@@ -139,3 +139,4 @@ main {
   position: relative;
 
 }
+
