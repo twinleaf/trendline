@@ -17,6 +17,12 @@
         window.onload = () => {
             let fft = [];
 
+            //TODO: Listen for corresponding fft? Or somehow duplicate the html for each instance
+            webpage.listen("name", (event) => {
+                const name = event.payload;
+                console.log(name);
+            });
+
             webpage.listen('fft', (event) => {
                 const [freq, power_spec] = event.payload;
                 fft.forEach((chart) => {

@@ -1,6 +1,5 @@
 const { listen } = window.__TAURI__.event;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
-const { invoke } = window.__TAURI__.core;
 
 webpage = getCurrentWebviewWindow();
 window.onload = () => {
@@ -120,14 +119,6 @@ window.onload = () => {
             makeResizable(canvas.id, uplot)
         }
     }, 1000);
-
-    //Popout Window
-    const pop = document.getElementById('pop')
-    pop.addEventListener("click", function() {
-        invoke('create_window')
-            .then(() => {console.log("window created")})
-            .catch((error) => {console.log("error", error)})
-    });
 
     //page tabbing logic
     document.querySelectorAll('.tabs div').forEach(tab => {

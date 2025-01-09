@@ -6,6 +6,10 @@ use getopts::Options;
 use tauri::{Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window};
 use welch_sde::{Build, SpectralDensity};
 use std::{env, thread, time::Instant};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+// Atomic counter to generate unique window labels
+static WINDOW_COUNTER: AtomicUsize = AtomicUsize::new(0);
 struct RpcMeta {
     arg_type: String,
     size: usize,
@@ -249,6 +253,8 @@ fn graph_data(window: Window) {
             sampling.push(stream.segment.sampling_rate);
             sampling.push(stream.segment.decimation);
         }
+        let decimation_rate = sampling[1] as f32;
+        let fs = sampling[0] as f32/ decimation_rate;
  
         let mut stream1: Vec<Vec<f32>> = Vec::new();
         let mut signal: Vec<f32> = Vec::with_capacity(1000);
@@ -268,38 +274,6 @@ fn graph_data(window: Window) {
                     for column in &sample.columns{
                         names.push(column.desc.name.clone());
                         values.push(match_value(column.value.clone()));
-                        signal.push(match_value(column.value.clone())); 
-
-                        if signal.len() > 500 {
-                            signal.remove(0);
-                        }
-
-                        if stream1.len() >= 100{
-                            stream1.clear();
-                        } 
-    
-                        if elapsed.elapsed() >= std::time::Duration::from_secs(1){
-                            elapsed = Instant::now();
-                            if signal.len() <= 500{
-                                //TODO: Determine correct decimation and sampling rates
-                                let decimation_rate = sampling[1] as f32;
-                                let mut fs = sampling[0] as f32;
-                                fs = fs/ decimation_rate;
-             
-                                let welch: SpectralDensity<f32> =
-                                    SpectralDensity::<f32>::builder(&signal, fs).build();
-                                let sd = welch.periodogram();
-                
-                                let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
-                                let mut power_spectrum: Vec<f32> = sd.to_vec();
-                                
-                                for value in &mut power_spectrum {
-                                    *value = value.sqrt();
-                                }
-            
-                                let _= window.emit("fft", (frequencies, power_spectrum));  
-                            }
-                        }
                     }
                     stream1.push(values);
                     if stream1.len() >= 50{
@@ -318,56 +292,17 @@ fn graph_data(window: Window) {
                             signal1.remove(0);
                         }
 
-                        if stream1.len() >= 100{
-                            stream1.clear();
-                        } 
-    
-                        if column.desc.name.clone() == "pump1.therm.heater.power"{
+                        if column.desc.name.clone() == "pump1.therm.heater.power" || column.desc.name.clone() == "pump2.therm.heater.power"{
                             if elapsed.elapsed() >= std::time::Duration::from_millis(500){
                                 elapsed = Instant::now();
-                                if signal.len() <= 500{
-                                    //TODO: Determine correct decimation and sampling rates
-                                    let decimation_rate = sampling[1] as f32;
-                                    let mut fs = sampling[0] as f32;
-                                    fs = fs/ decimation_rate;
-                 
-                                    let welch: SpectralDensity<f32> =
-                                        SpectralDensity::<f32>::builder(&signal1, fs).build();
-                                    let sd = welch.periodogram();
-                    
-                                    let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
-                                    let mut power_spectrum: Vec<f32> = sd.to_vec();
-                                    
-                                    for value in &mut power_spectrum {
-                                        *value = value.sqrt();
-                                    }
-                                    
-                                    let _= window.emit("pump1", (frequencies, power_spectrum));
+                                let (freq, power) = calc_fft(signal1.clone(), sampling.clone());
+                                //TODO: Determine if pump1.html actually works
+                                if column.desc.name.clone() == "pump1.therm.heater.power"{
+                                    let _= window.emit("pump1", (freq, power));
+                                } else if column.desc.name.clone() == "pump2.therm.heater.power"{
+                                    let _= window.emit("pump2", (freq, power));
                                 }
-                            }
-                        } else if column.desc.name.clone() == "pump2.therm.heater.power"{
-                            if elapsed.elapsed() >= std::time::Duration::from_millis(500){
-                                elapsed = Instant::now();
-                                if signal.len() <= 500{
-                                    //TODO: Determine correct decimation and sampling rates
-                                    let decimation_rate = sampling[1] as f32;
-                                    let mut fs = sampling[0] as f32;
-                                    fs = fs/ decimation_rate;
-                 
-                                    let welch: SpectralDensity<f32> =
-                                        SpectralDensity::<f32>::builder(&signal1, fs).build();
-                                    let sd = welch.periodogram();
-                    
-                                    let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
-                                    let mut power_spectrum: Vec<f32> = sd.to_vec();
-                                    
-                                    for value in &mut power_spectrum {
-                                        *value = value.sqrt();
-                                    }
-                                    
-                                    let _= window.emit("pump2", (frequencies, power_spectrum));
-                                }
-                            }
+                            } 
                         }
                     }
 
@@ -377,6 +312,29 @@ fn graph_data(window: Window) {
                     for column in &sample.columns{
                         names.push(column.desc.name.clone());
                         values.push(match_value(column.value.clone()));
+                        signal.push(match_value(column.value.clone())); 
+
+                        if signal.len() > 500 {
+                            signal.remove(0);
+                        }
+    
+                        if elapsed.elapsed() >= std::time::Duration::from_secs(1){
+                            elapsed = Instant::now();
+                            if signal.len() <= 500{
+                                let welch: SpectralDensity<f32> =
+                                    SpectralDensity::<f32>::builder(&signal, fs).build();
+                                let sd = welch.periodogram();
+                
+                                let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
+                                let mut power_spectrum: Vec<f32> = sd.to_vec();
+                                
+                                for value in &mut power_spectrum {
+                                    *value = value.sqrt();
+                                }
+            
+                                let _= window.emit("fft", (frequencies, power_spectrum));  
+                            }
+                        }
                     }
                     let _ = window.emit("power", (&values, &names, &header));                         
                 }
@@ -386,68 +344,51 @@ fn graph_data(window: Window) {
     });
 }
 
+//Fft calculation to standard format
+fn calc_fft(signal: Vec<f32>, sampling: Vec<u32>) -> (Vec<f32>, Vec<f32>) {
+    if signal.len() <= 500{
+        let decimation_rate = sampling[1] as f32;
+        let fs = sampling[0] as f32/ decimation_rate;
+
+        let welch: SpectralDensity<f32> =
+            SpectralDensity::<f32>::builder(&signal, fs).build();
+        let sd = welch.periodogram();
+
+        let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
+        let mut power_spectrum: Vec<f32> = sd.to_vec();
+        
+        for value in &mut power_spectrum {
+            *value = value.sqrt();
+        }
+
+        return (frequencies, power_spectrum)
+    }
+    
+    (vec![], vec![])
+}
+
 #[tauri::command]
 fn create_window(app_handle: tauri::AppHandle){
-    let fftWindow = tauri::WebviewWindowBuilder::new(&app_handle, "fft", WebviewUrl::App("FFTGraphs/fft.html".parse().unwrap()))
+    let fft_window = tauri::WebviewWindowBuilder::new(&app_handle, "fft", WebviewUrl::App("FFTGraphs/fft.html".parse().unwrap()))
         .title("FFT")
         .inner_size(800., 400.)
         .build()
         .unwrap();
 
-    fftWindow.show().unwrap();
+        fft_window.show().unwrap();
 }
 
-#[tauri::command]
-fn pump1_win(app_handle: tauri::AppHandle){
-    let fftWindow = tauri::WebviewWindowBuilder::new(&app_handle, "fft_1", WebviewUrl::App("FFTGraphs/pump1.html".parse().unwrap()))
+//Standard create_window for dynamically diffrent webpages
+/*#[tauri::command]
+fn new_win(app_handle: tauri::AppHandle){
+    let window_label = format!("fft_{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let fft_window = tauri::WebviewWindowBuilder::new(&app_handle, window_label, WebviewUrl::App("FFTGraphs/fft.html".parse().unwrap()))
         .title("FFT")
         .inner_size(800., 400.)
         .build()
         .unwrap();
 
-    fftWindow.show().unwrap();
-}
-#[tauri::command]
-fn pump2_win(app_handle: tauri::AppHandle){
-    let fftWindow = tauri::WebviewWindowBuilder::new(&app_handle, "fft_2", WebviewUrl::App("FFTGraphs/pump2.html".parse().unwrap()))
-        .title("FFT")
-        .inner_size(800., 400.)
-        .build()
-        .unwrap();
-
-    fftWindow.show().unwrap();
-}
-
-//TODO apply fft calculation to standard format
-/*fn calc_fft(mut signal: Vec<f32>, sampling: Vec<u32>) -> (Vec<f32>, Vec<f32>) {
-    let mut elapsed = Instant::now();
-    if signal.len() > 500 {
-        signal.remove(0);
-    }
-
-    if elapsed.elapsed() >= std::time::Duration::from_secs(1){
-        elapsed = Instant::now();
-        if signal.len() <= 500{
-            //TODO: Determine correct decimation and sampling rates
-            let decimation_rate = sampling[1] as f32;
-            let fs = sampling[0] as f32/ decimation_rate;
-
-            let welch: SpectralDensity<f32> =
-                SpectralDensity::<f32>::builder(&signal, fs).build();
-            let sd = welch.periodogram();
-
-            let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
-            let mut power_spectrum: Vec<f32> = sd.to_vec();
-            
-            for value in &mut power_spectrum {
-                *value = value.sqrt();
-            }
-
-            return (frequencies, power_spectrum)
-            //let _= window.emit("fft", (frequencies, power_spectrum));  
-        }
-    } 
-    (vec![], vec![])
+        fft_window.show().unwrap();
 }*/
 
 fn main(){
@@ -536,9 +477,7 @@ fn main(){
         })
         .invoke_handler(tauri::generate_handler![
             graph_data, 
-            create_window,
-            pump1_win,
-            pump2_win])
+            create_window])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
     
