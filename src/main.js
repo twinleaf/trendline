@@ -280,15 +280,21 @@ window.onload = () => {
     const pop2 = document.getElementById(ffts[1])
 
     pop.addEventListener("click", function() {
+        pop.disabled = true;
         invoke('pump1_win')
-        .then(() => {console.log("window created")})
+        .then(() => {
+            console.log("window created")
+        })
         .catch((error) => {console.log("error", error)})
     })
     pop2.addEventListener("click", function() {
+        pop2.disabled = true;
         invoke('pump2_win')
-        .then(() => {console.log("window created")})
-        .catch((error) => {console.log("error", error)})})
-
+        .then(() => {
+            console.log("window created")
+        })
+        .catch((error) => {console.log("error", error)})
+    })
     //page tabbing
     document.querySelectorAll('.tabs div').forEach(tab => {
         tab.addEventListener('click', function() {
