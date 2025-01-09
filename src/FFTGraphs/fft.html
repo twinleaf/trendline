@@ -17,7 +17,7 @@
         window.onload = () => {
             let fft = [];
 
-            webpage.listen('fft', (event) => {
+            webpage.listen('fft', (event) => { 
                 const [freq, power_spec] = event.payload;
                 fft.forEach((chart) => {
                     for (let i = 0; i< freq.length; i++) {

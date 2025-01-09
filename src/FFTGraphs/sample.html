@@ -17,7 +17,7 @@
         window.onload = () => {
             let fft = [];
  
-            webpage.listen('pump1', (event) => {
+            /*webpage.listen('pump1', (event) => {
                 const [freq, power_spec] = event.payload;
                 renderFFT(freq, power_spec, 'transform', fft)
                 fft.forEach((chart) => {
@@ -32,9 +32,9 @@
                     }
                     chart.setData(chart.data, true);
                 }) 
-            })
+            })*/
 
-            webpage.listen('pump2', (event) => {
+            /*webpage.listen('pump2', (event) => {
                 const [freq, power_spec] = event.payload;
                 renderFFT(freq, power_spec, 'transform', fft)
 
@@ -50,7 +50,7 @@
                     }
                     chart.setData(chart.data, true);
                 }) 
-            })
+            })*/
 
             webpage.listen('lockin', (event) => {
                 const [freq, power_spec] = event.payload;

@@ -350,7 +350,7 @@ fn graph_data(window: Window) {
                         if elapsed.elapsed() >= std::time::Duration::from_secs(1){
                             elapsed = Instant::now();
                             if signal.len() <= 500{
-                                let (freq, power) = calc_fft(signal1.clone(), sampling_rates.get(&sample.stream.stream_id));
+                                let (freq, power) = calc_fft(signal.clone(), sampling_rates.get(&sample.stream.stream_id));
                                 let _= window.emit("fft", (freq, power));  
                             }
                         }
