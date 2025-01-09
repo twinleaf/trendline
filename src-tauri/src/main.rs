@@ -7,6 +7,7 @@ use tauri::{Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl
 use welch_sde::{Build, SpectralDensity};
 use std::{env, thread, time::Instant};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::HashMap;
 
 // Atomic counter to generate unique window labels
 static WINDOW_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -247,19 +248,17 @@ fn graph_data(window: Window) {
         
         //metadata for sampling and decimation rate
         let meta = device.get_metadata();
-        let mut sampling = Vec::new();
+        let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
 
         for (_id, stream) in &meta.streams {
-            sampling.push(stream.segment.sampling_rate);
-            sampling.push(stream.segment.decimation);
+            sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
         }
-        let decimation_rate = sampling[1] as f32;
-        let fs = sampling[0] as f32/ decimation_rate;
  
         let mut stream1: Vec<Vec<f32>> = Vec::new();
         let mut signal: Vec<f32> = Vec::with_capacity(1000);
         let mut signal1: Vec<f32> = Vec::with_capacity(1000);
         let mut elapsed = Instant::now();
+        let mut elapsed2 = Instant::now();
 
         //TODO:: Need set up following flexible number of streams
         loop{
@@ -293,9 +292,9 @@ fn graph_data(window: Window) {
                         }
 
                         if column.desc.name.clone() == "pump1.therm.heater.power" || column.desc.name.clone() == "pump2.therm.heater.power"{
-                            if elapsed.elapsed() >= std::time::Duration::from_millis(500){
+                            if elapsed.elapsed() >= std::time::Duration::from_secs(1){
                                 elapsed = Instant::now();
-                                let (freq, power) = calc_fft(signal1.clone(), sampling.clone());
+                                let (freq, power) = calc_fft(signal1.clone(), sampling_rates.get(&sample.stream.stream_id).clone());
                                 //TODO: Determine if pump1.html actually works
                                 if column.desc.name.clone() == "pump1.therm.heater.power"{
                                     let _= window.emit("pump1", (freq, power));
@@ -305,7 +304,6 @@ fn graph_data(window: Window) {
                             } 
                         }
                     }
-
                     let _ = window.emit("aux", (&values, &names, &header));                        
                 }
                 3 => {
@@ -318,21 +316,11 @@ fn graph_data(window: Window) {
                             signal.remove(0);
                         }
     
-                        if elapsed.elapsed() >= std::time::Duration::from_secs(1){
-                            elapsed = Instant::now();
+                        if elapsed2.elapsed() >= std::time::Duration::from_secs(1){
+                            elapsed2 = Instant::now();
                             if signal.len() <= 500{
-                                let welch: SpectralDensity<f32> =
-                                    SpectralDensity::<f32>::builder(&signal, fs).build();
-                                let sd = welch.periodogram();
-                
-                                let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
-                                let mut power_spectrum: Vec<f32> = sd.to_vec();
-                                
-                                for value in &mut power_spectrum {
-                                    *value = value.sqrt();
-                                }
-            
-                                let _= window.emit("fft", (frequencies, power_spectrum));  
+                                let (freq, power) = calc_fft(signal1.clone(), sampling_rates.get(&sample.stream.stream_id).clone());
+                                let _= window.emit("fft", (freq, power));  
                             }
                         }
                     }
@@ -345,23 +333,24 @@ fn graph_data(window: Window) {
 }
 
 //Fft calculation to standard format
-fn calc_fft(signal: Vec<f32>, sampling: Vec<u32>) -> (Vec<f32>, Vec<f32>) {
-    if signal.len() <= 500{
-        let decimation_rate = sampling[1] as f32;
-        let fs = sampling[0] as f32/ decimation_rate;
+fn calc_fft(signal: Vec<f32>, sampling: Option<&Vec<u32>>) -> (Vec<f32>, Vec<f32>) {
+    if let Some(sampling) = sampling {
+        if signal.len() <= 500{
+            let decimation_rate = sampling[1] as f32;
+            let fs = sampling[0] as f32/ decimation_rate;
 
-        let welch: SpectralDensity<f32> =
-            SpectralDensity::<f32>::builder(&signal, fs).build();
-        let sd = welch.periodogram();
-
-        let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
-        let mut power_spectrum: Vec<f32> = sd.to_vec();
-        
-        for value in &mut power_spectrum {
-            *value = value.sqrt();
+            let welch: SpectralDensity<f32> =
+                SpectralDensity::<f32>::builder(&signal, fs).build();
+            let sd = welch.periodogram();
+    
+            let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
+            let mut power_spectrum: Vec<f32> = sd.to_vec();
+            
+            for value in &mut power_spectrum {
+                *value = value.sqrt();
+            }
+            return (frequencies, power_spectrum)
         }
-
-        return (frequencies, power_spectrum)
     }
     
     (vec![], vec![])
@@ -379,17 +368,17 @@ fn create_window(app_handle: tauri::AppHandle){
 }
 
 //Standard create_window for dynamically diffrent webpages
-/*#[tauri::command]
+#[tauri::command]
 fn new_win(app_handle: tauri::AppHandle){
     let window_label = format!("fft_{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
-    let fft_window = tauri::WebviewWindowBuilder::new(&app_handle, window_label, WebviewUrl::App("FFTGraphs/fft.html".parse().unwrap()))
+    let fft_window = tauri::WebviewWindowBuilder::new(&app_handle, window_label, WebviewUrl::App("FFTGraphs/sample.html".parse().unwrap()))
         .title("FFT")
         .inner_size(800., 400.)
         .build()
         .unwrap();
 
         fft_window.show().unwrap();
-}*/
+}
 
 fn main(){
     tauri::Builder::default()
@@ -477,7 +466,8 @@ fn main(){
         })
         .invoke_handler(tauri::generate_handler![
             graph_data, 
-            create_window])
+            create_window,
+            new_win])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
     

@@ -275,26 +275,19 @@ window.onload = () => {
         content.classList.toggle("show");
     })
 
-    var ffts = ['pump1', 'pump2']
-    const pop = document.getElementById(ffts[0])
-    const pop2 = document.getElementById(ffts[1])
+    var ffts = ['pump1', 'pump2'] //TODO: fix hardcode
+    ffts.forEach(pop => {
+        const fftButton = document.getElementById(pop);
+        fftButton.addEventListener('click', function() {
+            pop.disabled = true;
+            invoke('new_win')
+            .then(() => {
+                console.log("window created")
+            })
+            .catch((error) => {console.log("error", error)})
+        }) 
+    })
 
-    pop.addEventListener("click", function() {
-        pop.disabled = true;
-        invoke('pump1_win')
-        .then(() => {
-            console.log("window created")
-        })
-        .catch((error) => {console.log("error", error)})
-    })
-    pop2.addEventListener("click", function() {
-        pop2.disabled = true;
-        invoke('pump2_win')
-        .then(() => {
-            console.log("window created")
-        })
-        .catch((error) => {console.log("error", error)})
-    })
     //page tabbing
     document.querySelectorAll('.tabs div').forEach(tab => {
         tab.addEventListener('click', function() {
@@ -308,12 +301,6 @@ window.onload = () => {
         })
     })    
 };
-
-/*function popWindow(){
-    invoke('create_window')
-        .then(() => {console.log("window created")})
-        .catch((error) => {console.log("error", error)})
-}*/
 
 //function tests if input is within specified range
 function in_range(fillValue) {
