@@ -224,6 +224,30 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
     Ok(result)
 }
 
+//Fft calculation
+fn calc_fft(signal: Vec<f32>, sampling: Option<&Vec<u32>>) -> (Vec<f32>, Vec<f32>) {
+    if let Some(sampling) = sampling {
+        if signal.len() <= 500{
+            let decimation_rate = sampling[1] as f32;
+            let fs = sampling[0] as f32/ decimation_rate;
+
+            let welch: SpectralDensity<f32> =
+                SpectralDensity::<f32>::builder(&signal, fs).build();
+            let sd = welch.periodogram();
+    
+            let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
+            let mut power_spectrum: Vec<f32> = sd.to_vec();
+            
+            for value in &mut power_spectrum {
+                *value = value.sqrt();
+            }
+            return (frequencies, power_spectrum)
+        }
+    }
+    
+    (vec![], vec![])
+}
+
 fn match_value(data: ColumnData) -> f32 {
     let data_type = match data {
         ColumnData::Int(x) => x as f32,
@@ -255,6 +279,7 @@ fn graph_data(window: Window) {
         }
  
         let mut stream1: Vec<Vec<f32>> = Vec::new();
+        let mut locksignal: Vec<f32> = Vec::with_capacity(1000);
         let mut signal: Vec<f32> = Vec::with_capacity(1000);
         let mut signal1: Vec<f32> = Vec::with_capacity(1000);
         let mut elapsed = Instant::now();
@@ -266,19 +291,30 @@ fn graph_data(window: Window) {
             let mut names: Vec<String> = Vec::new();
             let mut values: Vec<f32> = Vec::new();
             
-            //TODO: Question of how to standardize rates?
             match sample.stream.stream_id{
                 1 => {
                     for column in &sample.columns{
                         names.push(column.desc.name.clone());
                         values.push(match_value(column.value.clone()));
+                        locksignal.push(match_value(column.value.clone()));
+
+                        if locksignal.len() > 500 {
+                            locksignal.remove(0);
+                        }
+
+                        if elapsed.elapsed() >= std::time::Duration::from_secs(1){
+                            elapsed = Instant::now();
+                            if column.desc.name.clone() == "lockin.0x" {
+                                let (freq, power) = calc_fft(locksignal.clone(), sampling_rates.get(&sample.stream.stream_id));
+                                let _= window.emit("lockin", (freq, power));  
+                            }      
+                        }
                     }
                     stream1.push(values);
                     if stream1.len() >= 50{
                         let _ = window.emit("field", (&stream1, &names, &header));
                         stream1.clear();
                     }
-
                 }
                 2 => {
                     for column in &sample.columns{
@@ -291,8 +327,7 @@ fn graph_data(window: Window) {
                         }
 
                         if column.desc.name.clone() == "pump1.therm.heater.power" || column.desc.name.clone() == "pump2.therm.heater.power"{
-                            let (freq, power) = calc_fft(signal1.clone(), sampling_rates.get(&sample.stream.stream_id).clone());
-                            println!("{} {:?}", column.desc.name.clone(), freq);
+                            let (freq, power) = calc_fft(signal1.clone(), sampling_rates.get(&sample.stream.stream_id));
                             if column.desc.name.clone() == "pump1.therm.heater.power"{
                                 let _= window.emit("pump1", (freq, power));
                             } else if column.desc.name.clone() == "pump2.therm.heater.power"{
@@ -315,7 +350,7 @@ fn graph_data(window: Window) {
                         if elapsed.elapsed() >= std::time::Duration::from_secs(1){
                             elapsed = Instant::now();
                             if signal.len() <= 500{
-                                let (freq, power) = calc_fft(signal1.clone(), sampling_rates.get(&sample.stream.stream_id).clone());
+                                let (freq, power) = calc_fft(signal1.clone(), sampling_rates.get(&sample.stream.stream_id));
                                 let _= window.emit("fft", (freq, power));  
                             }
                         }
@@ -326,30 +361,6 @@ fn graph_data(window: Window) {
             };
         }  
     });
-}
-
-//Fft calculation to standard format
-fn calc_fft(signal: Vec<f32>, sampling: Option<&Vec<u32>>) -> (Vec<f32>, Vec<f32>) {
-    if let Some(sampling) = sampling {
-        if signal.len() <= 500{
-            let decimation_rate = sampling[1] as f32;
-            let fs = sampling[0] as f32/ decimation_rate;
-
-            let welch: SpectralDensity<f32> =
-                SpectralDensity::<f32>::builder(&signal, fs).build();
-            let sd = welch.periodogram();
-    
-            let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
-            let mut power_spectrum: Vec<f32> = sd.to_vec();
-            
-            for value in &mut power_spectrum {
-                *value = value.sqrt();
-            }
-            return (frequencies, power_spectrum)
-        }
-    }
-    
-    (vec![], vec![])
 }
 
 #[tauri::command]
@@ -363,7 +374,7 @@ fn create_window(app_handle: tauri::AppHandle){
         fft_window.show().unwrap();
 }
 
-//Standard create_window for dynamically diffrent webpages
+//Standard create_window for dynamically different webpages
 #[tauri::command]
 fn new_win(app_handle: tauri::AppHandle){
     let window_label = format!("fft_{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
@@ -449,12 +460,12 @@ fn main(){
             });
             
             //on load the current rpc values are loaded into the corresponding input fields
-            let _2 = app.listen("onLoad", move |event| {
+            app.listen("onLoad", move |event| {
                 let mut arg: Vec<String> = vec![env::args().collect(), "rpc".to_string()]; 
                 let rpccall: String = serde_json::from_str(event.payload()).unwrap();
                 let _ = &arg.push(rpccall.clone());
                 if let Ok(passed) = rpc(&arg[2..]) {
-                    let _ = new_window.emit("returnOnLoad", (rpccall.clone(), passed.clone())).unwrap();
+                    new_window.emit("returnOnLoad", (rpccall.clone(), passed.clone())).unwrap();
                 }
             });
 
