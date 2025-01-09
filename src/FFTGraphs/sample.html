@@ -16,9 +16,10 @@
         webpage = getCurrentWebviewWindow();
         window.onload = () => {
             let fft = [];
-
-            webpage.listen('pump2', (event) => {
+ 
+            webpage.listen('pump1', (event) => {
                 const [freq, power_spec] = event.payload;
+                renderFFT(freq, power_spec, 'transform', fft)
                 fft.forEach((chart) => {
                     for (let i = 0; i< freq.length; i++) {
                         chart.data[0].push(freq[i]) 
@@ -31,10 +32,32 @@
                     }
                     chart.setData(chart.data, true);
                 }) 
-            });
+            })
 
+            webpage.listen('pump2', (event) => {
+                const [freq, power_spec] = event.payload;
+                renderFFT(freq, power_spec, 'transform', fft)
+
+                fft.forEach((chart) => {
+                    for (let i = 0; i< freq.length; i++) {
+                        chart.data[0].push(freq[i]) 
+                        chart.data[1].push(power_spec[i])
+                    }
+                
+                    while (chart.data[0].length > 1000){
+                        chart.data[0].shift();
+                        chart.data[1].shift();
+                    }
+                    chart.setData(chart.data, true);
+                }) 
+            })
+        };
+
+        function renderFFT(frequencies, powerSpectrum, elementId, fftArray) {
             setTimeout(() => {
-                let opt2 = {
+                const fftGraphContainer = document.getElementById(elementId);
+                const fftPlot = new uPlot({
+                    
                     title: 'FFT',
                     width: 800, 
                     height: 300,
@@ -59,15 +82,13 @@
                         {   size: 100,
                             values: (u, v) => v
                         }]
-                }
-                data2 = [[], []]
-                let newFFT = new uPlot(opt2, data2, document.getElementById('transform'))
-                fft.push(newFFT);
-
-                makeResizable('transform', newFFT)
+                }, [frequencies, powerSpectrum], fftGraphContainer);
+                fftArray.push(fftPlot)
                 
+                makeResizable(elementId, fftPlot)
             }, 200);
-        };
+            
+        }
 
         function makeResizable(elementId, uplotResize){
             const element = document.getElementById(elementId);
