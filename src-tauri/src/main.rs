@@ -258,7 +258,6 @@ fn graph_data(window: Window) {
         let mut signal: Vec<f32> = Vec::with_capacity(1000);
         let mut signal1: Vec<f32> = Vec::with_capacity(1000);
         let mut elapsed = Instant::now();
-        let mut elapsed2 = Instant::now();
 
         //TODO:: Need set up following flexible number of streams
         loop{
@@ -292,16 +291,13 @@ fn graph_data(window: Window) {
                         }
 
                         if column.desc.name.clone() == "pump1.therm.heater.power" || column.desc.name.clone() == "pump2.therm.heater.power"{
-                            if elapsed.elapsed() >= std::time::Duration::from_secs(1){
-                                elapsed = Instant::now();
-                                let (freq, power) = calc_fft(signal1.clone(), sampling_rates.get(&sample.stream.stream_id).clone());
-                                //TODO: Determine if pump1.html actually works
-                                if column.desc.name.clone() == "pump1.therm.heater.power"{
-                                    let _= window.emit("pump1", (freq, power));
-                                } else if column.desc.name.clone() == "pump2.therm.heater.power"{
-                                    let _= window.emit("pump2", (freq, power));
-                                }
-                            } 
+                            let (freq, power) = calc_fft(signal1.clone(), sampling_rates.get(&sample.stream.stream_id).clone());
+                            println!("{} {:?}", column.desc.name.clone(), freq);
+                            if column.desc.name.clone() == "pump1.therm.heater.power"{
+                                let _= window.emit("pump1", (freq, power));
+                            } else if column.desc.name.clone() == "pump2.therm.heater.power"{
+                                let _= window.emit("pump2", (freq, power));
+                            }
                         }
                     }
                     let _ = window.emit("aux", (&values, &names, &header));                        
@@ -316,8 +312,8 @@ fn graph_data(window: Window) {
                             signal.remove(0);
                         }
     
-                        if elapsed2.elapsed() >= std::time::Duration::from_secs(1){
-                            elapsed2 = Instant::now();
+                        if elapsed.elapsed() >= std::time::Duration::from_secs(1){
+                            elapsed = Instant::now();
                             if signal.len() <= 500{
                                 let (freq, power) = calc_fft(signal1.clone(), sampling_rates.get(&sample.stream.stream_id).clone());
                                 let _= window.emit("fft", (freq, power));  
