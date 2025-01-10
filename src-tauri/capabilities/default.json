@@ -9,9 +9,7 @@
         "field",
         "fft",
         "fft_0", 
-        "fft_1", 
-        "fft_2",
-        "fft_3"],
+        "fft_1"],
     "permissions": [
       "core:default",
       "core:event:allow-listen",

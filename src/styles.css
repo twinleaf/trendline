@@ -132,6 +132,8 @@ main {
   border-style: dotted;
   border-color: black;
   border-width: 1px; 
+  width: auto;
+  align-items: center;
   display: flex;
   overflow: auto;
   margin: auto;

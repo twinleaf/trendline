@@ -203,7 +203,7 @@ window.onload = () => {
 
             //uplot graph styling
             let options = {
-                width: 800, 
+                width: 600, 
                 height: 300,
                 series: [
                     {label: 'Time'},
@@ -240,7 +240,7 @@ window.onload = () => {
             const targetResize = interact(targetElement);
 
             targetResize.resizable({
-                edges: {left: true, right: true, bottom: true, top:true},
+                edges: {left: false, right: false, bottom: true, top: true},
                 inertia: true,
                 listeners: {
                     move(event) {
@@ -248,7 +248,7 @@ window.onload = () => {
                         let width = event.rect.width;
                         let height = event.rect.height;
 
-                        target.style.width = `${width}px`
+                        target.style.width = `auto`
                         target.style.height = `${height}px`
 
                         uplot.setSize({width, height});
