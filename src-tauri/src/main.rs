@@ -306,7 +306,7 @@ fn graph_data(window: Window) {
                             elapsed = Instant::now();
                             if column.desc.name.clone() == "lockin.0x" {
                                 let (freq, power) = calc_fft(locksignal.clone(), sampling_rates.get(&sample.stream.stream_id));
-                                let _= window.emit("lockin", (freq, power));  
+                                let _= window.emit("lockin", (freq.clone(), power.clone()));  
                             }      
                         }
                     }
@@ -351,7 +351,7 @@ fn graph_data(window: Window) {
                             elapsed = Instant::now();
                             if signal.len() <= 500{
                                 let (freq, power) = calc_fft(signal.clone(), sampling_rates.get(&sample.stream.stream_id));
-                                let _= window.emit("fft", (freq, power));  
+                                let _= window.emit("fft", (freq.clone(), power.clone()));  
                             }
                         }
                     }
@@ -365,26 +365,27 @@ fn graph_data(window: Window) {
 
 #[tauri::command]
 fn create_window(app_handle: tauri::AppHandle){
-    let fft_window = tauri::WebviewWindowBuilder::new(&app_handle, "fft", WebviewUrl::App("FFTGraphs/fft.html".parse().unwrap()))
+    let fft_window = tauri::WebviewWindowBuilder::new(&app_handle, "fft", WebviewUrl::App("FFTGraphs/fftpower.html".parse().unwrap()))
         .title("FFT")
         .inner_size(800., 400.)
         .build()
         .unwrap();
 
-        fft_window.show().unwrap();
+    fft_window.show().unwrap();
 }
 
 //Standard create_window for dynamically different webpages
 #[tauri::command]
 fn new_win(app_handle: tauri::AppHandle){
-    let window_label = format!("fft_{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
-    let fft_window = tauri::WebviewWindowBuilder::new(&app_handle, window_label, WebviewUrl::App("FFTGraphs/sample.html".parse().unwrap()))
+    let count =  WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let window_label = format!("fft_{}", count);
+    let fft_window = tauri::WebviewWindowBuilder::new(&app_handle, window_label.clone(), WebviewUrl::App("FFTGraphs/fftgraphs.html".parse().unwrap()))
         .title("FFT")
         .inner_size(800., 400.)
         .build()
         .unwrap();
 
-        fft_window.show().unwrap();
+    fft_window.show().unwrap();
 }
 
 fn main(){

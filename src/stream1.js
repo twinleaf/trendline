@@ -1,5 +1,6 @@
 const { listen } = window.__TAURI__.event;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
+const { WebviewWindow } = window.__TAURI__.webviewWindow;
 const { invoke } = window.__TAURI__.core;
 
 webpage = getCurrentWebviewWindow();
@@ -124,10 +125,13 @@ window.onload = () => {
     //Popout Window
     const pop = document.getElementById('lockin')
     pop.addEventListener("click", function() {
-        pop.disabled = true;
         invoke('new_win')
-            .then(() => {console.log("window created")})
-            .catch((error) => {console.log("error", error)})
+        .then(() => {
+            console.log("window created")
+        })
+        .catch((error) => {
+            console.log("error", error)
+        })
     });
 
     //page tabbing logic

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css" />
+    <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
+  </head>
+  <body>
+    <template id="fft-template">
+      <div class="canvas-container"></div>
+    </template>
+
+    <main id="canvases" style="resize: both;">
+      <!-- FFT graphs will be appended here -->
+    </main>
+
+    <script>
+      const { listen } = window.__TAURI__.event;
+      const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
+
+      webpage = getCurrentWebviewWindow();
+      window.onload = () => {
+        createFFTGraph('lockin', 'transform1');
+        createFFTGraph('pump1', 'transform2');
+        createFFTGraph('pump2', 'transform3');
+      
+        // Function to create a new FFT graph
+        function createFFTGraph(eventName, containerId) {
+          const template = document.getElementById('fft-template');
+          const clone = template.content.cloneNode(true);
+          const container = clone.querySelector('.canvas-container');
+          container.id = containerId;
+          document.getElementById('canvases').appendChild(container); 
+
+          const fftPlot = new uPlot({
+                  title: eventName,
+                  width: 800, 
+                  height: 300,
+                  series: [
+                      {   label: "Frequency (Hz)"},
+                      { 
+                          label: "Power Spectrum (V/√Hz)",
+                          stroke: 'blue',
+                          points: { show: false },    
+                      },
+                  ],
+                  scales: {
+                      x: {
+                      time: false,
+                      auto: true,
+                      distr: 3
+                      },
+                      y: {distr: 3}
+                  },
+                  axes: [
+                      {},
+                      {   size: 100,
+                          values: (u, v) => v
+                      }]
+          }, [[],[]], container);
+
+          // Make the container resizable
+          makeResizable(containerId, fftPlot);
+
+          // Listen for the event and update the graph
+          webpage.listen(eventName, (event) => {
+            const [frequencies, powerSpectrum] = event.payload;
+
+            for (let i = 0; i< frequencies.length; i++) {
+              fftPlot.data[0].push(frequencies[i]) 
+              fftPlot.data[1].push(powerSpectrum[i])
+            }
+            while (fftPlot.data[0].length > 1000){
+              fftPlot.data[0].shift();
+              fftPlot.data[1].shift();
+            }
+            fftPlot.setData(fftPlot.data, true);
+          });
+        }
+      };
+
+      function makeResizable(elementId, uplotInstance) {
+        const element = document.getElementById(elementId);
+        interact(element).resizable({
+          edges: { left: true, right: true, bottom: true, top: true },
+          inertia: true,
+          listeners: {
+            move(event) {
+              const target = event.target;
+              let width = event.rect.width;
+              let height = event.rect.height;
+
+              target.style.width = `${width}px`;
+              target.style.height = `${height}px`;
+
+              uplotInstance.setSize({ width, height });
+            }
+          },
+          modifiers: [
+            interact.modifiers.restrict({
+              restriction: 'parent'
+            }),
+            interact.modifiers.restrictSize({
+              min: { width: 400, height: 200 }
+            })
+          ]
+        });
+      }
+    </script>
+  </body>
+</html>

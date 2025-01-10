@@ -275,19 +275,6 @@ window.onload = () => {
         content.classList.toggle("show");
     })
 
-    var ffts = ['pump1', 'pump2'] //TODO: fix hardcode
-    ffts.forEach(pop => {
-        const fftButton = document.getElementById(pop);
-        fftButton.addEventListener('click', function() {
-            pop.disabled = true;
-            invoke('new_win')
-            .then(() => {
-                console.log("window created")
-            })
-            .catch((error) => {console.log("error", error)})
-        }) 
-    })
-
     //page tabbing
     document.querySelectorAll('.tabs div').forEach(tab => {
         tab.addEventListener('click', function() {
