@@ -377,7 +377,7 @@ fn create_window(app_handle: tauri::AppHandle){
 //Standard create_window for dynamically different webpages
 #[tauri::command]
 fn new_win(app_handle: tauri::AppHandle){
-    let window_label = format!("fft_{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let window_label = format!("fft-{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
     let fft_window = tauri::WebviewWindowBuilder::new(&app_handle, window_label, WebviewUrl::App("FFTGraphs/fftgraphs.html".parse().unwrap()))
         .title("FFT")
         .inner_size(800., 400.)
