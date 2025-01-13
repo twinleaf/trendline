@@ -4,12 +4,12 @@ const { Window } = window.__TAURI__.window;
 const { Webview } = window.__TAURI__.webview;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 
-invoke('graph_data', {data: 'data'}).then((data) => {});
+invoke('graph_data');
 
 webpage = getCurrentWebviewWindow();
 window.onload = () => {
-    var graphs = []; //store graphs for display
-    var columns = []; //store names for canvases
+    var graphs = []; //store graphs
+    var columns = []; //store canvas names
     var serial = []; 
     let timePoints = 10;
     const inputChange = document.querySelectorAll('.InputCommands');
@@ -20,7 +20,7 @@ window.onload = () => {
     gotNames = false;
 
     //emit rust data and push to uplot graphs 
-    webpage.listen("aux", (event) => {
+    webpage.listen("stream-2", (event) => {
         const [values, name, header] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
         

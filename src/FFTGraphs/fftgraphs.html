@@ -18,9 +18,10 @@
 
     <script>
       const { listen } = window.__TAURI__.event;
+      const { invoke } = window.__TAURI__.core;
       const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 
-      webpage = getCurrentWebviewWindow();
+      webpage = getCurrentWebviewWindow();  
       window.onload = () => {
         createFFTGraph('lockin', 'transform1');
         createFFTGraph('pump1', 'transform2');

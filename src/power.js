@@ -12,7 +12,7 @@ window.onload = () => {
     let startTime = Date.now();
     gotNames = false;
 
-    webpage.listen("power", (event) => {
+    webpage.listen("stream-3", (event) => {
         const [values, name, info] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
         

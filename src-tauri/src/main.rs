@@ -282,14 +282,13 @@ fn graph_data(window: Window) {
         let mut elapsed = std::time::Instant::now();
         //TODO: make backlog applicable to multiple streams
         let mut backlog: Vec<Vec<f32>> = Vec::new();
-        let window_names: Vec<String> = vec!["field".to_string(), "aux".to_string(), "power".to_string()];
 
         loop{
             let sample = device.next();
             let header = format!("Connected to: {}   Serial: {}   Session ID: {}", sample.device.name, sample.device.serial_number, sample.device.session_id);
             let mut names: Vec<String> = Vec::new();
             let mut values: Vec<f32> = Vec::new();
-            let stream_pos = sample.stream.stream_id as usize - 1;
+            let stream_num = format!("stream-{}", sample.stream.stream_id as usize);
 
             for column in &sample.columns{
                 names.push(column.desc.name.clone());
@@ -331,15 +330,11 @@ fn graph_data(window: Window) {
                 if fs >= 20.0 {
                     backlog.push(values);
                     if backlog.len() >= 50{
-                        if let Some(window_name) = window_names.get(stream_pos){
-                            let _ = window.emit(window_name, (&backlog, &names, &header));
-                        }
+                        let _ = window.emit(&stream_num, (&backlog, &names, &header));
                         backlog.clear();
                     }
                 }
-                else if let Some(window_name) = window_names.get(stream_pos){
-                    let _ = window.emit(window_name, (&values, &names, &header));
-                }
+                else {let _ = window.emit(&stream_num, (&values, &names, &header));}
             }
         }  
     });
@@ -378,20 +373,20 @@ fn main(){
                 .build()?;
 
             //webviews within main window
+            let field = tauri::WebviewWindowBuilder::new(app, "stream-1", WebviewUrl::App("stream1.html".parse().unwrap()))
+                .title("Lockin")
+                .inner_size(750., 550.)
+                .build()?;
+
             let aux = window.add_child(
-                tauri::webview::WebviewBuilder::new("aux", WebviewUrl::App(Default::default()))
+                tauri::webview::WebviewBuilder::new("stream-2", WebviewUrl::App(Default::default()))
                     .auto_resize(),
                     LogicalPosition::new(0., 0.),
                     LogicalSize::new(800., 600.),
                 )?;
 
-            let power = tauri::WebviewWindowBuilder::new(app, "power", WebviewUrl::App("power.html".parse().unwrap()))
+            let power = tauri::WebviewWindowBuilder::new(app, "stream-3", WebviewUrl::App("power.html".parse().unwrap()))
                 .title("Power Monitor")
-                .inner_size(750., 550.)
-                .build()?;
-
-            let field = tauri::WebviewWindowBuilder::new(app, "field", WebviewUrl::App("stream1.html".parse().unwrap()))
-                .title("Lockin")
                 .inner_size(750., 550.)
                 .build()?;
 
@@ -425,8 +420,8 @@ fn main(){
             }); 
 
             //App listens for the RPC call and returns the result to the specified window
-            let main_window = app.get_webview("aux").unwrap();
-            let new_window = app.get_webview("aux").unwrap();
+            let main_window = app.get_webview("stream-2").unwrap();
+            let new_window = app.get_webview("stream-2").unwrap();
             app.listen("returningRPCName", move |event| {
                 let mut arg: Vec<String> = vec![env::args().collect(), "rpc".to_string()];   
                 let rpccall: Vec<String> = serde_json::from_str(event.payload()).unwrap();

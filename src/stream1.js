@@ -14,7 +14,7 @@ window.onload = () => {
     let startTime = Date.now();
     gotNames = false;
 
-    webpage.listen("field", (event) => {
+    webpage.listen("stream-1", (event) => {
         const [values, name, info] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
 
