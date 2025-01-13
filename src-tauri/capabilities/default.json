@@ -5,7 +5,7 @@
     "windows": [
         "main",
         "lily",
-        "desc",
+        "power",
         "field",
         "fft",
         "fft-*"],

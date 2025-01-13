@@ -5,7 +5,7 @@ use getopts::Options;
 
 use tauri::{Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window};
 use welch_sde::{Build, SpectralDensity};
-use std::{env, thread, time::Instant};
+use std::{env, thread};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::collections::HashMap;
 
@@ -273,92 +273,74 @@ fn graph_data(window: Window) {
         //metadata for sampling and decimation rate
         let meta = device.get_metadata();
         let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
-
         for (_id, stream) in &meta.streams {
             sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
         }
- 
-        let mut stream1: Vec<Vec<f32>> = Vec::new();
+
         let mut locksignal: Vec<f32> = Vec::with_capacity(1000);
         let mut signal: Vec<f32> = Vec::with_capacity(1000);
-        let mut signal1: Vec<f32> = Vec::with_capacity(1000);
-        let mut elapsed = Instant::now();
+        let mut elapsed = std::time::Instant::now();
+        //TODO: make backlog applicable to multiple streams
+        let mut backlog: Vec<Vec<f32>> = Vec::new();
+        let window_names: Vec<String> = vec!["field".to_string(), "aux".to_string(), "power".to_string()];
 
-        //TODO:: Need set up following flexible number of streams
         loop{
             let sample = device.next();
             let header = format!("Connected to: {}   Serial: {}   Session ID: {}", sample.device.name, sample.device.serial_number, sample.device.session_id);
             let mut names: Vec<String> = Vec::new();
             let mut values: Vec<f32> = Vec::new();
-            
-            match sample.stream.stream_id{
-                1 => {
-                    for column in &sample.columns{
-                        names.push(column.desc.name.clone());
-                        values.push(match_value(column.value.clone()));
-                        locksignal.push(match_value(column.value.clone()));
+            let stream_pos = sample.stream.stream_id as usize - 1;
 
-                        if locksignal.len() > 500 {
-                            locksignal.remove(0);
-                        }
-
-                        if elapsed.elapsed() >= std::time::Duration::from_secs(1){
-                            elapsed = Instant::now();
-                            if column.desc.name.clone() == "lockin.0x" {
-                                let (freq, power) = calc_fft(locksignal.clone(), sampling_rates.get(&sample.stream.stream_id));
-                                let _= window.emit("lockin", (freq.clone(), power.clone()));  
-                            }      
-                        }
+            for column in &sample.columns{
+                names.push(column.desc.name.clone());
+                values.push(match_value(column.value.clone()));
+                
+                //Standardize
+                if sample.stream.stream_id == 1 {
+                    locksignal.push(match_value(column.value.clone()));
+                    if locksignal.len() > 500 {
+                        locksignal.remove(0);
                     }
-                    stream1.push(values);
-                    if stream1.len() >= 50{
-                        let _ = window.emit("field", (&stream1, &names, &header));
-                        stream1.clear();
+
+                    if elapsed.elapsed() >= std::time::Duration::from_secs(1){
+                        elapsed = std::time::Instant::now();
+                        if column.desc.name.clone() == "lockin.0x" {
+                            let (freq, power) = calc_fft(locksignal.clone(), sampling_rates.get(&sample.stream.stream_id));
+                            let _= window.emit("lockin", (freq.clone(), power.clone()));  
+                        }      
+                    }
+                } else if sample.stream.stream_id ==3 {
+                    signal.push(match_value(column.value.clone())); 
+                    if signal.len() > 500 {
+                        signal.remove(0);
+                    }
+
+                    if elapsed.elapsed() >= std::time::Duration::from_secs(1){
+                        elapsed = std::time::Instant::now();
+                        if signal.len() <= 500{
+                            let (freq, power) = calc_fft(signal.clone(), sampling_rates.get(&sample.stream.stream_id));
+                            let _= window.emit("fft", (freq.clone(), power.clone()));  
+                        }
                     }
                 }
-                2 => {
-                    for column in &sample.columns{
-                        names.push(column.desc.name.clone());
-                        values.push(match_value(column.value.clone()));
-                        signal1.push(match_value(column.value.clone())); 
+            }   
 
-                        if signal1.len() > 500 {
-                            signal1.remove(0);
+            let decimation_info = sampling_rates.get(&sample.stream.stream_id);
+            if let Some(sampling) = decimation_info {
+                let fs = sampling[0] as f32/ sampling[1] as f32;
+                if fs >= 20.0 {
+                    backlog.push(values);
+                    if backlog.len() >= 50{
+                        if let Some(window_name) = window_names.get(stream_pos){
+                            let _ = window.emit(window_name, (&backlog, &names, &header));
                         }
-
-                        if column.desc.name.clone() == "pump1.therm.heater.power" || column.desc.name.clone() == "pump2.therm.heater.power"{
-                            let (freq, power) = calc_fft(signal1.clone(), sampling_rates.get(&sample.stream.stream_id));
-                            if column.desc.name.clone() == "pump1.therm.heater.power"{
-                                let _= window.emit("pump1", (freq, power));
-                            } else if column.desc.name.clone() == "pump2.therm.heater.power"{
-                                let _= window.emit("pump2", (freq, power));
-                            }
-                        }
+                        backlog.clear();
                     }
-                    let _ = window.emit("aux", (&values, &names, &header));                        
                 }
-                3 => {
-                    for column in &sample.columns{
-                        names.push(column.desc.name.clone());
-                        values.push(match_value(column.value.clone()));
-                        signal.push(match_value(column.value.clone())); 
-
-                        if signal.len() > 500 {
-                            signal.remove(0);
-                        }
-    
-                        if elapsed.elapsed() >= std::time::Duration::from_secs(1){
-                            elapsed = Instant::now();
-                            if signal.len() <= 500{
-                                let (freq, power) = calc_fft(signal.clone(), sampling_rates.get(&sample.stream.stream_id));
-                                let _= window.emit("fft", (freq.clone(), power.clone()));  
-                            }
-                        }
-                    }
-                    let _ = window.emit("power", (&values, &names, &header));                         
+                else if let Some(window_name) = window_names.get(stream_pos){
+                    let _ = window.emit(window_name, (&values, &names, &header));
                 }
-                _ => {}
-            };
+            }
         }  
     });
 }
@@ -403,7 +385,7 @@ fn main(){
                     LogicalSize::new(800., 600.),
                 )?;
 
-            let desc = tauri::WebviewWindowBuilder::new(app, "desc", WebviewUrl::App("power.html".parse().unwrap()))
+            let power = tauri::WebviewWindowBuilder::new(app, "power", WebviewUrl::App("power.html".parse().unwrap()))
                 .title("Power Monitor")
                 .inner_size(750., 550.)
                 .build()?;
@@ -415,22 +397,20 @@ fn main(){
 
             //listen on backend for which webview to show
             aux.show().unwrap();
-            desc.hide().unwrap();
+            power.hide().unwrap();
             field.hide().unwrap();
 
             app.listen("toggle",  move |event| {
                 let webpage: String = serde_json::from_str(event.payload()).unwrap();
-
-                //TODO: Standardize window hiding logic
                 match webpage.as_str() {
                     "lily" => {
                         aux.show().unwrap();
                     }
-                    "desc" => {
-                        if desc.is_visible().expect("Not visible") {
-                            desc.hide().unwrap();
+                    "power" => {
+                        if power.is_visible().expect("Not visible") {
+                            power.hide().unwrap();
                         } else {
-                            desc.show().unwrap();
+                            power.show().unwrap();
                         } 
                     }
                     "field" => {
