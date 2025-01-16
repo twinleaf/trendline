@@ -1,4 +1,4 @@
-stream: 1
+stream: 2
 
 rpc: 
   - cell.therm.control.enable

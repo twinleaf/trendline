@@ -266,7 +266,7 @@ fn match_value(data: ColumnData) -> f32 {
 }
 
 fn read_yaml(args: Vec<String>) -> Config {
-    let default = "../src-tauri/src/armstrong.yaml".to_string();
+    let default = "../src-tauri/src/sample.yaml".to_string();
     let path = args.get(1).unwrap_or(&default);
     let yaml_content = std::fs::read_to_string(path).expect("failed to read yaml");
     let results: Config = serde_yaml::from_str(&yaml_content).expect("failed to parse yaml");
