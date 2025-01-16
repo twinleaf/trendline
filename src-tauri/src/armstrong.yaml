@@ -1,0 +1,27 @@
+plots: 
+  - status
+  - signal
+  - signal.detector
+  - laser.therm.control.error
+  - laser.therm.control.monitor
+  - laser.therm.heater.power
+  - cell.therm.sensor.measure
+  - cell.therm.heater.power
+  - vco.error
+  - vco.pull
+  - mcu.therm
+
+rpc: 
+  - cell.therm.control.enable
+  - cell.therm.control.Kp
+  - cell.therm.control.Ki
+  - cell.therm.control.setpoint
+  - laser.therm.control.enable
+  - laser.therm.control.reset
+  - laser.therm.control.Kp
+  - laser.therm.control.Ki
+  - laser.therm.control.setpoint
+  
+fft: 
+  - field
+  - power

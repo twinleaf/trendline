@@ -8,6 +8,7 @@ use welch_sde::{Build, SpectralDensity};
 use std::{env, thread};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::collections::HashMap;
+use serde::Deserialize;
 
 // Atomic counter to generate unique window labels
 static WINDOW_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -56,6 +57,13 @@ impl RpcMeta {
             unknown: meta == 0,
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct Config {
+    plots: Vec<String>,
+    rpc: Vec<String>,
+    fft: Vec<String>
 }
 
 fn tio_opts() -> Options {
@@ -225,7 +233,7 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
 }
 
 //Fft calculation
-fn calc_fft(signal: Vec<f32>, sampling: Option<&Vec<u32>>) -> (Vec<f32>, Vec<f32>) {
+fn calc_fft(signal: &Vec<f32>, sampling: Option<&Vec<u32>>) -> (Vec<f32>, Vec<f32>) {
     if let Some(sampling) = sampling {
         if signal.len() <= 500{
             let decimation_rate = sampling[1] as f32;
@@ -244,7 +252,6 @@ fn calc_fft(signal: Vec<f32>, sampling: Option<&Vec<u32>>) -> (Vec<f32>, Vec<f32
             return (frequencies, power_spectrum)
         }
     }
-    
     (vec![], vec![])
 }
 
@@ -258,14 +265,22 @@ fn match_value(data: ColumnData) -> f32 {
     data_type
 }
 
+fn read_yaml(args: Vec<String>) -> Config {
+    let default = "../src-tauri/src/armstrong.yaml".to_string();
+    let path = args.get(1).unwrap_or(&default);
+    let yaml_content = std::fs::read_to_string(path).expect("failed to read yaml");
+    let results: Config = serde_yaml::from_str(&yaml_content).expect("failed to parse yaml");
+    results
+}
+
 #[tauri::command]
 //main tauri function where stream data gets emitted to graphs on frontend
 fn graph_data(window: Window) {
     let args: Vec<String> = env::args().collect();   
     let opts = tio_opts();
     let (_matches, root, route) = tio_parseopts(opts, &args);
-    
-    thread::spawn(move || {  
+
+    thread::spawn(move || {
         let proxy = proxy::Interface::new(&root);
         let device = proxy.device_full(route).unwrap();
         let mut device = Device::new(device);
@@ -276,86 +291,75 @@ fn graph_data(window: Window) {
         for (_id, stream) in &meta.streams {
             sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
         }
+        
+        let results = read_yaml(args);
+        let _ = window.emit("rpcs", (results.plots, results.rpc)).unwrap();
 
-        let mut locksignal: Vec<f32> = Vec::with_capacity(1000);
-        let mut signal: Vec<f32> = Vec::with_capacity(1000);
+        let mut fft_signal: HashMap<u8, Vec<f32>> = HashMap::new();
         let mut elapsed = std::time::Instant::now();
-        //TODO: make backlog applicable to multiple streams
-        let mut backlog: Vec<Vec<f32>> = Vec::new();
+        let mut backlog: HashMap<u8, Vec<Vec<f32>>> = HashMap::new();
 
-        loop{
+        loop{ 
             let sample = device.next();
             let header = format!("Connected to: {}   Serial: {}   Session ID: {}", sample.device.name, sample.device.serial_number, sample.device.session_id);
             let mut names: Vec<String> = Vec::new();
             let mut values: Vec<f32> = Vec::new();
             let stream_num = format!("stream-{}", sample.stream.stream_id as usize);
-
+            let mut col_pos = 0;
             for column in &sample.columns{
                 names.push(column.desc.name.clone());
                 values.push(match_value(column.value.clone()));
-                
-                //Standardize
-                if sample.stream.stream_id == 1 {
-                    locksignal.push(match_value(column.value.clone()));
-                    if locksignal.len() > 500 {
-                        locksignal.remove(0);
-                    }
 
-                    if elapsed.elapsed() >= std::time::Duration::from_secs(1){
-                        elapsed = std::time::Instant::now();
-                        if column.desc.name.clone() == "lockin.0x" {
-                            let (freq, power) = calc_fft(locksignal.clone(), sampling_rates.get(&sample.stream.stream_id));
-                            let _= window.emit("lockin", (freq.clone(), power.clone()));  
-                        }      
-                    }
-                } else if sample.stream.stream_id ==3 {
-                    signal.push(match_value(column.value.clone())); 
+                backlog.entry(sample.stream.stream_id).or_insert_with(|| vec![Vec::new(); sample.columns.len()]);
+                if let Some(column_backlog) = backlog.get_mut(&sample.stream.stream_id) {
+                    column_backlog[col_pos].push(match_value(column.value.clone()));
+                    col_pos += 1;
+                }
+                
+                fft_signal.entry(sample.stream.stream_id).or_insert_with(|| Vec::with_capacity(1000));
+                if let Some(signal) = fft_signal.get_mut(&sample.stream.stream_id){
+                    signal.extend(values.clone());
                     if signal.len() > 500 {
                         signal.remove(0);
                     }
+                }
 
-                    if elapsed.elapsed() >= std::time::Duration::from_secs(1){
-                        elapsed = std::time::Instant::now();
-                        if signal.len() <= 500{
-                            let (freq, power) = calc_fft(signal.clone(), sampling_rates.get(&sample.stream.stream_id));
-                            let _= window.emit("fft", (freq.clone(), power.clone()));  
-                        }
+                if elapsed.elapsed() >= std::time::Duration::from_secs(1) {
+                    elapsed = std::time::Instant::now();
+                    if let Some(calculation) = fft_signal.get(&sample.stream.stream_id) {
+                        let (freq, power) = calc_fft(calculation, sampling_rates.get(&sample.stream.stream_id));
+                        if results.fft.contains(&column.desc.name.clone()){
+                            let _ = window.emit("fftgraphs", &results.fft);
+                            let _ = window.emit(&column.desc.name.clone(), (freq.clone(), power.clone()));
+                        };
                     }
                 }
-            }   
+            }
 
             let decimation_info = sampling_rates.get(&sample.stream.stream_id);
             if let Some(sampling) = decimation_info {
                 let fs = sampling[0] as f32/ sampling[1] as f32;
                 if fs >= 20.0 {
-                    backlog.push(values);
-                    if backlog.len() >= 50{
-                        let _ = window.emit(&stream_num, (&backlog, &names, &header));
-                        backlog.clear();
+                    if let Some(column) = backlog.get_mut(&sample.stream.stream_id){
+                        if column.iter().all(|col| col.len() >= fs as usize) {
+                            let _ = window.emit(&stream_num, (&column, &names, &header));
+                            column.iter_mut().for_each(|col| col.clear());
+                        }
                     }
                 }
-                else {let _ = window.emit(&stream_num, (&values, &names, &header));}
+                else if let Some(column) = backlog.get_mut(&sample.stream.stream_id){
+                    let _ = window.emit(&stream_num, (&values, &names, &header));
+                    column.iter_mut().for_each(|col| col.clear());
+                }
             }
-        }  
+        }
     });
 }
 
 #[tauri::command]
-fn create_window(app_handle: tauri::AppHandle){
-    let fft_window = tauri::WebviewWindowBuilder::new(&app_handle, "fft", WebviewUrl::App("FFTGraphs/fftpower.html".parse().unwrap()))
-        .title("FFT")
-        .inner_size(800., 400.)
-        .build()
-        .unwrap();
-
-    fft_window.show().unwrap();
-}
-
-//Standard create_window for dynamically different webpages
-#[tauri::command]
 fn new_win(app_handle: tauri::AppHandle){
     let window_label = format!("fft-{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
-    let fft_window = tauri::WebviewWindowBuilder::new(&app_handle, window_label, WebviewUrl::App("FFTGraphs/fftgraphs.html".parse().unwrap()))
+    let fft_window = tauri::WebviewWindowBuilder::new(&app_handle, &window_label, WebviewUrl::App("fftgraphs.html".parse().unwrap()))
         .title("FFT")
         .inner_size(800., 400.)
         .build()
@@ -447,8 +451,7 @@ fn main(){
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            graph_data, 
-            create_window,
+            graph_data,
             new_win])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
