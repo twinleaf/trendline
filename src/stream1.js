@@ -17,7 +17,6 @@ window.onload = () => {
     webpage.listen("stream-1", (event) => {
         const [values, name, info] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
-
         //push names to canvas
         if (!gotNames) {
             for (let i = 0; i< name.length; i++) {
@@ -25,13 +24,12 @@ window.onload = () => {
             }
             serial.push(info)
             gotNames = true;
-            } 
+        } 
 
         graphs.forEach((chart, index) => { //iterate through each graph
-            
-            for (let i = 0; i < values.length; i++) {
+            for (let i = 0; i < values[index].length; i++) {
                 chart.data[0].push(elapsed)
-                chart.data[1].push(values[i][index])
+                chart.data[1].push(values[index][i])
 
                 let firstLogTime = chart.data[0][0]
                 let recentLogTime = chart.data[0][chart.data[0].length -1] //last timestamp

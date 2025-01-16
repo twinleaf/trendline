@@ -3,6 +3,7 @@ const { listen } = window.__TAURI__.event;
 const { Window } = window.__TAURI__.window;
 const { Webview } = window.__TAURI__.webview;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
+const { once } = window.__TAURI__.event;
 
 invoke('graph_data');
 
@@ -10,37 +11,35 @@ webpage = getCurrentWebviewWindow();
 window.onload = () => {
     var graphs = []; //store graphs
     var columns = []; //store canvas names
+    var rpcs = [];
     var serial = []; 
     let timePoints = 10;
-    const inputChange = document.querySelectorAll('.InputCommands');
-    const toggleChange = document.querySelectorAll('.checkCommands') 
-    const rpcType = document.querySelectorAll('.controls');
-    
+
     let startTime = Date.now();
     gotNames = false;
-
     //emit rust data and push to uplot graphs 
     webpage.listen("stream-2", (event) => {
         const [values, name, header] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
         
-        //push names to canvas
         if (!gotNames) {
-            for (let i = 0; i< name.length; i++) {
-                columns.push(name[i])
-            }
             serial.push(header)
             gotNames = true;
         } 
 
         //push data to each graph
-        graphs.forEach((chart, index) => {
+        graphs.forEach((chart, index) => {    
             chart.data[0].push(elapsed)
             chart.data[1].push(values[index])
 
             let firstLogTime = chart.data[0][0]
             let recentLogTime = chart.data[0][chart.data[0].length -1] //last timestamp
 
+            if ((recentLogTime - firstLogTime) > timePoints){
+                chart.data[0].shift();
+                chart.data[1].shift();
+            }
+            
             const timeSpan = document.getElementById('timeSpan');
             timeSpan.addEventListener('keypress', function(e) {
                 if (e.key == "Enter") {
@@ -55,15 +54,15 @@ window.onload = () => {
                     timeSpan.value = timePoints;
                 }
             }) 
-    
-            if ((recentLogTime - firstLogTime) > timePoints){
-                chart.data[0].shift();
-                chart.data[1].shift();
-            }
-            
             chart.setData(chart.data, true);
         }) 
     });
+
+    webpage.listen("rpcs", (event) => {
+        const [graphs, controls] = event.payload;
+        for (let i = 0; i< graphs.length; i++) {columns.push(graphs[i])}
+        for (let i = 0; i< controls.length; i++) {rpcs.push(controls[i])}
+    })
 
     //on button click return rpc
     const buttonChange = document.querySelectorAll('.buttonCommands');
@@ -74,6 +73,8 @@ window.onload = () => {
         })
     })
 
+    const inputChange = document.querySelectorAll('.InputCommands');
+    const toggleChange = document.querySelectorAll('.checkCommands') 
     //on input change call rpc command
     inputChange.forEach(rpccall => {
         rpccall.addEventListener('keypress', function(e) {
@@ -100,36 +101,7 @@ window.onload = () => {
         })
     })
 
-    //returns all rpc values to corresponding input field
-    webpage.listen("returnRPC", (event) => {
-        let [name, inputValue] = event.payload;
-        inputChange.forEach(rpccall => {
-            if (rpccall.id == name) {
-                rpccall.value = inputValue;
-                rpccall.textContent = inputValue;
-                rpccall.innerHTML = inputValue;
-            }
-        })
-    }); 
-
     setTimeout(() => {
-        //display rpc values on load
-        webpage.listen("returnOnLoad", (event) => {
-            let [name, inputValue] = event.payload;
-            inputChange.forEach(rpccall => {
-                if (rpccall.id == name) {
-                    rpccall.value = inputValue;
-                    rpccall.textContent = inputValue;
-                    rpccall.innerHTML = inputValue;
-                }
-            })
-            toggleChange.forEach(toggle => {
-                if (toggle.id == name && inputValue == 1){
-                    toggle.checked = true;
-                }
-            })
-        });
-        
         //Push Sensor information to display
         const deviceinfo = document.getElementById('sensorinfo');
         const display = document.createElement('info');
@@ -137,8 +109,66 @@ window.onload = () => {
         display.innerText= serial[0];
         deviceinfo.appendChild(display);
 
+        //write out rpc divs
+        const rpcGroups = new Map();
+        rpcs.forEach(rpc => {
+            const prefix = rpc.split('.').slice(0, -1).join('.');
+            const suffix = rpc.split('.').slice(-1).join('.');
+            if (!rpcGroups.has(prefix)) {
+                rpcGroups.set(prefix, []);
+            }
+            rpcGroups.get(prefix).push(suffix);
+        })
+
+        const rpcsContainer = document.getElementById('RPCCommands')
+        rpcGroups.forEach((commands, prefix) => {
+            const rpcDiv = document.createElement('div');
+            rpcDiv.id = prefix;
+            rpcDiv.className = 'controls'
+            rpcDiv.style.display = 'none';
+
+            const title = document.createElement('paragraph');
+            title.innerText = prefix + ' ';
+            rpcDiv.appendChild(title);
+
+            commands.forEach(command => {
+                let addElement;
+                if (command === 'enable') {
+                    addElement = document.createElement('input');
+                    addElement.type = 'checkbox';
+                    addElement.className = "checkCommands";
+                } else if (command === 'reset') {
+                    addElement = document.createElement('button');
+                    addElement.innerText = 'Reset';
+                    addElement.className = "buttonCommands";
+                } else {
+                    addElement = document.createElement('input');
+                    addElement.type = 'number';
+                    addElement.step = 0.1;
+                    addElement.className = "InputCommands";
+                }
+                addElement.id = `${prefix}.${command}`;
+
+                if (command != 'reset'){
+                    const label = document.createElement('label');
+                    label.htmlFor = addElement.id;
+                    label.innerText = command + ' '
+                    label.appendChild(addElement)
+                    rpcDiv.appendChild(label);
+                } else{rpcDiv.appendChild(addElement)}
+                const lines = document.createElement('br');
+                rpcDiv.appendChild(lines)
+            })
+            rpcsContainer.appendChild(rpcDiv)
+        })
+
+        const inputChange = document.querySelectorAll('.InputCommands');
+        const toggleChange = document.querySelectorAll('.checkCommands') 
+
         //write out a chart for each column 
         let lastLabel = "none";
+        //TODO: Test this works tomorrow
+        const rpcType = document.querySelectorAll('.controls');
         for (let i = 0; i < columns.length; i++) {
             const checkboxesContainer = document.getElementById('dropdown');
             const canvasesContainer = document.getElementById('canvases');
@@ -176,8 +206,9 @@ window.onload = () => {
                 rpcType.forEach(rpcControl => {
                     const checkboxes = document.querySelectorAll('.checkboxes');
                     let stayDisplayed = false;
+                    const rpcControlId = rpcControl.id.split('.').slice(0, 1);
                     checkboxes.forEach(checkbox => {
-                        if (checkbox.labels[0].innerText.includes(rpcControl.id) && checkbox.checked) {
+                        if (checkbox.labels[0].innerText.includes(rpcControlId) && checkbox.checked) {
                             stayDisplayed = true; 
                         }
                         rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
@@ -185,16 +216,17 @@ window.onload = () => {
                 });
             });
             rpcType.forEach(rpcDiv => {
+                const rpcControlId = rpcDiv.id.split('.').slice(0, 1);
                 if (label.innerText.includes(lastLabel)) {} //pass;
                 else{
                     inputChange.forEach(rpccall => {
-                        if (label.innerText.includes(rpcDiv.id) && rpccall.parentNode.parentNode == rpcDiv){
+                        if (label.innerText.includes(rpcControlId) && rpccall.parentNode.parentNode == rpcDiv){
                             webpage.emit('onLoad', rpccall.id)
                             lastLabel = rpcDiv.id
                         } 
                     })
                     toggleChange.forEach(toggleChange => {
-                        if (label.innerText.includes(rpcDiv.id) && toggleChange.parentNode.parentNode == rpcDiv){
+                        if (label.innerText.includes(rpcControlId) && toggleChange.parentNode.parentNode == rpcDiv){
                             webpage.emit('onLoad', toggleChange.id)
                         } 
                     })
@@ -264,9 +296,38 @@ window.onload = () => {
                     })
                 ]
             })
+
+            //display rpc values on load
+            webpage.listen("returnOnLoad", (event) => {
+                let [name, inputValue] = event.payload;
+                inputChange.forEach(rpccall => {
+                    if (rpccall.id == name) {
+                        rpccall.value = inputValue;
+                        rpccall.textContent = inputValue;
+                        rpccall.innerHTML = inputValue;
+                    }
+                })
+                toggleChange.forEach(toggle => {
+                    if (toggle.id == name && inputValue == 1){
+                        toggle.checked = true;
+                    }
+                })
+            });
         }
         
     }, 2000);
+
+    //returns all rpc values to corresponding input field
+    webpage.listen("returnRPC", (event) => {
+        let [name, inputValue] = event.payload;
+        inputChange.forEach(rpccall => {
+            if (rpccall.id == name) {
+                rpccall.value = inputValue;
+                rpccall.textContent = inputValue;
+                rpccall.innerHTML = inputValue;
+            }
+        })
+    }); 
     
     //SIDE BAR LOGIC
     const drop = document.getElementById('drop')
@@ -304,4 +365,3 @@ function in_range(fillValue) {
     return withinRange
 }
 
-    
