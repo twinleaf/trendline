@@ -145,15 +145,6 @@ window.onload = () => {
 
     }, 1000);
 
-    //Popout Window
-    const pop = document.getElementById('pop')
-    pop.addEventListener("click", function() {
-        pop.disabled = true;
-        invoke('create_window')
-            .then(() => {console.log("window created")})
-            .catch((error) => {console.log("error", error)})
-    });
-
     //page tabbing logic
     document.querySelectorAll('.tabs div').forEach(tab => {
         tab.addEventListener('click', function() {

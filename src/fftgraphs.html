@@ -18,14 +18,17 @@
 
     <script>
       const { listen } = window.__TAURI__.event;
-      const { invoke } = window.__TAURI__.core;
+      const { once } = window.__TAURI__.event;
       const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 
-      webpage = getCurrentWebviewWindow();  
-      window.onload = () => {
-        createFFTGraph('lockin', 'transform1');
-        createFFTGraph('pump1', 'transform2');
-        createFFTGraph('pump2', 'transform3');
+      webpage = getCurrentWebviewWindow(); 
+      window.onload = () => {  
+        webpage.once("fftgraphs", (event) => {
+          const graphs = event.payload;
+          graphs.forEach((graph, index) => {
+            createFFTGraph(graph, `transform${index+1}`);
+          })
+        })
       
         // Function to create a new FFT graph
         function createFFTGraph(eventName, containerId) {
@@ -68,7 +71,6 @@
           // Listen for the event and update the graph
           webpage.listen(eventName, (event) => {
             const [frequencies, powerSpectrum] = event.payload;
-
             for (let i = 0; i< frequencies.length; i++) {
               fftPlot.data[0].push(frequencies[i]) 
               fftPlot.data[1].push(powerSpectrum[i])
