@@ -9,15 +9,14 @@ invoke('graph_data');
 
 webpage = getCurrentWebviewWindow();
 window.onload = () => {
-    var graphs = []; //store graphs
-    var columns = []; //store canvas names
+    var graphs = []; 
+    var columns = []; 
     var rpcs = [];
     var serial = []; 
     let timePoints = 10;
 
     let startTime = Date.now();
     gotNames = false;
-    //emit rust data and push to uplot graphs 
     webpage.listen("main", (event) => {
         const [values, name, header] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
@@ -169,7 +168,6 @@ window.onload = () => {
 
         //write out a chart for each column 
         let lastLabel = "none";
-        //TODO: Test this works tomorrow
         const rpcType = document.querySelectorAll('.controls');
         for (let i = 0; i < columns.length; i++) {
             const checkboxesContainer = document.getElementById('dropdown');
@@ -269,35 +267,7 @@ window.onload = () => {
             const uplot = new uPlot(options, data, document.getElementById(canvas.id))
             graphs.push(uplot)
 
-            //interact js to resize chart height
-            const targetElement = document.getElementById(canvas.id)
-            const targetResize = interact(targetElement);
-
-            targetResize.resizable({
-                edges: {left: false, right: false, bottom: true, top: true},
-                inertia: true,
-                listeners: {
-                    move(event) {
-                        const target = event.target;
-                        let width = event.rect.width;
-                        let height = event.rect.height;
-
-                        target.style.width = `auto`
-                        target.style.height = `${height}px`
-
-                        uplot.setSize({width, height});
-                    }
-                },
-                modifiers: [
-                    interact.modifiers.restrict({
-                        restriction: 'parent'
-                    }),
-                    
-                    interact.modifiers.restrictSize({
-                        min: {width: 400, height: 200}
-                    })
-                ]
-            })
+            makeResizable(canvas.id, uplot)
 
             //display rpc values on load
             webpage.listen("returnOnLoad", (event) => {
@@ -315,6 +285,8 @@ window.onload = () => {
                     }
                 })
             });
+
+            
         }
         
     }, 2000);
@@ -337,21 +309,25 @@ window.onload = () => {
         const content = document.getElementById('dropdown')
         content.classList.toggle("show");
     })
-    
-    //Popout Window
-    const pop = document.getElementById('ffts')
-    pop.addEventListener("click", function() {
-        invoke('new_win')
-        .then(() => {
-            console.log("window created")
+
+    const pop = document.getElementById('showPlot')    
+    pop.addEventListener("change", function() {
+        const fftDiv = document.getElementById('FFT')
+        if (pop.checked){
+            fftDiv.style.display = 'inline-block'
+        } else{ fftDiv.style.display = 'none'};
+    })
+
+    //FFT DIV
+    webpage.once("fftgraphs", (event) => {
+        const graphs = event.payload;
+        graphs.forEach((graph, index) => {
+            createFFTGraph(graph, `transform${index+1}`);
         })
-        .catch((error) => {
-            console.log("error", error)
-        })
-    });
+    })
 };
 
-//function tests if input is within specified range
+//test if input is within specified range
 function in_range(fillValue) {
     const value = parseFloat(fillValue.value);
     const min = parseFloat(fillValue.min)
@@ -364,5 +340,85 @@ function in_range(fillValue) {
     } 
     else {withinRange = value;}
     return withinRange
+}
+
+// Create new FFT
+function createFFTGraph(eventName, containerId) {
+    const template = document.getElementById('fft-template');
+    const clone = template.content.cloneNode(true);
+    const container = clone.querySelector('.canvas-container');
+    container.id = containerId;
+    document.getElementById('FFT').appendChild(container); 
+
+    const fftPlot = new uPlot({
+            title: eventName,
+            width: 800, 
+            height: 300,
+            series: [
+                {   label: "Frequency (Hz)"},
+                { 
+                    label: "Power Spectrum (V/√Hz)",
+                    stroke: 'blue',
+                    points: { show: false },    
+                },
+            ],
+            scales: {
+                x: {
+                time: false,
+                auto: true,
+                distr: 3
+                },
+                y: {distr: 3}
+            },
+            axes: [
+                {},
+                {   size: 100,
+                    values: (u, v) => v
+                }]
+    }, [[],[]], container);
+
+    makeResizable(containerId, fftPlot);
+
+    // Listen for the event and update the graph
+    webpage.listen(eventName, (event) => {
+      const [frequencies, powerSpectrum] = event.payload;
+      for (let i = 0; i< frequencies.length; i++) {
+        fftPlot.data[0].push(frequencies[i]) 
+        fftPlot.data[1].push(powerSpectrum[i])
+      }
+      while (fftPlot.data[0].length > 1000){
+        fftPlot.data[0].shift();
+        fftPlot.data[1].shift();
+      }
+      fftPlot.setData(fftPlot.data, true);
+    });
+}
+
+function makeResizable(elementId, uplotInstance) {
+    const element = document.getElementById(elementId);
+    interact(element).resizable({
+        edges: { left: false, right: false, bottom: true, top: true },
+        inertia: true,
+        listeners: {
+        move(event) {
+            const target = event.target;
+            let width = event.rect.width;
+            let height = event.rect.height;
+
+            target.style.width = `${width}px`;
+            target.style.height = `${height}px`;
+
+            uplotInstance.setSize({ width, height });
+        }
+        },
+        modifiers: [
+        interact.modifiers.restrict({
+            restriction: 'parent'
+        }),
+        interact.modifiers.restrictSize({
+            min: { width: 400, height: 200 }
+        })
+        ]
+    });
 }
 

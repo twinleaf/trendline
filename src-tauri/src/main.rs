@@ -357,18 +357,6 @@ fn graph_data(window: Window) {
     });
 }
 
-#[tauri::command]
-fn new_win(app_handle: tauri::AppHandle){
-    let window_label = format!("fft-{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
-    let fft_window = tauri::WebviewWindowBuilder::new(&app_handle, &window_label, WebviewUrl::App("fftgraphs.html".parse().unwrap()))
-        .title("FFT")
-        .inner_size(800., 400.)
-        .build()
-        .unwrap();
-
-    fft_window.show().unwrap();
-}
-
 fn main(){
     tauri::Builder::default()
         .setup(|app| {
@@ -412,8 +400,7 @@ fn main(){
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            graph_data,
-            new_win])
+            graph_data])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
     
