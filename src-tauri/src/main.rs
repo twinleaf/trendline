@@ -389,28 +389,15 @@ fn main(){
                     LogicalSize::new(800., 600.),
                 )?;
 
-            let power = tauri::WebviewWindowBuilder::new(app, "stream-3", WebviewUrl::App("power.html".parse().unwrap()))
-                .title("Power Monitor")
-                .inner_size(750., 550.)
-                .build()?;
-
             //listen on backend for which webview to show
             aux.show().unwrap();
-            power.hide().unwrap();
             field.hide().unwrap();
 
             app.listen("toggle",  move |event| {
                 let webpage: String = serde_json::from_str(event.payload()).unwrap();
                 match webpage.as_str() {
-                    "lily" => {
+                    "aux" => {
                         aux.show().unwrap();
-                    }
-                    "power" => {
-                        if power.is_visible().expect("Not visible") {
-                            power.hide().unwrap();
-                        } else {
-                            power.show().unwrap();
-                        } 
                     }
                     "field" => {
                         if field.is_visible().expect("Not visible") {
