@@ -8,11 +8,6 @@
   </head>
 
   <div class = "sidebar">
-    <div class = "tabs">
-      <div id = "aux" class = "active">Main</div> 
-      <div id = "field">Lockin</div>
-    </div>
-
     <h2 id ="header">Welcome to Lily :> </h2>
     <div class = "dropdown">
       <button class = "dropbtn" id="drop">Select Graphs</button>
@@ -21,14 +16,13 @@
 
     <div class = "RPCCommands" id = "RPCCommands">
       <label id = "timeSpanVal">Time Span<input type = "number" id = "timeSpan" class = "time" min ="1" max = "1000" value = "10"/></label><br>
+      <button id = "ffts" class = "fft">FFT</button><br>
     </div>
   </div>
 
   <body>
     <main id="canvases" style = "resize: both ">      
-
       <div id = "sensorinfo"></div>
-    
       <script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css" />
       <script src = "https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>

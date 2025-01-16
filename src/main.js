@@ -18,27 +18,30 @@ window.onload = () => {
     let startTime = Date.now();
     gotNames = false;
     //emit rust data and push to uplot graphs 
-    webpage.listen("stream-2", (event) => {
+    webpage.listen("main", (event) => {
         const [values, name, header] = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
         
         if (!gotNames) {
+            for (let i = 0; i< name.length; i++) {columns.push(name[i])}
             serial.push(header)
             gotNames = true;
         } 
 
         //push data to each graph
-        graphs.forEach((chart, index) => {    
-            chart.data[0].push(elapsed)
-            chart.data[1].push(values[index])
+        graphs.forEach((chart, index) => {  
+            for (let i = 0; i < values[index].length; i++) {  
+                chart.data[0].push(elapsed)
+                chart.data[1].push(values[index][i])
 
-            let firstLogTime = chart.data[0][0]
-            let recentLogTime = chart.data[0][chart.data[0].length -1] //last timestamp
+                let firstLogTime = chart.data[0][0]
+                let recentLogTime = chart.data[0][chart.data[0].length -1] //last timestamp
 
-            if ((recentLogTime - firstLogTime) > timePoints){
-                chart.data[0].shift();
-                chart.data[1].shift();
-            }
+                if ((recentLogTime - firstLogTime) > timePoints){
+                    chart.data[0].shift();
+                    chart.data[1].shift();
+                }
+            }   
             
             const timeSpan = document.getElementById('timeSpan');
             timeSpan.addEventListener('keypress', function(e) {
@@ -58,9 +61,8 @@ window.onload = () => {
         }) 
     });
 
-    webpage.listen("rpcs", (event) => {
-        const [graphs, controls] = event.payload;
-        for (let i = 0; i< graphs.length; i++) {columns.push(graphs[i])}
+    webpage.once("rpcs", (event) => {
+        const controls = event.payload;
         for (let i = 0; i< controls.length; i++) {rpcs.push(controls[i])}
     })
 
@@ -235,7 +237,7 @@ window.onload = () => {
 
             //uplot graph styling
             let options = {
-                width: 600, 
+                width: 800, 
                 height: 300,
                 series: [
                     {label: 'Time'},
@@ -335,19 +337,18 @@ window.onload = () => {
         const content = document.getElementById('dropdown')
         content.classList.toggle("show");
     })
-
-    //page tabbing
-    document.querySelectorAll('.tabs div').forEach(tab => {
-        tab.addEventListener('click', function() {
-            //deactivate all visibility
-            document.querySelectorAll('.tabs div').forEach(tab => tab.classList.remove('active'));
-            //activate specified tab
-            tab.classList.add('active');
-            
-            const webviewShow = tab.id;
-            webpage.emit('toggle', webviewShow)
+    
+    //Popout Window
+    const pop = document.getElementById('ffts')
+    pop.addEventListener("click", function() {
+        invoke('new_win')
+        .then(() => {
+            console.log("window created")
         })
-    })    
+        .catch((error) => {
+            console.log("error", error)
+        })
+    });
 };
 
 //function tests if input is within specified range

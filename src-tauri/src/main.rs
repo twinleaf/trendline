@@ -61,7 +61,7 @@ impl RpcMeta {
 
 #[derive(Debug, Deserialize)]
 struct Config {
-    plots: Vec<String>,
+    stream: u32,
     rpc: Vec<String>,
     fft: Vec<String>
 }
@@ -293,7 +293,7 @@ fn graph_data(window: Window) {
         }
         
         let results = read_yaml(args);
-        let _ = window.emit("rpcs", (results.plots, results.rpc)).unwrap();
+        let _ = window.emit("rpcs", results.rpc).unwrap();
 
         let mut fft_signal: HashMap<u8, Vec<f32>> = HashMap::new();
         let mut elapsed = std::time::Instant::now();
@@ -301,56 +301,57 @@ fn graph_data(window: Window) {
 
         loop{ 
             let sample = device.next();
-            let header = format!("Connected to: {}   Serial: {}   Session ID: {}", sample.device.name, sample.device.serial_number, sample.device.session_id);
+            let header = format!("Connected to: {}   Serial: {}   Session ID: {}    Stream: {}", sample.device.name, sample.device.serial_number, sample.device.session_id, &results.stream);
             let mut names: Vec<String> = Vec::new();
             let mut values: Vec<f32> = Vec::new();
-            let stream_num = format!("stream-{}", sample.stream.stream_id as usize);
             let mut col_pos = 0;
-            for column in &sample.columns{
-                names.push(column.desc.name.clone());
-                values.push(match_value(column.value.clone()));
-
-                backlog.entry(sample.stream.stream_id).or_insert_with(|| vec![Vec::new(); sample.columns.len()]);
-                if let Some(column_backlog) = backlog.get_mut(&sample.stream.stream_id) {
-                    column_backlog[col_pos].push(match_value(column.value.clone()));
-                    col_pos += 1;
-                }
-                
-                fft_signal.entry(sample.stream.stream_id).or_insert_with(|| Vec::with_capacity(1000));
-                if let Some(signal) = fft_signal.get_mut(&sample.stream.stream_id){
-                    signal.extend(values.clone());
-                    if signal.len() > 500 {
-                        signal.remove(0);
+            if sample.stream.stream_id == results.stream as u8{
+                for column in &sample.columns{
+                    names.push(column.desc.name.clone());
+                    values.push(match_value(column.value.clone()));
+    
+                    backlog.entry(sample.stream.stream_id).or_insert_with(|| vec![Vec::new(); sample.columns.len()]);
+                    if let Some(column_backlog) = backlog.get_mut(&sample.stream.stream_id) {
+                        column_backlog[col_pos].push(match_value(column.value.clone()));
+                        col_pos += 1;
                     }
-                }
-
-                if elapsed.elapsed() >= std::time::Duration::from_secs(1) {
-                    elapsed = std::time::Instant::now();
-                    if let Some(calculation) = fft_signal.get(&sample.stream.stream_id) {
-                        let (freq, power) = calc_fft(calculation, sampling_rates.get(&sample.stream.stream_id));
-                        if results.fft.contains(&column.desc.name.clone()){
-                            let _ = window.emit("fftgraphs", &results.fft);
-                            let _ = window.emit(&column.desc.name.clone(), (freq.clone(), power.clone()));
-                        };
+                    
+                    fft_signal.entry(sample.stream.stream_id).or_insert_with(|| Vec::with_capacity(1000));
+                    if let Some(signal) = fft_signal.get_mut(&sample.stream.stream_id){
+                        signal.extend(values.clone());
+                        if signal.len() > 500 {
+                            signal.remove(0);
+                        }
                     }
-                }
-            }
-
-            let decimation_info = sampling_rates.get(&sample.stream.stream_id);
-            if let Some(sampling) = decimation_info {
-                let fs = sampling[0] as f32/ sampling[1] as f32;
-                if fs >= 20.0 {
-                    if let Some(column) = backlog.get_mut(&sample.stream.stream_id){
-                        if column.iter().all(|col| col.len() >= fs as usize) {
-                            let _ = window.emit(&stream_num, (&column, &names, &header));
-                            column.iter_mut().for_each(|col| col.clear());
+    
+                    if elapsed.elapsed() >= std::time::Duration::from_secs(1) {
+                        elapsed = std::time::Instant::now();
+                        if let Some(calculation) = fft_signal.get(&sample.stream.stream_id) {
+                            let (freq, power) = calc_fft(calculation, sampling_rates.get(&sample.stream.stream_id));
+                            if results.fft.contains(&column.desc.name.clone()){
+                                let _ = window.emit("fftgraphs", &results.fft);
+                                let _ = window.emit(&column.desc.name.clone(), (freq.clone(), power.clone()));
+                            };
                         }
                     }
                 }
-                else if let Some(column) = backlog.get_mut(&sample.stream.stream_id){
-                    let _ = window.emit(&stream_num, (&values, &names, &header));
-                    column.iter_mut().for_each(|col| col.clear());
-                }
+    
+                let decimation_info = sampling_rates.get(&sample.stream.stream_id);
+                if let Some(sampling) = decimation_info {
+                    let fs = sampling[0] as f32/ sampling[1] as f32;
+                    if fs >= 20.0 {
+                        if let Some(column) = backlog.get_mut(&sample.stream.stream_id){
+                            if column.iter().all(|col| col.len() >= fs as usize) {
+                                let _ = window.emit("main", (&column, &names, &header));
+                                column.iter_mut().for_each(|col| col.clear());
+                            }
+                        }
+                    }
+                    else if let Some(column) = backlog.get_mut(&sample.stream.stream_id){
+                        let _ = window.emit("main", (&column, &names, &header));
+                        column.iter_mut().for_each(|col| col.clear());
+                    }
+                }    
             }
         }
     });
@@ -376,39 +377,12 @@ fn main(){
                 .title("Lily")
                 .build()?;
 
-            //webviews within main window
-            let field = tauri::WebviewWindowBuilder::new(app, "stream-1", WebviewUrl::App("stream1.html".parse().unwrap()))
-                .title("Lockin")
-                .inner_size(750., 550.)
-                .build()?;
-
-            let aux = window.add_child(
+            let _aux = window.add_child(
                 tauri::webview::WebviewBuilder::new("stream-2", WebviewUrl::App(Default::default()))
                     .auto_resize(),
                     LogicalPosition::new(0., 0.),
                     LogicalSize::new(800., 600.),
                 )?;
-
-            //listen on backend for which webview to show
-            aux.show().unwrap();
-            field.hide().unwrap();
-
-            app.listen("toggle",  move |event| {
-                let webpage: String = serde_json::from_str(event.payload()).unwrap();
-                match webpage.as_str() {
-                    "aux" => {
-                        aux.show().unwrap();
-                    }
-                    "field" => {
-                        if field.is_visible().expect("Not visible") {
-                            field.hide().unwrap();
-                        } else {
-                            field.show().unwrap();
-                        }                        
-                    }
-                    _ => {}
-                }
-            }); 
 
             //App listens for the RPC call and returns the result to the specified window
             let main_window = app.get_webview("stream-2").unwrap();

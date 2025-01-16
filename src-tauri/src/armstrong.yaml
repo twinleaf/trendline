@@ -1,15 +1,4 @@
-plots: 
-  - status
-  - signal
-  - signal.detector
-  - laser.therm.control.error
-  - laser.therm.control.monitor
-  - laser.therm.heater.power
-  - cell.therm.sensor.measure
-  - cell.therm.heater.power
-  - vco.error
-  - vco.pull
-  - mcu.therm
+stream: 1
 
 rpc: 
   - cell.therm.control.enable
