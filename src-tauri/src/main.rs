@@ -235,39 +235,40 @@ fn rpc_controls(args: &[String], column_names: HashMap<u8, Vec<String>>) -> Vec<
 
     let nrpcs: u16 = device.get("rpc.listinfo").unwrap();
 
-    let suffixes = ["enable", "reset", "Kp", "Ki", "setpoint"];
     let mut rpc_controls: Vec<String> = Vec::new();
     let mut seen_controls: HashSet<String> = HashSet::new();
-    let mut control_names = HashSet::new();
+    let mut control_names: HashMap<String, Vec<String>> = HashMap::new();
 
     for (_id, col_names) in &column_names {
         for meta_name in col_names {
             let parts: Vec<&str> = meta_name.split('.').collect();
-        
-            if parts.len() >= 2 {
+            if parts.len() >= 3 {
                 let prefix = format!("{}.{}", parts[0], parts[1]);
-                for suffix in &suffixes{
-                    let control_name = format!("{}.control.{}", prefix, suffix);
-                    control_names.insert(control_name);
-                }
+                control_names.entry(prefix).or_insert_with(Vec::new).push(meta_name.clone());
             }   
         }     
     }
 
+    let mut rpc_map: HashMap<String, Vec<String>> = HashMap::new();
     for rpc_id in 0u16..nrpcs {
         let (_meta, name): (u16, String) = device.rpc("rpc.listinfo", rpc_id).unwrap();
-        if control_names.contains(&name) && !seen_controls.contains(&name) {
-            seen_controls.insert(name);
+        let parts: Vec<&str> = name.split('.').collect();
+        if parts.len() >= 3{
+            let prefix = format!("{}.{}", parts[0], parts[1]);
+            rpc_map.entry(prefix).or_insert_with(Vec::new).push(name.clone());
         }
-    }     
+    } 
 
-    for suffix in &suffixes {
-        for control_name in &seen_controls{
-            if control_name.ends_with(suffix) {
-                rpc_controls.push(control_name.clone());
+    for (prefix, _names) in control_names {
+        if let Some(rpc_names) = rpc_map.get(&prefix) {
+            for name in rpc_names{
+                if !seen_controls.contains(name) {
+                    rpc_controls.push(name.clone());
+                    seen_controls.insert(name.clone());
+                }
             }
         }
-    }   
+    }
     rpc_controls
 }
 

@@ -76,34 +76,6 @@ window.onload = () => {
         })
     })
 
-    const inputChange = document.querySelectorAll('.InputCommands');
-    const toggleChange = document.querySelectorAll('.checkCommands') 
-    //on input change call rpc command
-    inputChange.forEach(rpccall => {
-        rpccall.addEventListener('keypress', function(e) {
-            value = in_range(rpccall).toString()
-            if (e.key == "Enter") {
-                call= [rpccall.id, value];
-                webpage.emit('returningRPCName', call);    
-            }
-        })
-    })
-
-    //on checkbox change call rpc command
-    toggleChange.forEach(clickToggle => {
-        clickToggle.addEventListener("change", (event)=>{
-            let num = 0;
-            if (event.target.checked) {
-                num = 1;
-                call = [clickToggle.id, num.toString()]; 
-            } else{
-                num = 0;
-                call = [clickToggle.id, num.toString()]; 
-            }
-            webpage.emit('returningRPCName', call);
-        })
-    })
-
     setTimeout(() => {
         //Push Sensor information to display
         const deviceinfo = document.getElementById('sensorinfo');
@@ -163,6 +135,8 @@ window.onload = () => {
                 rpcDiv.appendChild(lines)
             })
             rpcsContainer.appendChild(rpcDiv)
+            attachInputListeners();
+            attachToggleListeners();
         })
 
         const inputChange = document.querySelectorAll('.InputCommands');
@@ -219,20 +193,17 @@ window.onload = () => {
             });
             rpcType.forEach(rpcDiv => {
                 const rpcControlId = rpcDiv.id.split('.').slice(0, 1);
-                if (label.innerText.includes(lastLabel)) {} //pass;
-                else{
-                    inputChange.forEach(rpccall => {
-                        if (label.innerText.includes(rpcControlId) && rpccall.parentNode.parentNode == rpcDiv){
-                            webpage.emit('onLoad', rpccall.id)
-                            lastLabel = rpcDiv.id
-                        } 
-                    })
-                    toggleChange.forEach(toggleChange => {
-                        if (label.innerText.includes(rpcControlId) && toggleChange.parentNode.parentNode == rpcDiv){
-                            webpage.emit('onLoad', toggleChange.id)
-                        } 
-                    })
-                }
+                inputChange.forEach(rpccall => {
+                    if (label.innerText.includes(rpcControlId) && rpccall.parentNode.parentNode == rpcDiv){
+                        webpage.emit('onLoad', rpccall.id)
+                        lastLabel = rpcDiv.id
+                    } 
+                })
+                toggleChange.forEach(toggleChange => {
+                    if (label.innerText.includes(rpcControlId) && toggleChange.parentNode.parentNode == rpcDiv){
+                        webpage.emit('onLoad', toggleChange.id)
+                    } 
+                })
             })
 
             //uplot graph styling
@@ -426,6 +397,36 @@ function makeResizable(elementId, uplotInstance) {
             min: { width: 400, height: 200 }
         })
         ]
+    });
+}
+
+// Function to attach event listeners to input elements
+function attachInputListeners() {
+    const inputChange = document.querySelectorAll('.InputCommands');
+    inputChange.forEach(rpccall => {
+        rpccall.addEventListener('keypress', function(e) {
+            value = in_range(rpccall).toString();
+            if (e.key == "Enter") {
+                call = [rpccall.id, value];
+                console.log('here');
+                webpage.emit('returningRPCName', call);    
+            }
+        });
+    });
+}
+
+// Function to attach event listeners to toggle elements
+function attachToggleListeners() {
+    const toggleChange = document.querySelectorAll('.checkCommands');
+    toggleChange.forEach(clickToggle => {
+        clickToggle.addEventListener("change", (event) => {
+            let num = 0;
+            if (event.target.checked) {
+                num = 1;
+            }
+            call = [clickToggle.id, num.toString()];
+            webpage.emit('returningRPCName', call);
+        });
     });
 }
 
