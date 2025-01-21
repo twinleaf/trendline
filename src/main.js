@@ -377,22 +377,10 @@ function createFFTGraph(eventName, containerId) {
                 {   size: 100,
                     values: (u, v) => v
                 }
-            ], 
-            hooks: {
-                addSeries: [
-                    (u, seriesIdx) => {
-                        console.log("addSeries" + (u.status == 0 ? " (init)" : ""), seriesIdx);
-                    }
-                ]
-            }
+            ]
     }, [[],[]], container);
 
     makeResizable(containerId, fftPlot);
-
-    const addseries = document.getElementById('addseries')
-    addseries.addEventListener("click", function() {
-        newSeries(fftPlot, "sample", fftPlot.data)
-    })
 
     // Listen for the event and update the graph
     webpage.listen(eventName, (event) => {
@@ -411,21 +399,6 @@ function createFFTGraph(eventName, containerId) {
         }
         fftPlot.setData(fftPlot.data, true);
     });
-}
-
-function newSeries(graph, data){
-    let xs = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30];
-    let vals = [-10,-9,-8,-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7,8,9,10];
-
-    let sidx = graph.series.length
-
-    graph.addSeries({
-        stroke: "orange",
-    }, sidx)
-    let newData = xs.map((t, i) => vals[Math.floor(Math.random() * vals.length)]);
-    data.splice(sidx, 0, newData);
-
-    graph.setData(data)
 }
 
 function makeResizable(elementId, uplotInstance) {

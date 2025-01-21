@@ -336,20 +336,21 @@ fn graph_data(window: Window) {
                 }
             }
         }
-        
-        let arg1 = &args[1];
-        let stream_id: u8 = match arg1.parse(){
-            Ok(val) => val,
-            Err(_e) => {return}
-        };
+
+        let stream_id: u8 = if args.len() >1 {
+            match args[1].parse(){
+                Ok(val) => val,
+                Err(_e) => 1
+            }
+        } else {1};
 
         let rpc_results = rpc_controls(&args, column_names);
         let results = read_yaml(args);
         window.emit("rpcs", rpc_results).unwrap();
 
-        let mut fft_signal: HashMap<u8, Vec<f32>> = HashMap::new();
         let mut elapsed = std::time::Instant::now();
-        let mut backlog: HashMap<u8, Vec<Vec<f32>>> = HashMap::new();
+        let mut fft_signal: Vec<f32> = Vec::new();
+        let mut backlog: Vec<Vec<f32>> = Vec::new();
 
         loop{ 
             let sample = device.next();
@@ -358,52 +359,45 @@ fn graph_data(window: Window) {
             let mut values: Vec<f32> = Vec::new();
             let mut col_pos = 0;
             if sample.stream.stream_id == stream_id{
+                if backlog.is_empty() {
+                    backlog = vec![Vec::new(); sample.columns.len()]
+                }
                 for column in &sample.columns{
                     names.push(column.desc.name.clone());
                     values.push(match_value(column.value.clone()));
-    
-                    backlog.entry(sample.stream.stream_id).or_insert_with(|| vec![Vec::new(); sample.columns.len()]);
-                    if let Some(column_backlog) = backlog.get_mut(&sample.stream.stream_id) {
-                        column_backlog[col_pos].push(match_value(column.value.clone()));
-                        col_pos += 1;
-                    }
-                    
-                    fft_signal.entry(sample.stream.stream_id).or_insert_with(|| Vec::with_capacity(1000));
-                    if let Some(signal) = fft_signal.get_mut(&sample.stream.stream_id){
-                        signal.extend(values.clone());
-                        if signal.len() > 500 {
-                            signal.remove(0);
-                        }
+
+                    backlog[col_pos].push(match_value(column.value.clone()));
+                    col_pos += 1;
+
+                    fft_signal.extend(values.clone());
+                    if fft_signal.len() > 500{
+                        fft_signal.remove(0);
                     }
     
                     if elapsed.elapsed() >= std::time::Duration::from_secs(1) {
                         elapsed = std::time::Instant::now();
-                        if let Some(calculation) = fft_signal.get(&sample.stream.stream_id) {
-                            let (freq, power) = calc_fft(calculation, sampling_rates.get(&sample.stream.stream_id));
-                            if results.fft.contains(&column.desc.name.clone()){
-                                let _ = window.emit("fftgraphs", &results.fft);
-                                let _ = window.emit(&column.desc.name.clone(), (freq.clone(), power.clone()));
-                            };
-                        }
+                        let (freq, power) = calc_fft(&fft_signal, sampling_rates.get(&sample.stream.stream_id));
+                        if results.fft.contains(&column.desc.name.clone()){
+                            let _ = window.emit("fftgraphs", &results.fft);
+                            let _ = window.emit(&column.desc.name.clone(), (freq.clone(), power.clone()));
+                        };
                     }
-                }
-    
-                let decimation_info = sampling_rates.get(&sample.stream.stream_id);
+                }  
+
+               let decimation_info = sampling_rates.get(&sample.stream.stream_id);
                 if let Some(sampling) = decimation_info {
                     let fs = sampling[0] as f32/ sampling[1] as f32;
                     if fs >= 20.0 {
-                        if let Some(column) = backlog.get_mut(&sample.stream.stream_id){
-                            if column.iter().all(|col| col.len() >= fs as usize) {
-                                let _ = window.emit("main", (&column, &names, &header));
-                                column.iter_mut().for_each(|col| col.clear());
-                            }
+                        if backlog.iter().all(|col| col.len() >= fs as usize) {
+                            let _ = window.emit("main", (&backlog, &names, &header));
+                            backlog.iter_mut().for_each(|col| col.clear());
                         }
                     }
-                    else if let Some(column) = backlog.get_mut(&sample.stream.stream_id){
-                        let _ = window.emit("main", (&column, &names, &header));
-                        column.iter_mut().for_each(|col| col.clear());
+                    else {
+                        let _ = window.emit("main", (&backlog, &names, &header));
+                        backlog.iter_mut().for_each(|col| col.clear());
                     }
-                }    
+                } 
             }
         }
     });
