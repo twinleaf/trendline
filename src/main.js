@@ -37,8 +37,9 @@ window.onload = () => {
                 let recentLogTime = chart.data[0][chart.data[0].length -1] //last timestamp
 
                 if ((recentLogTime - firstLogTime) > timePoints){
-                    chart.data[0].shift();
-                    chart.data[1].shift();
+                    for (let i = 0; i < chart.data.length; i++){
+                        chart.data[i].shift();
+                    }
                 }
             }   
             
@@ -47,8 +48,9 @@ window.onload = () => {
                 if (e.key == "Enter") {
                     timePoints = in_range(timeSpan);
                     while ((recentLogTime - firstLogTime)> timePoints) {
-                        chart.data[0].shift();
-                        chart.data[1].shift();
+                        for (let i = 0; i < chart.data.length; i++){
+                            chart.data[i].shift();
+                        }
                         firstLogTime = chart.data[0][0]
                         recentLogTime = chart.data[0][chart.data[0].length -1]
                     } 
@@ -315,7 +317,7 @@ window.onload = () => {
         const fftDiv = document.getElementById('FFT')
         if (pop.checked){
             fftDiv.style.display = 'inline-block'
-        } else{ fftDiv.style.display = 'none'};
+        } else{fftDiv.style.display = 'none'};
     })
 
     //FFT DIV
@@ -374,24 +376,56 @@ function createFFTGraph(eventName, containerId) {
                 {},
                 {   size: 100,
                     values: (u, v) => v
-                }]
+                }
+            ], 
+            hooks: {
+                addSeries: [
+                    (u, seriesIdx) => {
+                        console.log("addSeries" + (u.status == 0 ? " (init)" : ""), seriesIdx);
+                    }
+                ]
+            }
     }, [[],[]], container);
 
     makeResizable(containerId, fftPlot);
 
+    const addseries = document.getElementById('addseries')
+    addseries.addEventListener("click", function() {
+        newSeries(fftPlot, "sample", fftPlot.data)
+    })
+
     // Listen for the event and update the graph
     webpage.listen(eventName, (event) => {
-      const [frequencies, powerSpectrum] = event.payload;
-      for (let i = 0; i< frequencies.length; i++) {
-        fftPlot.data[0].push(frequencies[i]) 
-        fftPlot.data[1].push(powerSpectrum[i])
-      }
-      while (fftPlot.data[0].length > 1000){
-        fftPlot.data[0].shift();
-        fftPlot.data[1].shift();
-      }
-      fftPlot.setData(fftPlot.data, true);
+        const spectrum = event.payload;
+
+        for (let i = 0; i< spectrum[0].length; i++){
+            for (let j = 0; j< spectrum.length; j++){
+                fftPlot.data[j].push(spectrum[j][i])
+            }
+        }
+
+        while (fftPlot.data[0].length > 1000){
+            for (let i = 0; i < fftPlot.data.length; i++){
+                fftPlot.data[i].shift();
+            }
+        }
+        fftPlot.setData(fftPlot.data, true);
     });
+}
+
+function newSeries(graph, data){
+    let xs = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30];
+    let vals = [-10,-9,-8,-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7,8,9,10];
+
+    let sidx = graph.series.length
+
+    graph.addSeries({
+        stroke: "orange",
+    }, sidx)
+    let newData = xs.map((t, i) => vals[Math.floor(Math.random() * vals.length)]);
+    data.splice(sidx, 0, newData);
+
+    graph.setData(data)
 }
 
 function makeResizable(elementId, uplotInstance) {

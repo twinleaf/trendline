@@ -1,15 +1,2 @@
-stream: 2
-
-rpc: 
-  - cell.therm.control.enable
-  - cell.therm.control.Kp
-  - cell.therm.control.Ki
-  - cell.therm.control.setpoint
-  - laser.therm.control.enable
-  - laser.therm.control.reset
-  - laser.therm.control.Kp
-  - laser.therm.control.Ki
-  - laser.therm.control.setpoint
-  
 fft: 
   - field

@@ -1,17 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use twinleaf::{tio, data::{ColumnData, Device}};
+use twinleaf::{data::{ColumnData, Device}, tio::{self}};
 use tio::{proto::DeviceRoute, proxy, util};
 use getopts::Options;
 
 use tauri::{Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window};
 use welch_sde::{Build, SpectralDensity};
 use std::{env, thread};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use serde::Deserialize;
 
-// Atomic counter to generate unique window labels
-static WINDOW_COUNTER: AtomicUsize = AtomicUsize::new(0);
 struct RpcMeta {
     arg_type: String,
     size: usize,
@@ -61,8 +58,6 @@ impl RpcMeta {
 
 #[derive(Debug, Deserialize)]
 struct Config {
-    stream: u32,
-    rpc: Vec<String>,
     fft: Vec<String>
 }
 
@@ -232,7 +227,50 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
     Ok(result)
 }
 
-//Fft calculation
+fn rpc_controls(args: &[String], column_names: HashMap<u8, Vec<String>>) -> Vec<String>  {
+    let opts = tio_opts();
+    let (_matches, root, route) = tio_parseopts(opts, args);
+    let proxy = proxy::Interface::new(&root);
+    let device = proxy.device_rpc(route).unwrap();
+
+    let nrpcs: u16 = device.get("rpc.listinfo").unwrap();
+
+    let suffixes = ["enable", "reset", "Kp", "Ki", "setpoint"];
+    let mut rpc_controls: Vec<String> = Vec::new();
+    let mut seen_controls: HashSet<String> = HashSet::new();
+    let mut control_names = HashSet::new();
+
+    for (_id, col_names) in &column_names {
+        for meta_name in col_names {
+            let parts: Vec<&str> = meta_name.split('.').collect();
+        
+            if parts.len() >= 2 {
+                let prefix = format!("{}.{}", parts[0], parts[1]);
+                for suffix in &suffixes{
+                    let control_name = format!("{}.control.{}", prefix, suffix);
+                    control_names.insert(control_name);
+                }
+            }   
+        }     
+    }
+
+    for rpc_id in 0u16..nrpcs {
+        let (_meta, name): (u16, String) = device.rpc("rpc.listinfo", rpc_id).unwrap();
+        if control_names.contains(&name) && !seen_controls.contains(&name) {
+            seen_controls.insert(name);
+        }
+    }     
+
+    for suffix in &suffixes {
+        for control_name in &seen_controls{
+            if control_name.ends_with(suffix) {
+                rpc_controls.push(control_name.clone());
+            }
+        }
+    }   
+    rpc_controls
+}
+
 fn calc_fft(signal: &Vec<f32>, sampling: Option<&Vec<u32>>) -> (Vec<f32>, Vec<f32>) {
     if let Some(sampling) = sampling {
         if signal.len() <= 500{
@@ -267,7 +305,7 @@ fn match_value(data: ColumnData) -> f32 {
 
 fn read_yaml(args: Vec<String>) -> Config {
     let default = "../src-tauri/src/sample.yaml".to_string();
-    let path = args.get(1).unwrap_or(&default);
+    let path = args.get(2).unwrap_or(&default);
     let yaml_content = std::fs::read_to_string(path).expect("failed to read yaml");
     let results: Config = serde_yaml::from_str(&yaml_content).expect("failed to parse yaml");
     results
@@ -285,15 +323,29 @@ fn graph_data(window: Window) {
         let device = proxy.device_full(route).unwrap();
         let mut device = Device::new(device);
         
-        //metadata for sampling and decimation rate
+        //get sampling & decimation rate, column metadata
         let meta = device.get_metadata();
         let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
+        let mut column_names: HashMap<u8, Vec<String>> = HashMap::new();
         for (_id, stream) in &meta.streams {
             sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
+            for col in &stream.columns {
+                column_names.entry(stream.stream.stream_id).or_insert_with(||Vec::new());
+                if let Some(names) = column_names.get_mut(&stream.stream.stream_id){
+                    names.push(col.name.clone());
+                }
+            }
         }
         
+        let arg1 = &args[1];
+        let stream_id: u8 = match arg1.parse(){
+            Ok(val) => val,
+            Err(_e) => {return}
+        };
+
+        let rpc_results = rpc_controls(&args, column_names);
         let results = read_yaml(args);
-        let _ = window.emit("rpcs", results.rpc).unwrap();
+        window.emit("rpcs", rpc_results).unwrap();
 
         let mut fft_signal: HashMap<u8, Vec<f32>> = HashMap::new();
         let mut elapsed = std::time::Instant::now();
@@ -301,11 +353,11 @@ fn graph_data(window: Window) {
 
         loop{ 
             let sample = device.next();
-            let header = format!("Connected to: {}   Serial: {}   Session ID: {}    Stream: {}", sample.device.name, sample.device.serial_number, sample.device.session_id, &results.stream);
+            let header = format!("Connected to: {}   Serial: {}   Session ID: {}    Stream: {}", sample.device.name, sample.device.serial_number, sample.device.session_id, stream_id);
             let mut names: Vec<String> = Vec::new();
             let mut values: Vec<f32> = Vec::new();
             let mut col_pos = 0;
-            if sample.stream.stream_id == results.stream as u8{
+            if sample.stream.stream_id == stream_id{
                 for column in &sample.columns{
                     names.push(column.desc.name.clone());
                     values.push(match_value(column.value.clone()));
