@@ -135,15 +135,14 @@ window.onload = () => {
                 rpcDiv.appendChild(lines)
             })
             rpcsContainer.appendChild(rpcDiv)
-            attachInputListeners();
-            attachToggleListeners();
         })
+        attachInputListeners();
+        attachToggleListeners();
 
         const inputChange = document.querySelectorAll('.InputCommands');
         const toggleChange = document.querySelectorAll('.checkCommands') 
 
         //write out a chart for each column 
-        let lastLabel = "none";
         const rpcType = document.querySelectorAll('.controls');
         for (let i = 0; i < columns.length; i++) {
             const checkboxesContainer = document.getElementById('dropdown');
@@ -258,10 +257,7 @@ window.onload = () => {
                     }
                 })
             });
-
-            
         }
-        
     }, 2000);
 
     //returns all rpc values to corresponding input field
@@ -295,10 +291,86 @@ window.onload = () => {
     webpage.once("fftgraphs", (event) => {
         const graphs = event.payload;
         graphs.forEach((graph, index) => {
-            createFFTGraph(graph, `transform${index+1}`);
+            createFFT(graph, `transform${index+1}`)
         })
     })
 };
+
+var seriesConfig  = [{label: "Frequency (Hz)"}];
+let gotSeries = false;
+function createFFT(eventName, containerId) {
+    const template = document.getElementById('fft-template');
+    const clone = template.content.cloneNode(true);
+    const container = clone.querySelector('.canvas-container');
+    container.id = containerId;
+    document.getElementById('FFT').appendChild(container); 
+    let fftPlot;
+
+    // Listen for the event and update the graph
+    webpage.listen(eventName, (event) => {
+        const spectrum = event.payload;
+        if (!gotSeries) {
+            for (let i = 1; i< spectrum.data.length; i++) {
+                seriesConfig.push({
+                    label: `Power Spectrum ${i} (V/√Hz)`, 
+                    stroke: `hsl(${i*130}, 30%, 35%)`,
+                    points: {show: false}
+                })
+            } 
+            gotSeries = true;
+        }
+        
+        for (let i = 0; i< spectrum.data[0].length; i++){
+            for (let j = 0; j< spectrum.data.length; j++){
+                if (fftPlot.data[j]) {
+                    fftPlot.data[j].push(spectrum.data[j][i])
+                }
+            }
+        }
+
+        while (fftPlot.data[0].length > 500){
+            for (let i = 0; i < fftPlot.data.length; i++){
+                fftPlot.data[i].shift();
+            }
+        }
+        fftPlot.setData(fftPlot.data, true);
+    });
+
+    new Promise((resolve) => {
+        const checkSeriesConfig = setInterval(() => {
+            if (gotSeries) {
+                clearInterval(checkSeriesConfig);
+                resolve();
+            }
+        }, 100);
+    }).then(() => {
+        setTimeout(() => {
+            let data2 = Array.from({ length: seriesConfig.length }, () => []);
+            let opt2 = {
+                title: eventName,
+                width: 800,
+                height: 300,
+                series: seriesConfig,
+                scales: {
+                    x: {
+                        time: false,
+                        auto: true,
+                        distr: 3
+                    },
+                    y: { distr: 3 }
+                },
+                axes: [
+                    {},
+                    { size: 100, values: (u, v) => v }
+                ]
+            };
+
+            let chart2 = new uPlot(opt2, data2, container);
+            fftPlot = chart2;
+            makeResizable(containerId, chart2);
+        }, 200);
+    })
+}
 
 //test if input is within specified range
 function in_range(fillValue) {
@@ -315,67 +387,10 @@ function in_range(fillValue) {
     return withinRange
 }
 
-// Create new FFT
-function createFFTGraph(eventName, containerId) {
-    const template = document.getElementById('fft-template');
-    const clone = template.content.cloneNode(true);
-    const container = clone.querySelector('.canvas-container');
-    container.id = containerId;
-    document.getElementById('FFT').appendChild(container); 
-
-    const fftPlot = new uPlot({
-            title: eventName,
-            width: 800, 
-            height: 300,
-            series: [
-                {   label: "Frequency (Hz)"},
-                { 
-                    label: "Power Spectrum (V/√Hz)",
-                    stroke: 'blue',
-                    points: { show: false },    
-                },
-            ],
-            scales: {
-                x: {
-                time: false,
-                auto: true,
-                distr: 3
-                },
-                y: {distr: 3}
-            },
-            axes: [
-                {},
-                {   size: 100,
-                    values: (u, v) => v
-                }
-            ]
-    }, [[],[]], container);
-
-    makeResizable(containerId, fftPlot);
-
-    // Listen for the event and update the graph
-    webpage.listen(eventName, (event) => {
-        const spectrum = event.payload;
-
-        for (let i = 0; i< spectrum[0].length; i++){
-            for (let j = 0; j< spectrum.length; j++){
-                fftPlot.data[j].push(spectrum[j][i])
-            }
-        }
-
-        while (fftPlot.data[0].length > 1000){
-            for (let i = 0; i < fftPlot.data.length; i++){
-                fftPlot.data[i].shift();
-            }
-        }
-        fftPlot.setData(fftPlot.data, true);
-    });
-}
-
 function makeResizable(elementId, uplotInstance) {
     const element = document.getElementById(elementId);
     interact(element).resizable({
-        edges: { left: false, right: false, bottom: true, top: true },
+        edges: { left: true, right: true, bottom: true, top: true },
         inertia: true,
         listeners: {
         move(event) {
@@ -400,7 +415,6 @@ function makeResizable(elementId, uplotInstance) {
     });
 }
 
-// Function to attach event listeners to input elements
 function attachInputListeners() {
     const inputChange = document.querySelectorAll('.InputCommands');
     inputChange.forEach(rpccall => {
@@ -415,7 +429,6 @@ function attachInputListeners() {
     });
 }
 
-// Function to attach event listeners to toggle elements
 function attachToggleListeners() {
     const toggleChange = document.querySelectorAll('.checkCommands');
     toggleChange.forEach(clickToggle => {

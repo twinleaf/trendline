@@ -7,8 +7,11 @@ use tauri::{Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl
 use welch_sde::{Build, SpectralDensity};
 use std::{env, thread};
 use std::collections::{HashMap, HashSet};
-use serde::Deserialize;
 
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone)]
+struct SpectrumData {
+    data: Vec<Vec<f32>>
+}
 struct RpcMeta {
     arg_type: String,
     size: usize,
@@ -54,11 +57,6 @@ impl RpcMeta {
             unknown: meta == 0,
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct Config {
-    fft: Vec<String>
 }
 
 fn tio_opts() -> Options {
@@ -242,7 +240,7 @@ fn rpc_controls(args: &[String], column_names: HashMap<u8, Vec<String>>) -> Vec<
     for (_id, col_names) in &column_names {
         for meta_name in col_names {
             let parts: Vec<&str> = meta_name.split('.').collect();
-            if parts.len() >= 3 {
+            if parts.len() > 2 {
                 let prefix = format!("{}.{}", parts[0], parts[1]);
                 control_names.entry(prefix).or_insert_with(Vec::new).push(meta_name.clone());
             }   
@@ -272,23 +270,30 @@ fn rpc_controls(args: &[String], column_names: HashMap<u8, Vec<String>>) -> Vec<
     rpc_controls
 }
 
-fn calc_fft(signal: &Vec<f32>, sampling: Option<&Vec<u32>>) -> (Vec<f32>, Vec<f32>) {
+fn calc_fft(signals: Option<&Vec<f32>>, sampling: Option<&Vec<u32>>) -> (Vec<f32>, Vec<f32>) {
     if let Some(sampling) = sampling {
-        if signal.len() <= 500{
-            let decimation_rate = sampling[1] as f32;
-            let fs = sampling[0] as f32/ decimation_rate;
-
-            let welch: SpectralDensity<f32> =
-                SpectralDensity::<f32>::builder(&signal, fs).build();
-            let sd = welch.periodogram();
-    
-            let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
-            let mut power_spectrum: Vec<f32> = sd.to_vec();
-            
-            for value in &mut power_spectrum {
-                *value = value.sqrt();
-            }
-            return (frequencies, power_spectrum)
+        if let Some(signal) = signals{
+            if signal.len() <= 500{
+                let decimation_rate = sampling[1] as f32;
+                let fs = sampling[0] as f32/ decimation_rate;
+                let welch: SpectralDensity<f32> =
+                    SpectralDensity::<f32>::builder(&signal, fs).build();
+                
+                let result = std::panic::catch_unwind(|| {
+                    welch.periodogram();});
+                if result.is_err(){
+                    return (vec![], vec![]);
+                } else {
+                    let sd = welch.periodogram();
+                    let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
+                    let mut power_spectrum: Vec<f32> = sd.to_vec();
+                    
+                    for value in &mut power_spectrum {
+                        *value = value.sqrt();
+                    }
+                    return (frequencies, power_spectrum)
+                }
+            } 
         }
     }
     (vec![], vec![])
@@ -304,12 +309,16 @@ fn match_value(data: ColumnData) -> f32 {
     data_type
 }
 
-fn read_yaml(args: Vec<String>) -> Config {
-    let default = "../src-tauri/src/sample.yaml".to_string();
-    let path = args.get(2).unwrap_or(&default);
-    let yaml_content = std::fs::read_to_string(path).expect("failed to read yaml");
-    let results: Config = serde_yaml::from_str(&yaml_content).expect("failed to parse yaml");
-    results
+fn prefix(column_data: HashMap<u8, Vec<String>>) -> HashMap<String, Vec<String>> {
+    let mut fft_groups: HashMap<String, Vec<String>> = HashMap::new();
+    for (_id, names) in column_data {
+        for name in names {
+            let parts: Vec<&str> = name.split('.').collect();
+            let prefix = parts[0].to_string();
+            fft_groups.entry(prefix).or_insert_with(Vec::new).push(name.clone());
+        }
+    }
+    fft_groups
 }
 
 #[tauri::command]
@@ -337,7 +346,7 @@ fn graph_data(window: Window) {
                 }
             }
         }
-
+        let fft_sort = prefix(column_names.clone());
         let stream_id: u8 = if args.len() >1 {
             match args[1].parse(){
                 Ok(val) => val,
@@ -345,58 +354,90 @@ fn graph_data(window: Window) {
             }
         } else {1};
 
-        let rpc_results = rpc_controls(&args, column_names);
-        let results = read_yaml(args);
+        //Emit FFT Graph setup
+        let mut key_names: Vec<String> = Vec::new();
+        let mut last_key: String = String::new();
+        for key in fft_sort.keys() {
+            if let Some(stream_num) = column_names.get(&stream_id){
+                for stream_name in stream_num {
+                    let parts: Vec<&str> = stream_name.split('.').collect();
+                    let prefix = format!{"{}", parts[0]};
+                    if key.to_string() == prefix && last_key != prefix{
+                        key_names.push(key.to_string());
+                        last_key = prefix;
+                    }
+                }
+            };
+        }
+        let _ = window.emit("fftgraphs", &key_names.clone());
+
+        //Emitting RPC Commands
+        let rpc_results = rpc_controls(&args, column_names.clone());
         window.emit("rpcs", rpc_results).unwrap();
 
         let mut elapsed = std::time::Instant::now();
-        let mut fft_signal: Vec<f32> = Vec::new();
-        let mut backlog: Vec<Vec<f32>> = Vec::new();
+        let mut fft_signals: HashMap<String, Vec<f32>> = HashMap::new();
+        let mut graph_backlog: Vec<Vec<f32>> = Vec::new();
 
         loop{ 
             let sample = device.next();
             let header = format!("Connected to: {}   Serial: {}   Session ID: {}    Stream: {}", sample.device.name, sample.device.serial_number, sample.device.session_id, stream_id);
             let mut names: Vec<String> = Vec::new();
             let mut values: Vec<f32> = Vec::new();
+            let mut fft_freq: HashMap<String, Vec<f32>> = HashMap::new();
+            let mut fft_power: HashMap<String, Vec<f32>> = HashMap::new();
             let mut col_pos = 0;
+
             if sample.stream.stream_id == stream_id{
-                if backlog.is_empty() {
-                    backlog = vec![Vec::new(); sample.columns.len()]
+                if graph_backlog.is_empty() {
+                    graph_backlog = vec![Vec::new(); sample.columns.len()]
                 }
                 for column in &sample.columns{
                     names.push(column.desc.name.clone());
                     values.push(match_value(column.value.clone()));
 
-                    backlog[col_pos].push(match_value(column.value.clone()));
+                    graph_backlog[col_pos].push(match_value(column.value.clone()));
                     col_pos += 1;
 
-                    fft_signal.extend(values.clone());
-                    if fft_signal.len() > 500{
-                        fft_signal.remove(0);
-                    }
-    
+                    if fft_signals.iter().all(|(_col, value)| value.len() >= 500) {fft_signals.iter_mut().for_each(|(_col, value)| {value.remove(0);})}
+                    fft_signals.entry(column.desc.name.clone()).or_insert_with(||Vec::new()).push(match_value(column.value.clone()));
+
                     if elapsed.elapsed() >= std::time::Duration::from_secs(1) {
                         elapsed = std::time::Instant::now();
-                        let (freq, power) = calc_fft(&fft_signal, sampling_rates.get(&sample.stream.stream_id));
-                        if results.fft.contains(&column.desc.name.clone()){
-                            let _ = window.emit("fftgraphs", &results.fft);
-                            let _ = window.emit(&column.desc.name.clone(), (freq.clone(), power.clone()));
-                        };
+                        let (freq, power) = calc_fft(fft_signals.get(&column.desc.name.clone()), sampling_rates.get(&sample.stream.stream_id));
+                        if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){
+                            let parts: Vec<&str> = column.desc.name.split('.').collect();
+                            let prefix = parts[0].to_string();
+                            fft_power.entry(prefix.clone()).or_insert_with(||power.clone());
+                            fft_freq.entry(prefix.clone()).or_insert_with(||freq.clone());
+                        }
                     }
-                }  
-
-               let decimation_info = sampling_rates.get(&sample.stream.stream_id);
+                }
+                
+                for (name, values) in &mut fft_power{
+                    let mut spectrum_data = SpectrumData{
+                        data: vec![]
+                    };
+                    if let Some(freq_result) = fft_freq.get(name) {
+                        spectrum_data.data.push(freq_result.to_vec());
+                        spectrum_data.data.push(values.to_vec());
+                        let _ = window.emit(&name.clone(), spectrum_data);
+                    }
+                }
+                
+                let decimation_info = sampling_rates.get(&sample.stream.stream_id);
                 if let Some(sampling) = decimation_info {
                     let fs = sampling[0] as f32/ sampling[1] as f32;
                     if fs >= 20.0 {
-                        if backlog.iter().all(|col| col.len() >= fs as usize) {
-                            let _ = window.emit("main", (&backlog, &names, &header));
-                            backlog.iter_mut().for_each(|col| col.clear());
+                        let required_samples = fs as usize;
+                        if graph_backlog.iter().all(|col| col.len() >= required_samples as usize) {
+                            let _ = window.emit("main", (&graph_backlog, &names, &header));
+                            graph_backlog.iter_mut().for_each(|col| col.clear());
                         }
                     }
                     else {
-                        let _ = window.emit("main", (&backlog, &names, &header));
-                        backlog.iter_mut().for_each(|col| col.clear());
+                        let _ = window.emit("main", (&graph_backlog, &names, &header));
+                        graph_backlog.iter_mut().for_each(|col| col.clear());
                     }
                 } 
             }
