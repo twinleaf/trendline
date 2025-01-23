@@ -260,6 +260,7 @@ window.onload = () => {
         }
     }, 2000);
 
+    const inputChange = document.querySelectorAll('.InputCommands');
     //returns all rpc values to corresponding input field
     webpage.listen("returnRPC", (event) => {
         let [name, inputValue] = event.payload;
@@ -282,6 +283,7 @@ window.onload = () => {
     const pop = document.getElementById('showPlot')    
     pop.addEventListener("change", function() {
         const fftDiv = document.getElementById('FFT')
+
         if (pop.checked){
             fftDiv.style.display = 'inline-block'
         } else{fftDiv.style.display = 'none'};
@@ -291,7 +293,7 @@ window.onload = () => {
     webpage.once("fftgraphs", (event) => {
         const graphs = event.payload;
         graphs.forEach((graph, index) => {
-            createFFT(graph, `transform${index+1}`)
+            createFFT(graph, `${graph}`)
         })
     })
 };
@@ -303,6 +305,7 @@ function createFFT(eventName, containerId) {
     const clone = template.content.cloneNode(true);
     const container = clone.querySelector('.canvas-container');
     container.id = containerId;
+    container.style.display = 'none';
     document.getElementById('FFT').appendChild(container); 
     let fftPlot;
 
@@ -422,7 +425,6 @@ function attachInputListeners() {
             value = in_range(rpccall).toString();
             if (e.key == "Enter") {
                 call = [rpccall.id, value];
-                console.log('here');
                 webpage.emit('returningRPCName', call);    
             }
         });
