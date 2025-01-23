@@ -429,8 +429,7 @@ fn graph_data(window: Window) {
                 if let Some(sampling) = decimation_info {
                     let fs = sampling[0] as f32/ sampling[1] as f32;
                     if fs >= 20.0 {
-                        let required_samples = fs as usize;
-                        if graph_backlog.iter().all(|col| col.len() >= required_samples as usize) {
+                        if graph_backlog.iter().all(|col| col.len() >= (fs / 20.0).ceil() as usize) {
                             let _ = window.emit("main", (&graph_backlog, &names, &header));
                             graph_backlog.iter_mut().for_each(|col| col.clear());
                         }

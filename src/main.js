@@ -112,7 +112,7 @@ window.onload = () => {
                     addElement = document.createElement('input');
                     addElement.type = 'checkbox';
                     addElement.className = "checkCommands";
-                } else if (command === 'reset') {
+                } else if (command === 'reset'|| command === 'capture') {
                     addElement = document.createElement('button');
                     addElement.innerText = 'Reset';
                     addElement.className = "buttonCommands";
@@ -173,13 +173,16 @@ window.onload = () => {
             checkboxesContainer.appendChild(label);
             checkboxesContainer.appendChild(lineBreak);
             
+            const pop = document.getElementById('showPlot')
+            const checkboxes = document.querySelectorAll('.checkboxes');
+
             //event listener to display canvas/RPC div on click
             checkbox.addEventListener("change", (event) => {
                 const canvas = document.getElementById(`canvas${i}`)
                 canvas.style.display = event.target.checked ? 'block' : 'none';
 
                 rpcType.forEach(rpcControl => {
-                    const checkboxes = document.querySelectorAll('.checkboxes');
+                    //const checkboxes = document.querySelectorAll('.checkboxes');
                     let stayDisplayed = false;
                     const rpcControlId = rpcControl.id.split('.').slice(0, 1);
                     checkboxes.forEach(checkbox => {
@@ -188,8 +191,28 @@ window.onload = () => {
                         }
                         rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
                     });
-                });
+                });  
+                
             });
+            
+            pop.addEventListener("change", (event) => {
+                document.getElementById('FFT').childNodes.forEach(node => {
+                    if (pop.checked){
+                        let stayDisplayed = false;
+                        checkboxes.forEach(checkbox => {
+                            console.log(node.id, checkbox.labels[0])
+                            if (checkbox.labels[0].innerText.includes(node.id) && checkbox.checked) {
+                                stayDisplayed = true;
+                            } 
+                            document.getElementById('FFT').style.display = 'inline-block'
+                            node.style.display = stayDisplayed? 'inline-block' : 'none';
+                        })
+                    } else {
+                        node.style.display = 'none'
+                    }
+                })
+            })
+
             rpcType.forEach(rpcDiv => {
                 const rpcControlId = rpcDiv.id.split('.').slice(0, 1);
                 inputChange.forEach(rpccall => {
@@ -280,15 +303,6 @@ window.onload = () => {
         content.classList.toggle("show");
     })
 
-    const pop = document.getElementById('showPlot')    
-    pop.addEventListener("change", function() {
-        const fftDiv = document.getElementById('FFT')
-
-        if (pop.checked){
-            fftDiv.style.display = 'inline-block'
-        } else{fftDiv.style.display = 'none'};
-    })
-
     //FFT DIV
     webpage.once("fftgraphs", (event) => {
         const graphs = event.payload;
@@ -305,7 +319,6 @@ function createFFT(eventName, containerId) {
     const clone = template.content.cloneNode(true);
     const container = clone.querySelector('.canvas-container');
     container.id = containerId;
-    container.style.display = 'none';
     document.getElementById('FFT').appendChild(container); 
     let fftPlot;
 
