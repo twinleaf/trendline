@@ -279,8 +279,7 @@ fn calc_fft(signals: Option<&Vec<f32>>, sampling: Option<&Vec<u32>>) -> (Vec<f32
                 let welch: SpectralDensity<f32> =
                     SpectralDensity::<f32>::builder(signal, fs).build();
                 
-                let result = std::panic::catch_unwind(|| {
-                    welch.periodogram();});
+                let result = std::panic::catch_unwind(|| {welch.periodogram();});
                 if result.is_err(){
                     return (vec![], vec![]);
                 } else {
@@ -327,6 +326,13 @@ fn graph_data(window: Window) {
     let opts = tio_opts();
     let (_matches, root, route) = tio_parseopts(opts, &args);
 
+    let stream_id: u8 = if args.len() >1 {
+        match args[1].parse(){
+            Ok(val) => val,
+            Err(_e) => 1
+        }
+    } else {1};
+
     thread::spawn(move || {
         let proxy = proxy::Interface::new(&root);
         let device = proxy.device_full(route).unwrap();
@@ -336,6 +342,7 @@ fn graph_data(window: Window) {
         let meta = device.get_metadata();
         let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
         let mut column_names: HashMap<u8, Vec<String>> = HashMap::new();
+        let mut column_desc: HashMap<String, String> = HashMap::new();
         for stream in meta.streams.values() {
             sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
             for col in &stream.columns {
@@ -343,15 +350,15 @@ fn graph_data(window: Window) {
                 if let Some(names) = column_names.get_mut(&stream.stream.stream_id){
                     names.push(col.name.clone());
                 }
+                if stream.stream.stream_id == stream_id {
+                    column_desc.entry(col.name.clone()).or_insert_with(||col.description.clone());
+                }
             }
         }
+        
         let fft_sort = prefix(column_names.clone());
-        let stream_id: u8 = if args.len() >1 {
-            match args[1].parse(){
-                Ok(val) => val,
-                Err(_e) => 1
-            }
-        } else {1};
+        let header = format!("Connected to: {}\nSerial: {}\nStream: {}", meta.device.name, meta.device.serial_number, stream_id);
+        let _= window.emit("graph_labels", (header, column_desc));
 
         //Emit FFT Graph setup
         let mut key_names: Vec<String> = Vec::new();
@@ -381,8 +388,6 @@ fn graph_data(window: Window) {
         //Emitting Stream Data
         loop{ 
             let sample = device.next();
-            let header = format!("Connected to: {}   Serial: {}   Session ID: {}    Stream: {}", sample.device.name, sample.device.serial_number, sample.device.session_id, stream_id);
-            let mut names: Vec<String> = Vec::new();
             let mut fft_freq: HashMap<String, Vec<f32>> = HashMap::new();
             let mut fft_power: HashMap<String, Vec<f32>> = HashMap::new();
             let mut col_pos = 0;
@@ -392,7 +397,6 @@ fn graph_data(window: Window) {
                     graph_backlog = vec![Vec::new(); sample.columns.len()]
                 }
                 for column in &sample.columns{
-                    names.push(column.desc.name.clone());
                     graph_backlog[col_pos].push(match_value(column.value.clone()));
                     col_pos += 1;
 
@@ -427,12 +431,12 @@ fn graph_data(window: Window) {
                     let fs = sampling[0] as f32/ sampling[1] as f32;
                     if fs >= 20.0 {
                         if graph_backlog.iter().all(|col| col.len() >= (fs / 20.0).ceil() as usize) {
-                            let _ = window.emit("main", (&graph_backlog, &names, &header));
+                            let _ = window.emit("main", &graph_backlog);
                             graph_backlog.iter_mut().for_each(|col| col.clear());
                         }
                     }
                     else {
-                        let _ = window.emit("main", (&graph_backlog, &names, &header));
+                        let _ = window.emit("main", &graph_backlog);
                         graph_backlog.iter_mut().for_each(|col| col.clear());
                     }
                 } 

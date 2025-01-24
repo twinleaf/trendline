@@ -1,7 +1,7 @@
 /* navigation */
 .sidebar {
   position: fixed;
-  width: 250px;
+  width: 280px;
   height: auto;
   display: block;
   background-color: white;
@@ -16,7 +16,12 @@
 }
 
 .header{
-  text-align: center;
+  text-align: left;
+  padding: 10px;
+  border-width: 1px;
+  background-color: #4CAF50;
+  border-color: white;
+  border-radius: 10px; 
 }
 
 .dropdown {
@@ -47,8 +52,8 @@
 
 .checkboxes{
   display:block;
-  margin-block: -51px;
-  margin-top:-11.5px;
+  margin-block: -48px;
+  margin-top:-16px;
 }
 
 .dropdown-content label{

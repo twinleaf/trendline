@@ -11,21 +11,15 @@ webpage = getCurrentWebviewWindow();
 window.onload = () => {
     var graphs = []; 
     var columns = []; 
+    var column_id = [];
     var rpcs = [];
     var serial = []; 
     let timePoints = 10;
 
     let startTime = Date.now();
-    gotNames = false;
     webpage.listen("main", (event) => {
-        const [values, name, header] = event.payload;
+        const values = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
-        
-        if (!gotNames) {
-            for (let i = 0; i< name.length; i++) {columns.push(name[i])}
-            serial.push(header)
-            gotNames = true;
-        } 
 
         graphs.forEach((chart, index) => {  
             for (let i = 0; i < values[index].length; i++) {  
@@ -60,6 +54,15 @@ window.onload = () => {
             chart.setData(chart.data, true);
         }) 
     });
+
+    webpage.once("graph_labels", (event) => {
+        const [header, label_name] = event.payload;
+        serial.push(header);
+        for (let key in label_name){
+            columns.push(label_name[key])
+            column_id.push(key)
+        }
+    })
 
     webpage.once("rpcs", (event) => {
         const controls = event.payload;
@@ -104,6 +107,7 @@ window.onload = () => {
             const title = document.createElement('paragraph');
             title.innerText = prefix + ' ';
             rpcDiv.appendChild(title);
+            rpcDiv.appendChild(document.createElement('br'))
 
             commands.forEach(command => {
                 let addElement;
@@ -130,8 +134,8 @@ window.onload = () => {
                     label.appendChild(addElement)
                     rpcDiv.appendChild(label);
                 } else{rpcDiv.appendChild(addElement)}
-                const lines = document.createElement('br');
-                rpcDiv.appendChild(lines)
+
+                rpcDiv.appendChild(document.createElement('br'))
             })
             rpcsContainer.appendChild(rpcDiv)
         })
@@ -150,7 +154,7 @@ window.onload = () => {
             //create checkboxes
             const checkbox = document.createElement('input');
             checkbox.type = "checkbox";
-            checkbox.id = `canvasCheckbox${i}`;
+            checkbox.id = column_id[i]
             checkbox.className = 'checkboxes'
 
             //create labels for checkboxes
@@ -182,9 +186,8 @@ window.onload = () => {
 
                 rpcType.forEach(rpcControl => {
                     let stayDisplayed = false;
-                    const rpcControlId = rpcControl.id.split('.').slice(0, 1);
                     checkboxes.forEach(checkbox => {
-                        if (checkbox.labels[0].innerText.includes(rpcControlId) && checkbox.checked) {
+                        if (checkbox.id.split('.').slice(0,1).toString() == rpcControl.id.split('.').slice(0, 1).toString() && checkbox.checked) {
                             stayDisplayed = true; 
                         }
                     });
@@ -198,13 +201,13 @@ window.onload = () => {
                     if (pop.checked){
                         let stayDisplayed = false;
                         checkboxes.forEach(checkbox => {
-                            console.log(node.id, checkbox.labels[0])
-                            if (checkbox.labels[0].innerText.includes(node.id) && checkbox.checked) {
+                            if (checkbox.id.split('.').slice(0,1).toString() == node.id.toString() && checkbox.checked) {
                                 stayDisplayed = true;
-                            } 
-                            document.getElementById('FFT').style.display = 'inline-block'
-                            node.style.display = stayDisplayed? 'inline-block' : 'none';
+                                return;
+                            }
                         })
+                        document.getElementById('FFT').style.display = 'inline-block'
+                        node.style.display = stayDisplayed? 'inline-block' : 'none';
                     } else {
                         node.style.display = 'none'
                     }
@@ -214,13 +217,13 @@ window.onload = () => {
             rpcType.forEach(rpcDiv => {
                 const rpcControlId = rpcDiv.id.split('.').slice(0, 1);
                 inputChange.forEach(rpccall => {
-                    if (label.innerText.includes(rpcControlId) && rpccall.parentNode.parentNode == rpcDiv){
+                    if (checkbox.id.split('.').slice(0,1).toString() == rpcDiv.id.split('.').slice(0, 1) && rpccall.parentNode.parentNode == rpcDiv){
                         webpage.emit('onLoad', rpccall.id)
                         lastLabel = rpcDiv.id
                     } 
                 })
                 toggleChange.forEach(toggleChange => {
-                    if (label.innerText.includes(rpcControlId) && toggleChange.parentNode.parentNode == rpcDiv){
+                    if (checkbox.id.split('.').slice(0,1).toString() == rpcDiv.id.split('.').slice(0, 1) && toggleChange.parentNode.parentNode == rpcDiv){
                         webpage.emit('onLoad', toggleChange.id)
                     } 
                 })
@@ -233,7 +236,7 @@ window.onload = () => {
                 series: [
                     {label: 'Time'},
                     { 
-                        label: columns[i],
+                        label: column_id[i],
                         stroke: 'red',
                         points: { show: false },    
                         value: (u, v) => v  
