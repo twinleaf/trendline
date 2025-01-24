@@ -1,5 +1,5 @@
 # Lily
-Graphing tool for sensor stream data. Utilizes twinleaf-rust crate to read out metadata
+Graphical interface tool for Twinleaf sensor stream data. Equipped with RPC controls and fast fourier transform analysis
 
 ### Development
 On linux, there is a dependency on libudev; to install it use:
@@ -21,9 +21,6 @@ When there are more than one serial port available, it is necessary to specify t
 	[macOS]> tio-proxy -r /dev/cu.usbserialXXXXXX
 	[wsl1] > tio-proxy -r COM3
 
-Run Lily application:
+Optionally specify stream number or the default is stream 1:
 
-    cargo run
-
-### Project status
-Development in progress
+    cargo run <stream_id>

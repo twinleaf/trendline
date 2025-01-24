@@ -27,7 +27,6 @@ window.onload = () => {
             gotNames = true;
         } 
 
-        //push data to each graph
         graphs.forEach((chart, index) => {  
             for (let i = 0; i < values[index].length; i++) {  
                 chart.data[0].push(elapsed)
@@ -182,15 +181,14 @@ window.onload = () => {
                 canvas.style.display = event.target.checked ? 'block' : 'none';
 
                 rpcType.forEach(rpcControl => {
-                    //const checkboxes = document.querySelectorAll('.checkboxes');
                     let stayDisplayed = false;
                     const rpcControlId = rpcControl.id.split('.').slice(0, 1);
                     checkboxes.forEach(checkbox => {
                         if (checkbox.labels[0].innerText.includes(rpcControlId) && checkbox.checked) {
                             stayDisplayed = true; 
                         }
-                        rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
                     });
+                    rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
                 });  
                 
             });
@@ -296,17 +294,17 @@ window.onload = () => {
         })
     }); 
     
-    //SIDE BAR LOGIC
+    //side bar dropdown 
     const drop = document.getElementById('drop')
     drop.addEventListener("click", function() {
         const content = document.getElementById('dropdown')
         content.classList.toggle("show");
     })
 
-    //FFT DIV
+    //creating FFT graphs
     webpage.once("fftgraphs", (event) => {
         const graphs = event.payload;
-        graphs.forEach((graph, index) => {
+        graphs.forEach((graph, _index) => {
             createFFT(graph, `${graph}`)
         })
     })
@@ -361,8 +359,8 @@ function createFFT(eventName, containerId) {
         }, 100);
     }).then(() => {
         setTimeout(() => {
-            let data2 = Array.from({ length: seriesConfig.length }, () => []);
-            let opt2 = {
+            let data = Array.from({ length: seriesConfig.length }, () => []);
+            let opt = {
                 title: eventName,
                 width: 800,
                 height: 300,
@@ -381,9 +379,9 @@ function createFFT(eventName, containerId) {
                 ]
             };
 
-            let chart2 = new uPlot(opt2, data2, container);
-            fftPlot = chart2;
-            makeResizable(containerId, chart2);
+            let chart = new uPlot(opt, data, container);
+            fftPlot = chart;
+            makeResizable(containerId, chart);
         }, 200);
     })
 }

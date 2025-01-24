@@ -19,8 +19,6 @@
   text-align: center;
 }
 
-
-/* Style the nav links and the dropdown button */
 .dropdown {
   position: relative;
   display: block;
@@ -100,7 +98,7 @@ position: relative;
 }
 
       
-/*Graphs and main body*/
+/*Graphs*/
 main {
   margin-left: 300px;
 } 

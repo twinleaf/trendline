@@ -237,12 +237,12 @@ fn rpc_controls(args: &[String], column_names: HashMap<u8, Vec<String>>) -> Vec<
     let mut seen_controls: HashSet<String> = HashSet::new();
     let mut control_names: HashMap<String, Vec<String>> = HashMap::new();
 
-    for (_id, col_names) in &column_names {
+    for col_names in column_names.values() {
         for meta_name in col_names {
             let parts: Vec<&str> = meta_name.split('.').collect();
             if parts.len() > 2 {
                 let prefix = format!("{}.{}", parts[0], parts[1]);
-                control_names.entry(prefix).or_insert_with(Vec::new).push(meta_name.clone());
+                control_names.entry(prefix).or_default().push(meta_name.clone());
             }   
         }     
     }
@@ -253,7 +253,7 @@ fn rpc_controls(args: &[String], column_names: HashMap<u8, Vec<String>>) -> Vec<
         let parts: Vec<&str> = name.split('.').collect();
         if parts.len() >= 3{
             let prefix = format!("{}.{}", parts[0], parts[1]);
-            rpc_map.entry(prefix).or_insert_with(Vec::new).push(name.clone());
+            rpc_map.entry(prefix).or_default().push(name.clone());
         }
     } 
 
@@ -277,7 +277,7 @@ fn calc_fft(signals: Option<&Vec<f32>>, sampling: Option<&Vec<u32>>) -> (Vec<f32
                 let decimation_rate = sampling[1] as f32;
                 let fs = sampling[0] as f32/ decimation_rate;
                 let welch: SpectralDensity<f32> =
-                    SpectralDensity::<f32>::builder(&signal, fs).build();
+                    SpectralDensity::<f32>::builder(signal, fs).build();
                 
                 let result = std::panic::catch_unwind(|| {
                     welch.periodogram();});
@@ -315,14 +315,13 @@ fn prefix(column_data: HashMap<u8, Vec<String>>) -> HashMap<String, Vec<String>>
         for name in names {
             let parts: Vec<&str> = name.split('.').collect();
             let prefix = parts[0].to_string();
-            fft_groups.entry(prefix).or_insert_with(Vec::new).push(name.clone());
+            fft_groups.entry(prefix).or_default().push(name.clone());
         }
     }
     fft_groups
 }
 
 #[tauri::command]
-//main tauri function where stream data gets emitted to graphs on frontend
 fn graph_data(window: Window) {
     let args: Vec<String> = env::args().collect();   
     let opts = tio_opts();
@@ -337,10 +336,10 @@ fn graph_data(window: Window) {
         let meta = device.get_metadata();
         let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
         let mut column_names: HashMap<u8, Vec<String>> = HashMap::new();
-        for (_id, stream) in &meta.streams {
+        for stream in meta.streams.values() {
             sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
             for col in &stream.columns {
-                column_names.entry(stream.stream.stream_id).or_insert_with(||Vec::new());
+                column_names.entry(stream.stream.stream_id).or_default();
                 if let Some(names) = column_names.get_mut(&stream.stream.stream_id){
                     names.push(col.name.clone());
                 }
@@ -361,8 +360,8 @@ fn graph_data(window: Window) {
             if let Some(stream_num) = column_names.get(&stream_id){
                 for stream_name in stream_num {
                     let parts: Vec<&str> = stream_name.split('.').collect();
-                    let prefix = format!{"{}", parts[0]};
-                    if key.to_string() == prefix && last_key != prefix{
+                    let prefix = parts[0].to_string();
+                    if *key.to_string() == prefix && last_key != prefix{
                         key_names.push(key.to_string());
                         last_key = prefix;
                     }
@@ -379,11 +378,11 @@ fn graph_data(window: Window) {
         let mut fft_signals: HashMap<String, Vec<f32>> = HashMap::new();
         let mut graph_backlog: Vec<Vec<f32>> = Vec::new();
 
+        //Emitting Stream Data
         loop{ 
             let sample = device.next();
             let header = format!("Connected to: {}   Serial: {}   Session ID: {}    Stream: {}", sample.device.name, sample.device.serial_number, sample.device.session_id, stream_id);
             let mut names: Vec<String> = Vec::new();
-            let mut values: Vec<f32> = Vec::new();
             let mut fft_freq: HashMap<String, Vec<f32>> = HashMap::new();
             let mut fft_power: HashMap<String, Vec<f32>> = HashMap::new();
             let mut col_pos = 0;
@@ -394,13 +393,11 @@ fn graph_data(window: Window) {
                 }
                 for column in &sample.columns{
                     names.push(column.desc.name.clone());
-                    values.push(match_value(column.value.clone()));
-
                     graph_backlog[col_pos].push(match_value(column.value.clone()));
                     col_pos += 1;
 
                     if fft_signals.iter().all(|(_col, value)| value.len() >= 500) {fft_signals.iter_mut().for_each(|(_col, value)| {value.remove(0);})}
-                    fft_signals.entry(column.desc.name.clone()).or_insert_with(||Vec::new()).push(match_value(column.value.clone()));
+                    fft_signals.entry(column.desc.name.clone()).or_default().push(match_value(column.value.clone()));
 
                     if elapsed.elapsed() >= std::time::Duration::from_secs(1) {
                         elapsed = std::time::Instant::now();
