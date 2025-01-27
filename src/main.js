@@ -204,8 +204,8 @@ window.onload = () => {
                                 return;
                             }
                         })
-                        document.getElementById('FFT').style.display = 'inline-block'
-                        node.style.display = stayDisplayed? 'inline-block' : 'none';
+                        document.getElementById('FFT').style.display = 'block'
+                        node.style.display = stayDisplayed? 'block' : 'none';
                     } else {
                         node.style.display = 'none'
                     }
@@ -297,16 +297,22 @@ window.onload = () => {
 
     //creating FFT graphs
     webpage.once("fftgraphs", (event) => {
-        const graphs = event.payload;
+        const [graphs, sorted] = event.payload;
+        let labels = [];
+        for (let keys in sorted){            
+            for (let value in sorted[keys] ){
+                labels.push(sorted[keys][value])
+            }
+        }
         graphs.forEach((graph, _index) => {
-            createFFT(graph, `${graph}`)
+            createFFT(graph, `${graph}`, labels)
         })
     })
 };
 
 var seriesConfig  = [{label: "Frequency (Hz)"}];
 let gotSeries = false;
-function createFFT(eventName, containerId) {
+function createFFT(eventName, containerId, labels) {
     const template = document.getElementById('fft-template');
     const clone = template.content.cloneNode(true);
     const container = clone.querySelector('.canvas-container');
@@ -320,7 +326,7 @@ function createFFT(eventName, containerId) {
         if (!gotSeries) {
             for (let i = 1; i< spectrum.data.length; i++) {
                 seriesConfig.push({
-                    label: `Power Spectrum ${i} (V/√Hz)`, 
+                    label: `${labels[i-1]} (V/√Hz)`, 
                     stroke: `hsl(${i*130}, 30%, 35%)`,
                     points: {show: false}
                 })
@@ -355,7 +361,7 @@ function createFFT(eventName, containerId) {
         setTimeout(() => {
             let data = Array.from({ length: seriesConfig.length }, () => []);
             let opt = {
-                title: eventName,
+                title: `${eventName} power spectrum`,
                 width: 800,
                 height: 300,
                 series: seriesConfig,

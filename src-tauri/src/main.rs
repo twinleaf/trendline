@@ -12,6 +12,11 @@ use std::collections::{HashMap, HashSet};
 struct SpectrumData {
     data: Vec<Vec<f32>>
 }
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone)]
+struct GraphLabel{
+    col_name: Vec<String>, 
+    col_desc: Vec<String>
+}
 struct RpcMeta {
     arg_type: String,
     size: usize,
@@ -225,7 +230,7 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
     Ok(result)
 }
 
-fn rpc_controls(args: &[String], column_names: HashMap<u8, Vec<String>>) -> Vec<String>  {
+fn rpc_controls(args: &[String], column_names: Vec<String>) -> Vec<String>  {
     let opts = tio_opts();
     let (_matches, root, route) = tio_parseopts(opts, args);
     let proxy = proxy::Interface::new(&root);
@@ -237,14 +242,12 @@ fn rpc_controls(args: &[String], column_names: HashMap<u8, Vec<String>>) -> Vec<
     let mut seen_controls: HashSet<String> = HashSet::new();
     let mut control_names: HashMap<String, Vec<String>> = HashMap::new();
 
-    for col_names in column_names.values() {
-        for meta_name in col_names {
-            let parts: Vec<&str> = meta_name.split('.').collect();
-            if parts.len() > 2 {
-                let prefix = format!("{}.{}", parts[0], parts[1]);
-                control_names.entry(prefix).or_default().push(meta_name.clone());
-            }   
-        }     
+    for names in column_names {
+        let parts: Vec<&str> = names.split('.').collect();
+        if parts.len() > 2 {
+            let prefix = format!("{}.{}", parts[0], parts[1]);
+            control_names.entry(prefix).or_default().push(names.clone());
+        }
     }
 
     let mut rpc_map: HashMap<String, Vec<String>> = HashMap::new();
@@ -308,14 +311,12 @@ fn match_value(data: ColumnData) -> f32 {
     data_type
 }
 
-fn prefix(column_data: HashMap<u8, Vec<String>>) -> HashMap<String, Vec<String>> {
+fn prefix(column_data: Vec<String>) -> HashMap<String, Vec<String>> {
     let mut fft_groups: HashMap<String, Vec<String>> = HashMap::new();
-    for (_id, names) in column_data {
-        for name in names {
-            let parts: Vec<&str> = name.split('.').collect();
-            let prefix = parts[0].to_string();
-            fft_groups.entry(prefix).or_default().push(name.clone());
-        }
+    for names in column_data {
+        let parts: Vec<&str> = names.split('.').collect();
+        let prefix = parts[0].to_string();
+        fft_groups.entry(prefix).or_default().push(names.clone());
     }
     fft_groups
 }
@@ -341,47 +342,43 @@ fn graph_data(window: Window) {
         //get sampling & decimation rate, column metadata
         let meta = device.get_metadata();
         let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
-        let mut column_names: HashMap<u8, Vec<String>> = HashMap::new();
-        let mut column_desc: HashMap<String, String> = HashMap::new();
+        let mut stream_desc = GraphLabel{
+            col_name: Vec::new(),
+            col_desc: Vec::new()
+        };
         for stream in meta.streams.values() {
             sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
             for col in &stream.columns {
-                column_names.entry(stream.stream.stream_id).or_default();
-                if let Some(names) = column_names.get_mut(&stream.stream.stream_id){
-                    names.push(col.name.clone());
-                }
                 if stream.stream.stream_id == stream_id {
-                    column_desc.entry(col.name.clone()).or_insert_with(||col.description.clone());
+                    stream_desc.col_name.push(col.name.clone());
+                    stream_desc.col_desc.push(col.description.clone());
                 }
             }
         }
-        
-        let fft_sort = prefix(column_names.clone());
-        let header = format!("Connected to: {}\nSerial: {}\nStream: {}", meta.device.name, meta.device.serial_number, stream_id);
-        let _= window.emit("graph_labels", (header, column_desc));
+        let fft_sort = prefix(stream_desc.col_name.clone());
+        let header = format!("{}\nSerial: {}\nStream: {}", meta.device.name, meta.device.serial_number, stream_id);
+        let _= window.emit("graph_labels", (header, stream_desc.clone()));
 
         //Emit FFT Graph setup
         let mut key_names: Vec<String> = Vec::new();
         let mut last_key: String = String::new();
         for key in fft_sort.keys() {
-            if let Some(stream_num) = column_names.get(&stream_id){
-                for stream_name in stream_num {
-                    let parts: Vec<&str> = stream_name.split('.').collect();
-                    let prefix = parts[0].to_string();
-                    if *key.to_string() == prefix && last_key != prefix{
-                        key_names.push(key.to_string());
-                        last_key = prefix;
-                    }
+            for stream_name in stream_desc.col_name.clone() {
+                let parts: Vec<&str> = stream_name.split('.').collect();
+                let prefix = parts[0].to_string();
+                if *key.to_string() == prefix && last_key != prefix{
+                    key_names.push(key.to_string());
+                    last_key = prefix;
                 }
-            };
+            }
         }
-        let _ = window.emit("fftgraphs", &key_names.clone());
+        let _ = window.emit("fftgraphs", (&key_names.clone(), fft_sort));
 
         //Emitting RPC Commands
-        let rpc_results = rpc_controls(&args, column_names.clone());
+        let rpc_results = rpc_controls(&args, stream_desc.col_name.clone());
         window.emit("rpcs", rpc_results).unwrap();
 
-        let mut elapsed = std::time::Instant::now();
+        let elapsed = std::time::Instant::now();
         let mut fft_signals: HashMap<String, Vec<f32>> = HashMap::new();
         let mut graph_backlog: Vec<Vec<f32>> = Vec::new();
 
@@ -389,40 +386,44 @@ fn graph_data(window: Window) {
         loop{ 
             let sample = device.next();
             let mut fft_freq: HashMap<String, Vec<f32>> = HashMap::new();
-            let mut fft_power: HashMap<String, Vec<f32>> = HashMap::new();
+            let mut fft_power: HashMap<String, Vec<Vec<f32>>> = HashMap::new();
             let mut col_pos = 0;
 
             if sample.stream.stream_id == stream_id{
                 if graph_backlog.is_empty() {
                     graph_backlog = vec![Vec::new(); sample.columns.len()]
                 }
-                for column in &sample.columns{
+                for column in &sample.columns{                  
                     graph_backlog[col_pos].push(match_value(column.value.clone()));
                     col_pos += 1;
 
-                    if fft_signals.iter().all(|(_col, value)| value.len() >= 500) {fft_signals.iter_mut().for_each(|(_col, value)| {value.remove(0);})}
+                    if fft_signals.iter().all(|(_col, value)| value.len() >= 200) {
+                        fft_signals.iter_mut().for_each(|(_col, value)| {value.remove(0);});
+                    }
                     fft_signals.entry(column.desc.name.clone()).or_default().push(match_value(column.value.clone()));
 
                     if elapsed.elapsed() >= std::time::Duration::from_secs(1) {
-                        elapsed = std::time::Instant::now();
                         let (freq, power) = calc_fft(fft_signals.get(&column.desc.name.clone()), sampling_rates.get(&sample.stream.stream_id));
                         if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){
                             let parts: Vec<&str> = column.desc.name.split('.').collect();
                             let prefix = parts[0].to_string();
-                            fft_power.entry(prefix.clone()).or_insert_with(||power.clone());
+                            fft_power.entry(prefix.clone()).or_default().push(power.clone());
                             fft_freq.entry(prefix.clone()).or_insert_with(||freq.clone());
                         }
                     }
                 }
-                
+
                 for (name, values) in &mut fft_power{
                     let mut spectrum_data = SpectrumData{
                         data: vec![]
                     };
+
                     if let Some(freq_result) = fft_freq.get(name) {
                         spectrum_data.data.push(freq_result.to_vec());
-                        spectrum_data.data.push(values.to_vec());
-                        let _ = window.emit(&name.clone(), spectrum_data);
+                        for value in values{
+                            spectrum_data.data.push(value.to_vec());
+                        }
+                        //let _ = window.emit(&name.clone(), spectrum_data);
                     }
                 }
                 
@@ -453,16 +454,16 @@ fn main(){
                 .title("Lily")
                 .build()?;
 
-            let _aux = window.add_child(
-                tauri::webview::WebviewBuilder::new("stream-2", WebviewUrl::App(Default::default()))
+            let _graph = window.add_child(
+                tauri::webview::WebviewBuilder::new("stream-1", WebviewUrl::App(Default::default()))
                     .auto_resize(),
                     LogicalPosition::new(0., 0.),
                     LogicalSize::new(800., 600.),
                 )?;
 
             //App listens for the RPC call and returns the result to the specified window
-            let main_window = app.get_webview("stream-2").unwrap();
-            let new_window = app.get_webview("stream-2").unwrap();
+            let main_window = app.get_webview("stream-1").unwrap();
+            let new_window = app.get_webview("stream-1").unwrap();
             app.listen("returningRPCName", move |event| {
                 let mut arg: Vec<String> = vec![env::args().collect(), "rpc".to_string()];   
                 let rpccall: Vec<String> = serde_json::from_str(event.payload()).unwrap();
