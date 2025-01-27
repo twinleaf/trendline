@@ -8,12 +8,13 @@
   </head>
 
   <div class = "sidebar">
-    <div id = "sensorinfo" class ="header"></div><br>
+    <div id = "sensorinfo" class ="header">
+      <h2 id = "deviceName"></h2>
+      <p id = "serialinfo"></p>
+    </div><br>
     <div class = "dropdown">
-      <button class = "dropbtn" id="drop">Select Graphs</button>
       <div class = "dropdown-content" id= "dropdown"></div>
     </div>
-
     <div class = "RPCCommands" id = "RPCCommands">
       <label id = "timeSpanVal">Time Span<input type = "number" id = "timeSpan" class = "time" min ="1" max = "1000" value = "10"/></label><br>
       <div><input id = "showPlot" type = "checkbox"> FFT</input></div>

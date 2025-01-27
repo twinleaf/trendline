@@ -15,12 +15,11 @@ window.onload = () => {
     var rpcs = [];
     var serial = []; 
     let timePoints = 10;
-
     let startTime = Date.now();
+
     webpage.listen("main", (event) => {
         const values = event.payload;
         const elapsed = (Date.now() - startTime) /1000;
-
         graphs.forEach((chart, index) => {  
             for (let i = 0; i < values[index].length; i++) {  
                 chart.data[0].push(elapsed)
@@ -35,11 +34,12 @@ window.onload = () => {
                     }
                 }
             }   
-            
             const timeSpan = document.getElementById('timeSpan');
             timeSpan.addEventListener('keypress', function(e) {
                 if (e.key == "Enter") {
                     timePoints = in_range(timeSpan);
+                    let firstLogTime = chart.data[0][0]
+                    let recentLogTime = chart.data[0][chart.data[0].length -1]
                     while ((recentLogTime - firstLogTime)> timePoints) {
                         for (let i = 0; i < chart.data.length; i++){
                             chart.data[i].shift();
@@ -56,11 +56,12 @@ window.onload = () => {
     });
 
     webpage.once("graph_labels", (event) => {
-        const [header, label_name] = event.payload;
-        serial.push(header);
-        for (let key in label_name){
-            columns.push(label_name[key])
-            column_id.push(key)
+        const [header, label] = event.payload;
+        serial.push(header.split('\n').slice(0)[0]);
+        serial.push(header.split('\n').slice(1, 3).join('\n'));
+        for (let name in label.col_name){
+            columns.push(label.col_desc[name])
+            column_id.push(label.col_name[name])
         }
     })
 
@@ -80,11 +81,8 @@ window.onload = () => {
 
     setTimeout(() => {
         //Push Sensor information to display
-        const deviceinfo = document.getElementById('sensorinfo');
-        const display = document.createElement('info');
-        display.type = "paragraph";
-        display.innerText= serial[0];
-        deviceinfo.appendChild(display);
+        document.getElementById('deviceName').innerText= serial[0];
+        document.getElementById('serialinfo').innerText = serial[1];
 
         //write out rpc divs
         const rpcGroups = new Map();
@@ -117,7 +115,7 @@ window.onload = () => {
                     addElement.className = "checkCommands";
                 } else if (command === 'reset'|| command === 'capture') {
                     addElement = document.createElement('button');
-                    addElement.innerText = 'Reset';
+                    addElement.innerText = command;
                     addElement.className = "buttonCommands";
                 } else {
                     addElement = document.createElement('input');
@@ -127,7 +125,7 @@ window.onload = () => {
                 }
                 addElement.id = `${prefix}.${command}`;
 
-                if (command != 'reset'){
+                if (command != 'reset' && command != 'capture'){
                     const label = document.createElement('label');
                     label.htmlFor = addElement.id;
                     label.innerText = command + ' '
@@ -296,13 +294,6 @@ window.onload = () => {
             }
         })
     }); 
-    
-    //side bar dropdown 
-    const drop = document.getElementById('drop')
-    drop.addEventListener("click", function() {
-        const content = document.getElementById('dropdown')
-        content.classList.toggle("show");
-    })
 
     //creating FFT graphs
     webpage.once("fftgraphs", (event) => {
