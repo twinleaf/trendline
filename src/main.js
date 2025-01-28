@@ -6,18 +6,259 @@ const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 const { once } = window.__TAURI__.event;
 
 invoke('graph_data');
-
 webpage = getCurrentWebviewWindow();
-window.onload = () => {
-    var graphs = []; 
-    var columns = []; 
-    var column_id = [];
-    var rpcs = [];
-    var serial = []; 
+
+var graphs = [];
+var columns = []; 
+var column_id = [];
+var rpcs = [];
+var serial = []; 
+let labelloaded = false;
+let rpcloaded = false;
+
+webpage.once("graph_labels", (event) => {
+    const [header, label] = event.payload;
+    serial.push(header.split('\n').slice(0)[0]);
+    serial.push(header.split('\n').slice(1, 3).join('\n'));
+    for (let name in label.col_name){
+        columns.push(label.col_desc[name])
+        column_id.push(label.col_name[name])
+    }
+    labelloaded = true
+})
+
+webpage.once("rpcs", (event) => {
+    const controls = event.payload;
+    for (let i = 0; i< controls.length; i++) {rpcs.push(controls[i])}
+    rpcloaded = true
+})
+
+webpage.once("fftgraphs", (event) => {
+    const [graphs, sorted] = event.payload;
+    let labels = [];
+    for (let keys in sorted){            
+        for (let value in sorted[keys] ){
+            labels.push(sorted[keys][value])
+        }
+    }
+    graphs.forEach((graph, _index) => {
+        createFFT(graph, `${graph}`, labels)
+    })
+})
+
+new Promise((resolve) => {
+    const checkLoad = setInterval(() => {
+        if (labelloaded && rpcloaded) {
+            clearInterval(checkLoad);
+            resolve();
+        }
+    }, 100);
+}).then(() => {
+    setTimeout(() => {
+        //Push Sensor information to display
+        document.getElementById('deviceName').innerText= serial[0];
+        document.getElementById('serialinfo').innerText = serial[1];
+
+        //write out rpc divs
+        const rpcGroups = new Map();
+        rpcs.forEach(rpc => {
+            const prefix = rpc.split('.').slice(0, -1).join('.');
+            const suffix = rpc.split('.').slice(-1).join('.');
+            if (!rpcGroups.has(prefix)) {
+                rpcGroups.set(prefix, []);
+            }
+            rpcGroups.get(prefix).push(suffix);
+        })
+
+        const rpcsContainer = document.getElementById('RPCCommands')
+        rpcGroups.forEach((commands, prefix) => {
+            const rpcDiv = document.createElement('div');
+            rpcDiv.id = prefix;
+            rpcDiv.className = 'controls'
+            rpcDiv.style.display = 'none';
+
+            const title = document.createElement('paragraph');
+            title.innerText = prefix + ' ';
+            rpcDiv.appendChild(title);
+            rpcDiv.appendChild(document.createElement('br'))
+
+            commands.forEach(command => {
+                let addElement;
+                if (command === 'enable') {
+                    addElement = document.createElement('input');
+                    addElement.type = 'checkbox';
+                    addElement.className = "checkCommands";
+                } else if (command === 'reset'|| command === 'capture') {
+                    addElement = document.createElement('button');
+                    addElement.innerText = command;
+                    addElement.className = "buttonCommands";
+                } else {
+                    addElement = document.createElement('input');
+                    addElement.type = 'number';
+                    addElement.step = 0.1;
+                    addElement.className = "InputCommands";
+                }
+                addElement.id = `${prefix}.${command}`;
+
+                if (command != 'reset' && command != 'capture'){
+                    const label = document.createElement('label');
+                    label.htmlFor = addElement.id;
+                    label.innerText = command + ' '
+                    label.appendChild(addElement)
+                    rpcDiv.appendChild(label);
+                } else{rpcDiv.appendChild(addElement)}
+
+                rpcDiv.appendChild(document.createElement('br'))
+            })
+            rpcsContainer.appendChild(rpcDiv)
+        })
+        attachInputListeners();
+        attachToggleListeners();
+
+        const inputChange = document.querySelectorAll('.InputCommands');
+        const toggleChange = document.querySelectorAll('.checkCommands') 
+
+        //write out a chart for each column 
+        const rpcType = document.querySelectorAll('.controls');
+        for (let i = 0; i < columns.length; i++) {
+            const checkboxesContainer = document.getElementById('dropdown');
+            const canvasesContainer = document.getElementById('canvases');
+
+            //create checkboxes
+            const checkbox = document.createElement('input');
+            checkbox.type = "checkbox";
+            checkbox.id = column_id[i]
+            checkbox.className = 'checkboxes'
+
+            //create labels for checkboxes
+            const label = document.createElement('label');
+            label.htmlFor = checkbox.id;
+            label.innerText = columns[i]
+    
+            const lineBreak = document.createElement('br');
+
+            //create canvas
+            const canvas = document.createElement('div');
+            canvas.id = `canvas${i}`;
+            canvas.classList = 'canvas-container';
+            canvas.style.display = 'none';
+            canvas.style.height = '300px';
+            canvasesContainer.appendChild(canvas)
+
+            //add objects to div
+            checkboxesContainer.appendChild(checkbox);
+            checkboxesContainer.appendChild(label);
+            checkboxesContainer.appendChild(lineBreak);
+            
+            //uplot graph styling
+            let options = {
+                width: 800, 
+                height: 300,
+                series: [
+                    {label: 'Time'},
+                    { 
+                        label: column_id[i],
+                        stroke: 'red',
+                        points: { show: false },    
+                        value: (u, v) => v  
+    
+                    },
+                ],
+                axes: [
+                    {},
+                    {
+                        size: 80,
+                        values: (u, v) => v
+                    }
+                ],
+                scales: {
+                    x: {
+                    time: false,
+                    distr: 2,
+                    auto: true,
+                    }
+                }
+            }
+
+            const data = [[],[]]
+            const uplot = new uPlot(options, data, document.getElementById(canvas.id))
+            graphs.push(uplot)
+            makeResizable(canvas.id, uplot)
+
+            const fftpop = document.getElementById('showPlot')
+            const checkboxes = document.querySelectorAll('.checkboxes');
+
+            checkbox.addEventListener("change", (event) => {
+                const canvas = document.getElementById(`canvas${i}`)
+                canvas.style.display = event.target.checked ? 'block' : 'none';
+ 
+                rpcType.forEach(rpcControl => {
+                    let stayDisplayed = false;
+                    checkboxes.forEach(checkbox => {
+                        if (checkbox.id.split('.').slice(0,1).toString() == rpcControl.id.split('.').slice(0, 1).toString() && checkbox.checked) {
+                            stayDisplayed = true; 
+                        }
+                    });
+                    rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
+                });  
+                
+            });
+            
+            fftpop.addEventListener("change", () => {
+                document.getElementById('FFT').childNodes.forEach(node => {
+                    if (fftpop.checked){
+                        let stayDisplayed = false;
+                        checkboxes.forEach(checkbox => {
+                            if (checkbox.id.split('.').slice(0,1).toString() == node.id.toString() && checkbox.checked) {
+                                stayDisplayed = true;
+                                return;
+                            }
+                        })
+                        document.getElementById('FFT').style.display = 'block'
+                        node.style.display = stayDisplayed? 'block' : 'none';
+                    } else {
+                        node.style.display = 'none'
+                    }
+                })
+            })
+
+            rpcType.forEach(rpcDiv => {
+                inputChange.forEach(rpccall => {
+                    if (checkbox.id.split('.').slice(0,1).toString() == rpcDiv.id.split('.').slice(0, 1) && rpccall.parentNode.parentNode == rpcDiv){
+                        webpage.emit('onLoad', rpccall.id)
+                        lastLabel = rpcDiv.id
+                    } 
+                })
+                toggleChange.forEach(toggleChange => {
+                    if (checkbox.id.split('.').slice(0,1).toString() == rpcDiv.id.split('.').slice(0, 1) && toggleChange.parentNode.parentNode == rpcDiv){
+                        webpage.emit('onLoad', toggleChange.id)
+                    } 
+                })
+            })
+
+            //display rpc values on load
+            webpage.listen("returnOnLoad", (event) => {
+                let [name, inputValue] = event.payload;
+                inputChange.forEach(rpccall => {
+                    if (rpccall.id == name) {
+                        rpccall.value = inputValue;
+                        rpccall.textContent = inputValue;
+                        rpccall.innerHTML = inputValue;
+                    }
+                })
+                toggleChange.forEach(toggle => {
+                    if (toggle.id == name && inputValue == 1){
+                        toggle.checked = true;
+                    }
+                })
+            });
+        }
+    }, 1000);
+});
+
+window.onload = () => { 
     let timePoints = 10;
     let startTime = Date.now();
-    let labelloaded = false;
-    let rpcloaded = false;
 
     webpage.listen("main", (event) => {
         const values = event.payload;
@@ -57,24 +298,6 @@ window.onload = () => {
         }) 
     });
 
-    webpage.once("graph_labels", (event) => {
-        const [header, label] = event.payload;
-        serial.push(header.split('\n').slice(0)[0]);
-        serial.push(header.split('\n').slice(1, 3).join('\n'));
-        for (let name in label.col_name){
-            columns.push(label.col_desc[name])
-            column_id.push(label.col_name[name])
-        }
-        labelloaded = true
-    })
-
-    webpage.once("rpcs", (event) => {
-        const controls = event.payload;
-        for (let i = 0; i< controls.length; i++) {rpcs.push(controls[i])}
-        rpcloaded = true
-    })
-
-    //on button click return rpc
     const buttonChange = document.querySelectorAll('.buttonCommands');
     buttonChange.forEach(clickButton => {
         clickButton.addEventListener("click", function() {   
@@ -83,220 +306,7 @@ window.onload = () => {
         })
     })
 
-    new Promise((resolve) => {
-        const checkLoad = setInterval(() => {
-            if (labelloaded && rpcloaded) {
-                clearInterval(checkLoad);
-                resolve();
-            }
-        }, 100);
-    }).then(() => {
-        setTimeout(() => {
-            //Push Sensor information to display
-            document.getElementById('deviceName').innerText= serial[0];
-            document.getElementById('serialinfo').innerText = serial[1];
-    
-            //write out rpc divs
-            const rpcGroups = new Map();
-            rpcs.forEach(rpc => {
-                const prefix = rpc.split('.').slice(0, -1).join('.');
-                const suffix = rpc.split('.').slice(-1).join('.');
-                if (!rpcGroups.has(prefix)) {
-                    rpcGroups.set(prefix, []);
-                }
-                rpcGroups.get(prefix).push(suffix);
-            })
-    
-            const rpcsContainer = document.getElementById('RPCCommands')
-            rpcGroups.forEach((commands, prefix) => {
-                const rpcDiv = document.createElement('div');
-                rpcDiv.id = prefix;
-                rpcDiv.className = 'controls'
-                rpcDiv.style.display = 'none';
-    
-                const title = document.createElement('paragraph');
-                title.innerText = prefix + ' ';
-                rpcDiv.appendChild(title);
-                rpcDiv.appendChild(document.createElement('br'))
-    
-                commands.forEach(command => {
-                    let addElement;
-                    if (command === 'enable') {
-                        addElement = document.createElement('input');
-                        addElement.type = 'checkbox';
-                        addElement.className = "checkCommands";
-                    } else if (command === 'reset'|| command === 'capture') {
-                        addElement = document.createElement('button');
-                        addElement.innerText = command;
-                        addElement.className = "buttonCommands";
-                    } else {
-                        addElement = document.createElement('input');
-                        addElement.type = 'number';
-                        addElement.step = 0.1;
-                        addElement.className = "InputCommands";
-                    }
-                    addElement.id = `${prefix}.${command}`;
-    
-                    if (command != 'reset' && command != 'capture'){
-                        const label = document.createElement('label');
-                        label.htmlFor = addElement.id;
-                        label.innerText = command + ' '
-                        label.appendChild(addElement)
-                        rpcDiv.appendChild(label);
-                    } else{rpcDiv.appendChild(addElement)}
-    
-                    rpcDiv.appendChild(document.createElement('br'))
-                })
-                rpcsContainer.appendChild(rpcDiv)
-            })
-            attachInputListeners();
-            attachToggleListeners();
-    
-            const inputChange = document.querySelectorAll('.InputCommands');
-            const toggleChange = document.querySelectorAll('.checkCommands') 
-    
-            //write out a chart for each column 
-            const rpcType = document.querySelectorAll('.controls');
-            for (let i = 0; i < columns.length; i++) {
-                const checkboxesContainer = document.getElementById('dropdown');
-                const canvasesContainer = document.getElementById('canvases');
-    
-                //create checkboxes
-                const checkbox = document.createElement('input');
-                checkbox.type = "checkbox";
-                checkbox.id = column_id[i]
-                checkbox.className = 'checkboxes'
-    
-                //create labels for checkboxes
-                const label = document.createElement('label');
-                label.htmlFor = checkbox.id;
-                label.innerText = columns[i]
-        
-                const lineBreak = document.createElement('br');
-    
-                //create canvas
-                const canvas = document.createElement('div');
-                canvas.id = `canvas${i}`;
-                canvas.classList = 'canvas-container';
-                canvas.style.display = 'none';
-                canvasesContainer.appendChild(canvas)
-    
-                //add objects to div
-                checkboxesContainer.appendChild(checkbox);
-                checkboxesContainer.appendChild(label);
-                checkboxesContainer.appendChild(lineBreak);
-                
-                const pop = document.getElementById('showPlot')
-                const checkboxes = document.querySelectorAll('.checkboxes');
-    
-                //event listener to display canvas/RPC div on click
-                checkbox.addEventListener("change", (event) => {
-                    const canvas = document.getElementById(`canvas${i}`)
-                    canvas.style.display = event.target.checked ? 'block' : 'none';
-    
-                    rpcType.forEach(rpcControl => {
-                        let stayDisplayed = false;
-                        checkboxes.forEach(checkbox => {
-                            if (checkbox.id.split('.').slice(0,1).toString() == rpcControl.id.split('.').slice(0, 1).toString() && checkbox.checked) {
-                                stayDisplayed = true; 
-                            }
-                        });
-                        rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
-                    });  
-                    
-                });
-                
-                pop.addEventListener("change", (event) => {
-                    document.getElementById('FFT').childNodes.forEach(node => {
-                        if (pop.checked){
-                            let stayDisplayed = false;
-                            checkboxes.forEach(checkbox => {
-                                if (checkbox.id.split('.').slice(0,1).toString() == node.id.toString() && checkbox.checked) {
-                                    stayDisplayed = true;
-                                    return;
-                                }
-                            })
-                            document.getElementById('FFT').style.display = 'block'
-                            node.style.display = stayDisplayed? 'block' : 'none';
-                        } else {
-                            node.style.display = 'none'
-                        }
-                    })
-                })
-    
-                rpcType.forEach(rpcDiv => {
-                    const rpcControlId = rpcDiv.id.split('.').slice(0, 1);
-                    inputChange.forEach(rpccall => {
-                        if (checkbox.id.split('.').slice(0,1).toString() == rpcDiv.id.split('.').slice(0, 1) && rpccall.parentNode.parentNode == rpcDiv){
-                            webpage.emit('onLoad', rpccall.id)
-                            lastLabel = rpcDiv.id
-                        } 
-                    })
-                    toggleChange.forEach(toggleChange => {
-                        if (checkbox.id.split('.').slice(0,1).toString() == rpcDiv.id.split('.').slice(0, 1) && toggleChange.parentNode.parentNode == rpcDiv){
-                            webpage.emit('onLoad', toggleChange.id)
-                        } 
-                    })
-                })
-    
-                //uplot graph styling
-                let options = {
-                    width: 800, 
-                    height: 300,
-                    series: [
-                        {label: 'Time'},
-                        { 
-                            label: column_id[i],
-                            stroke: 'red',
-                            points: { show: false },    
-                            value: (u, v) => v  
-        
-                        },
-                    ],
-                    axes: [
-                        {},
-                        {
-                            size: 80,
-                            values: (u, v) => v
-                        }
-                    ],
-                    scales: {
-                        x: {
-                        time: false,
-                        distr: 2,
-                        auto: true,
-                        }
-                    }
-                }
-    
-                const data = [[],[]]
-                const uplot = new uPlot(options, data, document.getElementById(canvas.id))
-                graphs.push(uplot)
-    
-                makeResizable(canvas.id, uplot)
-    
-                //display rpc values on load
-                webpage.listen("returnOnLoad", (event) => {
-                    let [name, inputValue] = event.payload;
-                    inputChange.forEach(rpccall => {
-                        if (rpccall.id == name) {
-                            rpccall.value = inputValue;
-                            rpccall.textContent = inputValue;
-                            rpccall.innerHTML = inputValue;
-                        }
-                    })
-                    toggleChange.forEach(toggle => {
-                        if (toggle.id == name && inputValue == 1){
-                            toggle.checked = true;
-                        }
-                    })
-                });
-            }
-        }, 1000);
-    });
-
     const inputChange = document.querySelectorAll('.InputCommands');
-    //returns all rpc values to corresponding input field
     webpage.listen("returnRPC", (event) => {
         let [name, inputValue] = event.payload;
         inputChange.forEach(rpccall => {
@@ -307,20 +317,6 @@ window.onload = () => {
             }
         })
     }); 
-
-    //creating FFT graphs
-    webpage.once("fftgraphs", (event) => {
-        const [graphs, sorted] = event.payload;
-        let labels = [];
-        for (let keys in sorted){            
-            for (let value in sorted[keys] ){
-                labels.push(sorted[keys][value])
-            }
-        }
-        graphs.forEach((graph, _index) => {
-            createFFT(graph, `${graph}`, labels)
-        })
-    })
 };
 
 var seriesConfig  = [{label: "Frequency (Hz)"}];
@@ -349,9 +345,7 @@ function createFFT(eventName, containerId, labels) {
         
         for (let i = 0; i< spectrum.data[0].length; i++){
             for (let j = 0; j< spectrum.data.length; j++){
-                if (fftPlot.data[j]) {
-                    fftPlot.data[j].push(spectrum.data[j][i])
-                }
+                fftPlot.data[j].push(spectrum.data[j][i])
             }
         }
 
@@ -417,7 +411,7 @@ function in_range(fillValue) {
 function makeResizable(elementId, uplotInstance) {
     const element = document.getElementById(elementId);
     interact(element).resizable({
-        edges: { left: true, right: true, bottom: true, top: true },
+        edges: { left: false, right: false, bottom: true, top: true },
         inertia: true,
         listeners: {
         move(event) {
