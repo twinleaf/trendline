@@ -1,4 +1,3 @@
-/* navigation */
 .sidebar {
   position: fixed;
   width: 280px;
@@ -63,14 +62,13 @@
 .show {display: inline-block;
        flex-direction: column;}
 
-/*RPC Commands*/
 .RPCCommands{
   border: 5px;
   padding: 10px;
 }
 
 .controls{
-  margin-top: 10px;
+  margin-top: 5px;
   border-top-style: double;
   border-bottom-style: double;
 }
@@ -100,32 +98,29 @@ position: relative;
   margin-bottom: 5px;
 }
 
-      
-/*Graphs*/
-main {
-  margin-left: 300px;
-} 
-
 #canvases {
   position: relative;
   padding: 2vh;
+  border: solid;
+  border-width: 1px;
+  margin-left: 320px;
 }
 
 .canvas-container {
-  border-style: dotted;
+  border-bottom-style: solid;
   border-color: black;
   border-width: 1px; 
-  width: auto;
   overflow: auto;
   margin: auto;
-  padding: 10px;
   position: relative;
 }
 
 #FFT {
   position: relative;
   padding: 2vh;
-  margin-left: 300px;
+  border: solid;
+  border-width: 1px;
+  margin-left: 320px;
   display: none;
 }
 

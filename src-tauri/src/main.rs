@@ -456,7 +456,7 @@ fn main(){
         .setup(|app| {
             let window = tauri::WindowBuilder::new(app, "main")
                 .inner_size(800., 600.)
-                .title("Lily")
+                .title("Twinleaf UI") 
                 .build()?;
 
             let _graph = window.add_child(

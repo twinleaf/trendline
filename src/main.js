@@ -124,33 +124,26 @@ new Promise((resolve) => {
             const checkboxesContainer = document.getElementById('dropdown');
             const canvasesContainer = document.getElementById('canvases');
 
-            //create checkboxes
             const checkbox = document.createElement('input');
             checkbox.type = "checkbox";
             checkbox.id = column_id[i]
             checkbox.className = 'checkboxes'
 
-            //create labels for checkboxes
             const label = document.createElement('label');
             label.htmlFor = checkbox.id;
             label.innerText = columns[i]
-    
             const lineBreak = document.createElement('br');
 
-            //create canvas
             const canvas = document.createElement('div');
             canvas.id = `canvas${i}`;
             canvas.classList = 'canvas-container';
             canvas.style.display = 'none';
-            canvas.style.height = '300px';
             canvasesContainer.appendChild(canvas)
 
-            //add objects to div
             checkboxesContainer.appendChild(checkbox);
             checkboxesContainer.appendChild(label);
             checkboxesContainer.appendChild(lineBreak);
             
-            //uplot graph styling
             let options = {
                 width: 800, 
                 height: 300,
@@ -214,10 +207,11 @@ new Promise((resolve) => {
                                 return;
                             }
                         })
-                        document.getElementById('FFT').style.display = 'block'
+                        document.getElementById('FFT').style.display = stayDisplayed? 'block': 'none';
                         node.style.display = stayDisplayed? 'block' : 'none';
                     } else {
                         node.style.display = 'none'
+                        document.getElementById('FFT').style.display = 'none'
                     }
                 })
             })
@@ -269,7 +263,7 @@ window.onload = () => {
                 chart.data[1].push(values[index][i])
 
                 let firstLogTime = chart.data[0][0]
-                let recentLogTime = chart.data[0][chart.data[0].length -1] //last timestamp
+                let recentLogTime = chart.data[0][chart.data[0].length -1]
 
                 if ((recentLogTime - firstLogTime) > timePoints){
                     for (let i = 0; i < chart.data.length; i++){
@@ -326,7 +320,6 @@ function createFFT(eventName, containerId, labels) {
     const clone = template.content.cloneNode(true);
     const container = clone.querySelector('.canvas-container');
     container.id = containerId;
-    document.getElementById('FFT').appendChild(container); 
     let fftPlot;
 
     // Listen for the event and update the graph
@@ -342,19 +335,28 @@ function createFFT(eventName, containerId, labels) {
             } 
             gotSeries = true;
         }
+        new Promise((resolve) => {
+            const plotCreated = setInterval(() => {
+                if (fftPlot !== undefined) {
+                    clearInterval(plotCreated);
+                    resolve();
+                }
+            }, 100);
+        }).then(() => {
+            for (let i = 0; i< spectrum.data[0].length; i++){
+                for (let j = 0; j< spectrum.data.length; j++){
+                    fftPlot.data[j].push(spectrum.data[j][i])
+                }
+            }
+    
+            while (fftPlot.data[0].length > 500){
+                for (let i = 0; i < fftPlot.data.length; i++){
+                    fftPlot.data[i].shift();
+                }
+            }
+            fftPlot.setData(fftPlot.data, true);
+        })
         
-        for (let i = 0; i< spectrum.data[0].length; i++){
-            for (let j = 0; j< spectrum.data.length; j++){
-                fftPlot.data[j].push(spectrum.data[j][i])
-            }
-        }
-
-        while (fftPlot.data[0].length > 500){
-            for (let i = 0; i < fftPlot.data.length; i++){
-                fftPlot.data[i].shift();
-            }
-        }
-        fftPlot.setData(fftPlot.data, true);
     });
 
     new Promise((resolve) => {
@@ -389,11 +391,39 @@ function createFFT(eventName, containerId, labels) {
             let chart = new uPlot(opt, data, container);
             fftPlot = chart;
             makeResizable(containerId, chart);
+            document.getElementById('FFT').appendChild(container);
         }, 200);
     })
 }
 
-//test if input is within specified range
+function makeResizable(elementId, uplotInstance) {
+    const element = document.getElementById(elementId);
+    interact(element).resizable({
+        edges: { left: true, right: true, bottom: true, top: true },
+        inertia: true,
+        listeners: {
+        move(event) {
+            const target = event.target;
+            let width = event.rect.width;
+            let height = event.rect.height;
+
+            target.style.width = `${width}px`;
+            target.style.height = `${height}px`;
+            //console.log(uplotInstance)
+
+            uplotInstance.setSize({ width, height });  
+        }
+        },
+        modifiers: [
+        interact.modifiers.restrict({
+            restriction: 'parent'
+        }),
+        interact.modifiers.restrictSize({
+            min: { width: 400, height: 200 }
+        })
+        ]
+    });
+}
 function in_range(fillValue) {
     const value = parseFloat(fillValue.value);
     const min = parseFloat(fillValue.min)
@@ -406,34 +436,6 @@ function in_range(fillValue) {
     } 
     else {withinRange = value;}
     return withinRange
-}
-
-function makeResizable(elementId, uplotInstance) {
-    const element = document.getElementById(elementId);
-    interact(element).resizable({
-        edges: { left: false, right: false, bottom: true, top: true },
-        inertia: true,
-        listeners: {
-        move(event) {
-            const target = event.target;
-            let width = event.rect.width;
-            let height = event.rect.height;
-
-            target.style.width = `${width}px`;
-            target.style.height = `${height}px`;
-
-            uplotInstance.setSize({ width, height });
-        }
-        },
-        modifiers: [
-        interact.modifiers.restrict({
-            restriction: 'parent'
-        }),
-        interact.modifiers.restrictSize({
-            min: { width: 400, height: 200 }
-        })
-        ]
-    });
 }
 
 function attachInputListeners() {
