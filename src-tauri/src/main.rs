@@ -355,8 +355,8 @@ fn graph_data(window: Window) {
                 }
             }
         }
-        //Found that without a sleep the javascript does not load in emit properly
-        thread::sleep(std::time::Duration::from_millis(100));
+        //Note: Found that without a sleep the javascript does not load in emit properly
+        thread::sleep(std::time::Duration::from_secs(1));
         let fft_sort = prefix(stream_desc.col_name.clone());
         let header = format!("{}\nSerial: {}\nStream: {}", meta.device.name, meta.device.serial_number, stream_id);
         let _= window.emit("graph_labels", (header, stream_desc.clone()));
@@ -383,6 +383,7 @@ fn graph_data(window: Window) {
         let elapsed = std::time::Instant::now();
         let mut fft_signals: HashMap<String, Vec<f32>> = HashMap::new();
         let mut graph_backlog: Vec<Vec<f32>> = Vec::new();
+        let mut calculate: bool = true;
 
         //Emitting Stream Data
         loop{ 
@@ -404,15 +405,17 @@ fn graph_data(window: Window) {
                     }
                     fft_signals.entry(column.desc.name.clone()).or_default().push(match_value(column.value.clone()));
 
-                    /*if elapsed.elapsed() >= std::time::Duration::from_secs(1) {
+                    if elapsed.elapsed() >= std::time::Duration::from_secs(1) && calculate {
                         let (freq, power) = calc_fft(fft_signals.get(&column.desc.name.clone()), sampling_rates.get(&sample.stream.stream_id));
                         if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){
                             let parts: Vec<&str> = column.desc.name.split('.').collect();
                             let prefix = parts[0].to_string();
                             fft_power.entry(prefix.clone()).or_default().push(power.clone());
                             fft_freq.entry(prefix.clone()).or_insert_with(||freq.clone());
+                        } else{
+                            calculate = false;
                         }
-                    }*/
+                    }
                 }
 
                 for (name, values) in &mut fft_power{
