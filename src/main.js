@@ -326,7 +326,7 @@ function createFFT(eventName, containerId, labels) {
     webpage.listen(eventName, (event) => {
         const spectrum = event.payload;
         if (!gotSeries) {
-            for (let i = 1; i< spectrum.data.length; i++) {
+            for (let i = 1; i< spectrum.length; i++) {
                 seriesConfig.push({
                     label: `${labels[i-1]} (V/√Hz)`, 
                     stroke: `hsl(${i*130}, 30%, 35%)`,
@@ -343,9 +343,9 @@ function createFFT(eventName, containerId, labels) {
                 }
             }, 100);
         }).then(() => {
-            for (let i = 0; i< spectrum.data[0].length; i++){
-                for (let j = 0; j< spectrum.data.length; j++){
-                    fftPlot.data[j].push(spectrum.data[j][i])
+            for (let i = 0; i< spectrum[0].length; i++){
+                for (let j = 0; j< spectrum.length; j++){
+                    fftPlot.data[j].push(spectrum[j][i])
                 }
             }
     
@@ -409,7 +409,6 @@ function makeResizable(elementId, uplotInstance) {
 
             target.style.width = `${width}px`;
             target.style.height = `${height}px`;
-            //console.log(uplotInstance)
 
             uplotInstance.setSize({ width, height });  
         }

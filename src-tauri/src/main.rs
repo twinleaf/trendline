@@ -8,11 +8,7 @@ use welch_sde::{Build, SpectralDensity};
 use std::{env, thread};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, serde::Deserialize, serde::Serialize, Clone)]
-struct SpectrumData {
-    data: Vec<Vec<f32>>
-}
-#[derive(Debug, serde::Deserialize, serde::Serialize, Clone)]
+#[derive(serde::Serialize, Clone)]
 struct GraphLabel{
     col_name: Vec<String>, 
     col_desc: Vec<String>
@@ -311,16 +307,6 @@ fn match_value(data: ColumnData) -> f32 {
     data_type
 }
 
-fn prefix(column_data: Vec<String>) -> HashMap<String, Vec<String>> {
-    let mut fft_groups: HashMap<String, Vec<String>> = HashMap::new();
-    for names in column_data {
-        let parts: Vec<&str> = names.split('.').collect();
-        let prefix = parts[0].to_string();
-        fft_groups.entry(prefix).or_default().push(names.clone());
-    }
-    fft_groups
-}
-
 #[tauri::command]
 fn graph_data(window: Window) {
     let args: Vec<String> = env::args().collect();   
@@ -357,24 +343,22 @@ fn graph_data(window: Window) {
         }
         //Note: Found that without a sleep the javascript does not load in emit properly
         thread::sleep(std::time::Duration::from_secs(1));
-        let fft_sort = prefix(stream_desc.col_name.clone());
+        //Emit graph labels
+        let mut fft_sort: HashMap<String, Vec<String>> = HashMap::new();
+        for names in stream_desc.col_name.clone() {
+            let parts: Vec<&str> = names.split('.').collect();
+            let prefix = parts[0].to_string();
+            fft_sort.entry(prefix).or_default().push(names.clone());
+        }
         let header = format!("{}\nSerial: {}\nStream: {}", meta.device.name, meta.device.serial_number, stream_id);
         let _= window.emit("graph_labels", (header, stream_desc.clone()));
 
         //Emit FFT Graph setup
         let mut key_names: Vec<String> = Vec::new();
-        let mut last_key: String = String::new();
-        for key in fft_sort.keys() {
-            for stream_name in stream_desc.col_name.clone() {
-                let parts: Vec<&str> = stream_name.split('.').collect();
-                let prefix = parts[0].to_string();
-                if *key.to_string() == prefix && last_key != prefix{
-                    key_names.push(key.to_string());
-                    last_key = prefix;
-                }
-            }
+        for key in fft_sort.keys(){
+            key_names.push(key.to_string())
         }
-        let _ = window.emit("fftgraphs", (&key_names.clone(), fft_sort));
+        let _ = window.emit("fftgraphs", (key_names, fft_sort));
 
         //Emitting RPC Commands
         let rpc_results = rpc_controls(&args, stream_desc.col_name.clone());
@@ -419,14 +403,11 @@ fn graph_data(window: Window) {
                 }
 
                 for (name, values) in &mut fft_power{
-                    let mut spectrum_data = SpectrumData{
-                        data: vec![]
-                    };
-
+                    let mut spectrum_data: Vec<Vec<f32>> = Vec::new();
                     if let Some(freq_result) = fft_freq.get(name) {
-                        spectrum_data.data.push(freq_result.to_vec());
+                        spectrum_data.push(freq_result.to_vec());
                         for value in values{
-                            spectrum_data.data.push(value.to_vec());
+                            spectrum_data.push(value.to_vec());
                         }
                         let _ = window.emit(&name.clone(), spectrum_data);
                     }
@@ -435,11 +416,9 @@ fn graph_data(window: Window) {
                 let decimation_info = sampling_rates.get(&sample.stream.stream_id);
                 if let Some(sampling) = decimation_info {
                     let fs = sampling[0] as f32/ sampling[1] as f32;
-                    if fs >= 20.0 {
-                        if graph_backlog.iter().all(|col| col.len() >= (fs / 20.0).ceil() as usize) {
-                            let _ = window.emit("main", &graph_backlog);
-                            graph_backlog.iter_mut().for_each(|col| col.clear());
-                        }
+                    if fs >= 20.0 && graph_backlog.iter().all(|col| col.len() >= (fs / 20.0).ceil() as usize){
+                        let _ = window.emit("main", &graph_backlog);
+                        graph_backlog.iter_mut().for_each(|col| col.clear());
                     }
                     else {
                         let _ = window.emit("main", &graph_backlog);
