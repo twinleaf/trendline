@@ -5,7 +5,8 @@ const { Webview } = window.__TAURI__.webview;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 const { once } = window.__TAURI__.event;
 
-invoke('graph_data');
+invoke('stream_data');
+invoke('fft_data')
 webpage = getCurrentWebviewWindow();
 
 var graphs = [];
@@ -15,6 +16,7 @@ var rpcs = [];
 var serial = []; 
 let labelloaded = false;
 let rpcloaded = false;
+let fftloaded = false;
 
 webpage.once("graph_labels", (event) => {
     const [header, label] = event.payload;
@@ -44,6 +46,7 @@ webpage.once("fftgraphs", (event) => {
     graphs.forEach((graph, _index) => {
         createFFT(graph, `${graph}`, labels)
     })
+    fftloaded = true
 })
 
 new Promise((resolve) => {
@@ -358,7 +361,8 @@ function createFFT(eventName, containerId, labels) {
         })
         
     });
-
+    document.getElementById('FFT').appendChild(container);
+    //Promise is failing to return container
     new Promise((resolve) => {
         const checkSeriesConfig = setInterval(() => {
             if (gotSeries) {
@@ -387,11 +391,9 @@ function createFFT(eventName, containerId, labels) {
                     { size: 100, values: (u, v) => v }
                 ]
             };
-
             let chart = new uPlot(opt, data, container);
             fftPlot = chart;
             makeResizable(containerId, chart);
-            document.getElementById('FFT').appendChild(container);
         }, 200);
     })
 }

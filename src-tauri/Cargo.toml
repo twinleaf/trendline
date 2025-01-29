@@ -16,12 +16,11 @@ twinleaf = "1.2.0"
 getopts = "0.2"
 welch-sde = "0.1.0"
 serde_yaml = "0.9.34"
+ratelimit = "0.10.0"
 
 [build-dependencies]
 tauri-build = { version = "2.0.3", features = [] }
 
-[[bin]]
-name = "main"
-path = "src/main.rs"
+
 
 

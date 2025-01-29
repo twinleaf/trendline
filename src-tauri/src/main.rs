@@ -5,14 +5,15 @@ use getopts::Options;
 
 use tauri::{Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window};
 use welch_sde::{Build, SpectralDensity};
-use std::{env, thread};
+use ratelimit::Ratelimiter;
+use std::{env, thread, time::Duration};
 use std::collections::{HashMap, HashSet};
 
 #[derive(serde::Serialize, Clone)]
 struct GraphLabel{
     col_name: Vec<String>, 
     col_desc: Vec<String>
-}
+} 
 struct RpcMeta {
     arg_type: String,
     size: usize,
@@ -308,7 +309,7 @@ fn match_value(data: ColumnData) -> f32 {
 }
 
 #[tauri::command]
-fn graph_data(window: Window) {
+fn stream_data(window: Window) {
     let args: Vec<String> = env::args().collect();   
     let opts = tio_opts();
     let (_matches, root, route) = tio_parseopts(opts, &args);
@@ -342,7 +343,7 @@ fn graph_data(window: Window) {
             }
         }
         //Note: Found that without a sleep the javascript does not load in emit properly
-        thread::sleep(std::time::Duration::from_secs(1));
+        thread::sleep(Duration::from_secs(1));
         //Emit graph labels
         let mut fft_sort: HashMap<String, Vec<String>> = HashMap::new();
         for names in stream_desc.col_name.clone() {
@@ -364,16 +365,11 @@ fn graph_data(window: Window) {
         let rpc_results = rpc_controls(&args, stream_desc.col_name.clone());
         window.emit("rpcs", rpc_results).unwrap();
 
-        let elapsed = std::time::Instant::now();
-        let mut fft_signals: HashMap<String, Vec<f32>> = HashMap::new();
         let mut graph_backlog: Vec<Vec<f32>> = Vec::new();
-        let mut calculate: bool = true;
 
         //Emitting Stream Data
         loop{ 
             let sample = device.next();
-            let mut fft_freq: HashMap<String, Vec<f32>> = HashMap::new();
-            let mut fft_power: HashMap<String, Vec<Vec<f32>>> = HashMap::new();
             let mut col_pos = 0;
 
             if sample.stream.stream_id == stream_id{
@@ -383,13 +379,74 @@ fn graph_data(window: Window) {
                 for column in &sample.columns{                  
                     graph_backlog[col_pos].push(match_value(column.value.clone()));
                     col_pos += 1;
+                }
+                
+                let decimation_info = sampling_rates.get(&sample.stream.stream_id);
+                if let Some(sampling) = decimation_info {
+                    let fs = sampling[0] as f32/ sampling[1] as f32;
+                    if fs >= 20.0 && graph_backlog.iter().all(|col| col.len() >= (fs / 20.0).ceil() as usize){
+                        let _ = window.emit("main", &graph_backlog);
+                        graph_backlog.iter_mut().for_each(|col| col.clear());
+                    }
+                    else {
+                        let _ = window.emit("main", &graph_backlog);
+                        graph_backlog.iter_mut().for_each(|col| col.clear());
+                    }
+                } 
+            }
+        }
+    });
+}
 
+
+#[tauri::command]
+fn fft_data(window: Window) {
+    let args: Vec<String> = env::args().collect();   
+    let opts = tio_opts();
+    let (_matches, root, route) = tio_parseopts(opts, &args);
+
+    let stream_id: u8 = if args.len() >1 {
+        match args[1].parse(){
+            Ok(val) => val,
+            Err(_e) => 1
+        }
+    } else {1};
+
+    thread::spawn(move || {
+        let proxy = proxy::Interface::new(&root);
+        let device = proxy.device_full(route).unwrap();
+        let mut device = Device::new(device);
+        
+        //get sampling & decimation rate, column metadata
+        let meta = device.get_metadata();
+        let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
+        for stream in meta.streams.values() {
+            sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
+        }
+
+        let elapsed = std::time::Instant::now();
+        let mut fft_signals: HashMap<String, Vec<f32>> = HashMap::new();
+        let mut calculate: bool = true;
+        let ratelimiter = Ratelimiter::builder(1000, Duration::from_millis(100)).max_tokens(1000).build().unwrap();
+
+        //Emitting FFT Data
+        loop{ 
+            let sample = device.next();
+            let mut fft_freq: HashMap<String, Vec<f32>> = HashMap::new();
+            let mut fft_power: HashMap<String, Vec<Vec<f32>>> = HashMap::new();
+
+            if sample.stream.stream_id == stream_id{
+                if let Err(sleep) = ratelimiter.try_wait() {
+                        std::thread::sleep(sleep);
+                        continue;
+                }
+                for column in &sample.columns{                  
                     if fft_signals.iter().all(|(_col, value)| value.len() >= 200) {
                         fft_signals.iter_mut().for_each(|(_col, value)| {value.remove(0);});
                     }
                     fft_signals.entry(column.desc.name.clone()).or_default().push(match_value(column.value.clone()));
 
-                    if elapsed.elapsed() >= std::time::Duration::from_secs(1) && calculate {
+                    if elapsed.elapsed() >= Duration::from_secs(1) && calculate {
                         let (freq, power) = calc_fft(fft_signals.get(&column.desc.name.clone()), sampling_rates.get(&sample.stream.stream_id));
                         if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){
                             let parts: Vec<&str> = column.desc.name.split('.').collect();
@@ -412,24 +469,10 @@ fn graph_data(window: Window) {
                         let _ = window.emit(&name.clone(), spectrum_data);
                     }
                 }
-                
-                let decimation_info = sampling_rates.get(&sample.stream.stream_id);
-                if let Some(sampling) = decimation_info {
-                    let fs = sampling[0] as f32/ sampling[1] as f32;
-                    if fs >= 20.0 && graph_backlog.iter().all(|col| col.len() >= (fs / 20.0).ceil() as usize){
-                        let _ = window.emit("main", &graph_backlog);
-                        graph_backlog.iter_mut().for_each(|col| col.clear());
-                    }
-                    else {
-                        let _ = window.emit("main", &graph_backlog);
-                        graph_backlog.iter_mut().for_each(|col| col.clear());
-                    }
-                } 
             }
         }
     });
 }
-
 fn main(){
     tauri::Builder::default()
         .setup(|app| {
@@ -473,7 +516,8 @@ fn main(){
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            graph_data])
+            stream_data, 
+            fft_data])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
     
