@@ -1,8 +1,6 @@
 {
   "dependencies": {
     "@tauri-apps/api": "^2.0.2",
-    "chartjs-adapter-moment": "^1.0.1",
-    "chartjs-plugin-datalabels": "^2.2.0",
     "interactjs": "^1.10.27",
     "uplot": "^1.6.31"
   }
