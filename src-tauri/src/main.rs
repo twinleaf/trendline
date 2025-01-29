@@ -12,7 +12,8 @@ use std::collections::{HashMap, HashSet};
 #[derive(serde::Serialize, Clone)]
 struct GraphLabel{
     col_name: Vec<String>, 
-    col_desc: Vec<String>
+    col_desc: Vec<String>,
+    col_unit: Vec<String>
 } 
 struct RpcMeta {
     arg_type: String,
@@ -331,7 +332,8 @@ fn stream_data(window: Window) {
         let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
         let mut stream_desc = GraphLabel{
             col_name: Vec::new(),
-            col_desc: Vec::new()
+            col_desc: Vec::new(),
+            col_unit: Vec::new()
         };
         for stream in meta.streams.values() {
             sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
@@ -339,6 +341,7 @@ fn stream_data(window: Window) {
                 if stream.stream.stream_id == stream_id {
                     stream_desc.col_name.push(col.name.clone());
                     stream_desc.col_desc.push(col.description.clone());
+                    stream_desc.col_unit.push(col.units.clone());
                 }
             }
         }

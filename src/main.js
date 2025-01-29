@@ -10,10 +10,13 @@ invoke('fft_data')
 webpage = getCurrentWebviewWindow();
 
 var graphs = [];
-var columns = []; 
-var column_id = [];
 var rpcs = [];
 var serial = []; 
+const column_desc ={
+    column: [],
+    column_id: [],
+    units: []
+}
 let labelloaded = false;
 let rpcloaded = false;
 let fftloaded = false;
@@ -23,8 +26,9 @@ webpage.once("graph_labels", (event) => {
     serial.push(header.split('\n').slice(0)[0]);
     serial.push(header.split('\n').slice(1, 3).join('\n'));
     for (let name in label.col_name){
-        columns.push(label.col_desc[name])
-        column_id.push(label.col_name[name])
+        column_desc.column.push(label.col_desc[name])
+        column_desc.column_id.push(label.col_name[name])
+        column_desc.units.push(label.col_unit[name])
     }
     labelloaded = true
 })
@@ -123,18 +127,18 @@ new Promise((resolve) => {
 
         //write out a chart for each column 
         const rpcType = document.querySelectorAll('.controls');
-        for (let i = 0; i < columns.length; i++) {
+        for (let i = 0; i < column_desc.column.length; i++) {
             const checkboxesContainer = document.getElementById('dropdown');
             const canvasesContainer = document.getElementById('canvases');
 
             const checkbox = document.createElement('input');
             checkbox.type = "checkbox";
-            checkbox.id = column_id[i]
+            checkbox.id = column_desc.column_id[i]
             checkbox.className = 'checkboxes'
 
             const label = document.createElement('label');
             label.htmlFor = checkbox.id;
-            label.innerText = columns[i]
+            label.innerText = column_desc.column[i]
             const lineBreak = document.createElement('br');
 
             const canvas = document.createElement('div');
@@ -153,7 +157,7 @@ new Promise((resolve) => {
                 series: [
                     {label: 'Time'},
                     { 
-                        label: column_id[i],
+                        label: `${column_desc.column_id[i]}(${column_desc.units[i]})`,
                         stroke: 'red',
                         points: { show: false },    
                         value: (u, v) => v  
