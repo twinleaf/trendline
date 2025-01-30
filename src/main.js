@@ -189,17 +189,24 @@ new Promise((resolve) => {
             checkbox.addEventListener("change", (event) => {
                 const canvas = document.getElementById(`canvas${i}`)
                 canvas.style.display = event.target.checked ? 'block' : 'none';
- 
+                
                 rpcType.forEach(rpcControl => {
                     let stayDisplayed = false;
-                    checkboxes.forEach(checkbox => {
-                        if (checkbox.id.split('.').slice(0,1).toString() == rpcControl.id.split('.').slice(0, 1).toString() && checkbox.checked) {
-                            stayDisplayed = true; 
+                    if (checkbox.id.split('.').slice(0,1).toString() == rpcControl.id.split('.').slice(0, 1).toString()) {
+                        if (checkbox.checked){
+                            stayDisplayed = true;
+                            rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
                         }
-                    });
-                    rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
-                });  
-                
+                        else {
+                            checkboxes.forEach(checkbox => { 
+                                if (checkbox.id.split('.').slice(0,1).toString() == rpcControl.id.split('.').slice(0, 1).toString() && checkbox.checked){
+                                    stayDisplayed = true
+                                }
+                            })
+                            rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
+                        }
+                    }
+                })
             });
             
             fftpop.addEventListener("change", () => {

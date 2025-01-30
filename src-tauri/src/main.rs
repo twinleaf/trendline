@@ -419,7 +419,6 @@ fn fft_data(window: Window) {
         }
 
         let mut fft_signals: HashMap<String, Vec<f32>> = HashMap::new();
-        let mut calculate: bool = true;
 
         //Emitting FFT Data
         loop{ 
