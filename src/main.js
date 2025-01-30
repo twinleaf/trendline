@@ -9,17 +9,16 @@ invoke('stream_data');
 invoke('fft_data')
 webpage = getCurrentWebviewWindow();
 
-var graphs = [];
-var rpcs = [];
-var serial = []; 
 const column_desc ={
     column: [],
     column_id: [],
     units: []
 }
+var graphs = [];
+var rpcs = [];
+var serial = []; 
 let labelloaded = false;
 let rpcloaded = false;
-let fftloaded = false;
 
 webpage.once("graph_labels", (event) => {
     const [header, label] = event.payload;
@@ -50,7 +49,6 @@ webpage.once("fftgraphs", (event) => {
     graphs.forEach((graph, _index) => {
         createFFT(graph, `${graph}`, labels)
     })
-    fftloaded = true
 })
 
 new Promise((resolve) => {
@@ -414,7 +412,7 @@ function makeResizable(elementId, uplotInstance) {
             let height = event.rect.height;
 
             target.style.width = `${width}px`;
-            target.style.height = `${height}px`;
+            target.style.height = `${height+50}px`;
 
             uplotInstance.setSize({ width, height });  
         }

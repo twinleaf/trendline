@@ -118,7 +118,9 @@ position: relative;
 #FFT {
   position: relative;
   padding: 2vh;
-  border: solid;
+  border-left-style: solid;
+  border-right-style: solid;
+  border-bottom-style: solid;
   border-width: 1px;
   margin-left: 320px;
   display: none;

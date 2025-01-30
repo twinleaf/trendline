@@ -5,7 +5,6 @@ use getopts::Options;
 
 use tauri::{Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window};
 use welch_sde::{Build, SpectralDensity};
-use ratelimit::Ratelimiter;
 use std::{env, thread, time::Duration};
 use std::collections::{HashMap, HashSet};
 
@@ -149,7 +148,7 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
         Some(req_type)
     } else if rpc_arg.is_some() {
         let t = get_rpctype(&rpc_name, &device);
-        Some(if t == "" { "string".to_string() } else { t })
+        Some(if t.is_empty() { "string".to_string() } else { t })
     } else {None};
 
     let reply = match device.raw_rpc(
@@ -192,7 +191,7 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
             Some(rep_type)
         } else if req_type.is_none() {
             let t = get_rpctype(&rpc_name, &device);
-            Some(if t == "" { "string".to_string() } else { t })
+            Some(if t.is_empty() { "string".to_string() } else { t })
         } else {req_type};
     
         let reply_str = match &rep_type.as_ref().unwrap()[..] {
@@ -208,11 +207,7 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
             "f64" => f64::from_le_bytes(reply[0..8].try_into().unwrap()).to_string(),
             "string" => format!(
                 "\"{}\" {:?}",
-                if let Ok(s) = std::str::from_utf8(&reply) {
-                    s
-                } else {
-                    ""
-                },
+                std::str::from_utf8(&reply).unwrap_or_default(),
                 reply
             ),
             _ => panic!("Invalid type"),
@@ -245,7 +240,7 @@ fn rpc_controls(args: &[String], column_names: Vec<String>) -> Vec<String>  {
         if parts.len() > 2 {
             let prefix = format!("{}.{}", parts[0], parts[1]);
             control_names.entry(prefix).or_default().push(names.clone());
-        }
+        } 
     }
 
     let mut rpc_map: HashMap<String, Vec<String>> = HashMap::new();
@@ -258,8 +253,8 @@ fn rpc_controls(args: &[String], column_names: Vec<String>) -> Vec<String>  {
         }
     } 
 
-    for (prefix, _names) in control_names {
-        if let Some(rpc_names) = rpc_map.get(&prefix) {
+    for prefix in control_names.keys() {
+        if let Some(rpc_names) = rpc_map.get(prefix) {
             for name in rpc_names{
                 if !seen_controls.contains(name) {
                     rpc_controls.push(name.clone());
@@ -271,42 +266,38 @@ fn rpc_controls(args: &[String], column_names: Vec<String>) -> Vec<String>  {
     rpc_controls
 }
 
-fn calc_fft(signals: Option<&Vec<f32>>, sampling: Option<&Vec<u32>>) -> (Vec<f32>, Vec<f32>) {
-    if let Some(sampling) = sampling {
-        if let Some(signal) = signals{
-            if signal.len() <= 500{
-                let decimation_rate = sampling[1] as f32;
-                let fs = sampling[0] as f32/ decimation_rate;
-                let welch: SpectralDensity<f32> =
-                    SpectralDensity::<f32>::builder(signal, fs).build();
+fn calc_fft(signals: Option<&Vec<f32>>, fs: f32 ) -> (Vec<f32>, Vec<f32>) {
+    if let Some(signal) = signals{
+        if signal.len() <= 500{
+            let welch: SpectralDensity<f32> =
+                SpectralDensity::<f32>::builder(signal, fs).build();
+            
+            let result = std::panic::catch_unwind(|| {welch.periodogram();});
+            if result.is_err(){
+                return (vec![], vec![]);
+            } else {
+                let sd = welch.periodogram();
+                let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
+                let mut power_spectrum: Vec<f32> = sd.to_vec();
                 
-                let result = std::panic::catch_unwind(|| {welch.periodogram();});
-                if result.is_err(){
-                    return (vec![], vec![]);
-                } else {
-                    let sd = welch.periodogram();
-                    let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
-                    let mut power_spectrum: Vec<f32> = sd.to_vec();
-                    
-                    for value in &mut power_spectrum {
-                        *value = value.sqrt();
-                    }
-                    return (frequencies, power_spectrum)
+                for value in &mut power_spectrum {
+                    *value = value.sqrt();
                 }
-            } 
-        }
+                return (frequencies, power_spectrum)
+            }
+        } 
     }
     (vec![], vec![])
 }
 
 fn match_value(data: ColumnData) -> f32 {
-    let data_type = match data {
+    
+    match data {
         ColumnData::Int(x) => x as f32,
         ColumnData::UInt(x) => x as f32,
         ColumnData::Float(x) => x as f32,
         ColumnData::Unknown => 0.0,
-    };
-    data_type
+    }
 }
 
 #[tauri::command]
@@ -427,10 +418,8 @@ fn fft_data(window: Window) {
             sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
         }
 
-        let elapsed = std::time::Instant::now();
         let mut fft_signals: HashMap<String, Vec<f32>> = HashMap::new();
         let mut calculate: bool = true;
-        let ratelimiter = Ratelimiter::builder(1000, Duration::from_millis(100)).max_tokens(1000).build().unwrap();
 
         //Emitting FFT Data
         loop{ 
@@ -439,25 +428,26 @@ fn fft_data(window: Window) {
             let mut fft_power: HashMap<String, Vec<Vec<f32>>> = HashMap::new();
 
             if sample.stream.stream_id == stream_id{
-                if let Err(sleep) = ratelimiter.try_wait() {
-                        std::thread::sleep(sleep);
-                        continue;
-                }
                 for column in &sample.columns{                  
                     if fft_signals.iter().all(|(_col, value)| value.len() >= 200) {
                         fft_signals.iter_mut().for_each(|(_col, value)| {value.remove(0);});
                     }
                     fft_signals.entry(column.desc.name.clone()).or_default().push(match_value(column.value.clone()));
 
-                    if elapsed.elapsed() >= Duration::from_secs(1) && calculate {
-                        let (freq, power) = calc_fft(fft_signals.get(&column.desc.name.clone()), sampling_rates.get(&sample.stream.stream_id));
-                        if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){
-                            let parts: Vec<&str> = column.desc.name.split('.').collect();
-                            let prefix = parts[0].to_string();
-                            fft_power.entry(prefix.clone()).or_default().push(power.clone());
-                            fft_freq.entry(prefix.clone()).or_insert_with(||freq.clone());
-                        } else{
-                            calculate = false;
+                    if let Some(rate) = sampling_rates.get(&stream_id){
+                        let decimation_rate = rate[1];
+                        let fs = rate[0]/ decimation_rate;
+                        let fs_float = fs as f32;
+                        if fft_signals.iter().all(|(_col, value)| value.len() >= fs.try_into().unwrap()) && calculate {
+                            let (freq, power) = calc_fft(fft_signals.get(&column.desc.name.clone()), fs_float);
+                            if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){
+                                let parts: Vec<&str> = column.desc.name.split('.').collect();
+                                let prefix = parts[0].to_string();
+                                fft_power.entry(prefix.clone()).or_default().push(power.clone());
+                                fft_freq.entry(prefix.clone()).or_insert_with(||freq.clone());
+                            } else{
+                                calculate = false;
+                            }
                         }
                     }
                 }
