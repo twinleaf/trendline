@@ -83,7 +83,7 @@ cursor: pointer;
 position: relative;
 }
 
-.InputCommands{
+.InputCommands, .timeSpan{
   padding: 5px;
   position:relative;
   width: 30%;

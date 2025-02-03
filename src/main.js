@@ -1,13 +1,11 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
-const { Window } = window.__TAURI__.window;
-const { Webview } = window.__TAURI__.webview;
 const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 const { once } = window.__TAURI__.event;
 
 invoke('stream_data');
 invoke('fft_data')
-webpage = getCurrentWebviewWindow();
+const webpage = getCurrentWebviewWindow();
 
 const column_desc ={
     column: [],
@@ -228,19 +226,7 @@ new Promise((resolve) => {
                 })
             })
 
-            rpcType.forEach(rpcDiv => {
-                inputChange.forEach(rpccall => {
-                    if (checkbox.id.split('.').slice(0,1).toString() == rpcDiv.id.split('.').slice(0, 1) && rpccall.parentNode.parentNode == rpcDiv){
-                        webpage.emit('onLoad', rpccall.id)
-                        lastLabel = rpcDiv.id
-                    } 
-                })
-                toggleChange.forEach(toggleChange => {
-                    if (checkbox.id.split('.').slice(0,1).toString() == rpcDiv.id.split('.').slice(0, 1) && toggleChange.parentNode.parentNode == rpcDiv){
-                        webpage.emit('onLoad', toggleChange.id)
-                    } 
-                })
-            })
+            refreshRPC(checkbox)
 
             //display rpc values on load
             webpage.listen("returnOnLoad", (event) => {
@@ -307,7 +293,7 @@ window.onload = () => {
     const buttonChange = document.querySelectorAll('.buttonCommands');
     buttonChange.forEach(clickButton => {
         clickButton.addEventListener("click", function() {   
-            call = [clickButton.id, clickButton.value];     
+            call = [clickButton.id, clickButton.value];              
             webpage.emit('returningRPCName', call);      
         })
     })
@@ -371,7 +357,6 @@ function createFFT(eventName, containerId, labels) {
         
     });
     document.getElementById('FFT').appendChild(container);
-    //Promise is failing to return container
     new Promise((resolve) => {
         const checkSeriesConfig = setInterval(() => {
             if (gotSeries) {
@@ -403,7 +388,7 @@ function createFFT(eventName, containerId, labels) {
             let chart = new uPlot(opt, data, container);
             fftPlot = chart;
             makeResizable(containerId, chart);
-        }, 200);
+        }, 500);
     })
 }
 
@@ -448,6 +433,24 @@ function in_range(fillValue) {
     return withinRange
 }
 
+function refreshRPC(checkbox) {
+    const rpcType = document.querySelectorAll('.controls');
+    const inputChange = document.querySelectorAll('.InputCommands');
+    const toggleChange = document.querySelectorAll('.checkCommands');
+    rpcType.forEach(rpcDiv => {
+        inputChange.forEach(rpccall => {
+            if (checkbox.id.split('.').slice(0,1).toString() == rpcDiv.id.split('.').slice(0, 1) && rpccall.parentNode.parentNode == rpcDiv){
+                webpage.emit('onLoad', rpccall.id)
+            } 
+        })
+        toggleChange.forEach(toggleChange => {
+            if (checkbox.id.split('.').slice(0,1).toString() == rpcDiv.id.split('.').slice(0, 1) && toggleChange.parentNode.parentNode == rpcDiv){
+                webpage.emit('onLoad', toggleChange.id)
+            } 
+        })
+    })
+}
+
 function attachInputListeners() {
     const inputChange = document.querySelectorAll('.InputCommands');
     inputChange.forEach(rpccall => {
@@ -455,7 +458,11 @@ function attachInputListeners() {
             value = in_range(rpccall).toString();
             if (e.key == "Enter") {
                 call = [rpccall.id, value];
-                webpage.emit('returningRPCName', call);    
+                webpage.emit('returningRPCName', call); 
+
+                document.querySelectorAll('.checkboxes').forEach(checkbox => {
+                    refreshRPC(checkbox)
+                })
             }
         });
     });
@@ -466,11 +473,13 @@ function attachToggleListeners() {
     toggleChange.forEach(clickToggle => {
         clickToggle.addEventListener("change", (event) => {
             let num = 0;
-            if (event.target.checked) {
-                num = 1;
-            }
+            if (event.target.checked) {num = 1;}
             call = [clickToggle.id, num.toString()];
             webpage.emit('returningRPCName', call);
+
+            document.querySelectorAll('.checkboxes').forEach(checkbox => {
+                refreshRPC(checkbox)
+            })
         });
     });
 }
