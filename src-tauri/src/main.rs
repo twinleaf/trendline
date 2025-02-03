@@ -405,6 +405,13 @@ fn fft_data(window: Window) {
         }
     } else {1};
 
+    let time_span: u8 = if args.len() > 2{
+        match args[2].parse(){
+            Ok(val) => val, 
+            Err(_e) => 10
+        } 
+    } else{10};
+
     thread::spawn(move || {
         let proxy = proxy::Interface::new(&root);
         let device = proxy.device_full(route).unwrap();
@@ -432,12 +439,12 @@ fn fft_data(window: Window) {
                         let fs = rate[0]/ decimation_rate;
 
                         fft_signals.entry(column.desc.name.clone()).or_default().push(match_value(column.value.clone()));
-                        if fft_signals.iter().all(|(_col, value)| value.len() >= (fs*10).try_into().unwrap()) {
+                        if fft_signals.iter().all(|(_col, value)| value.len() >= (fs*time_span as u32).try_into().unwrap()) {
                             fft_signals.iter_mut().for_each(|(_col, value)| {value.remove(0);});
                         }
 
-                        //TODO: adjustable timespan? Currently defaults to 10 second calculation (resize breaks past length of fs) 
-                        if fft_signals.iter().all(|(_col, value)| value.len() >= (fs*10 -1).try_into().unwrap()) {
+                        //Note: (resize on fft breaks past length of fs) 
+                        if fft_signals.iter().all(|(_col, value)| value.len() >= (fs*time_span as u32 -1).try_into().unwrap()) {
                             let (freq, power) = calc_fft(fft_signals.get(&column.desc.name.clone()), fs as f32);
                             if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){
                                 let parts: Vec<&str> = column.desc.name.split('.').collect();
@@ -468,7 +475,7 @@ fn main(){
         .setup(|app| {
             let window = tauri::WindowBuilder::new(app, "main")
                 .inner_size(800., 600.)
-                .title("Twinleaf Trendline") 
+                .title("Trendline") 
                 .build()?;
 
             let _graph = window.add_child(

@@ -21,6 +21,6 @@ When there are more than one serial port available, it is necessary to specify t
 	[macOS]> tio-proxy -r /dev/cu.usbserialXXXXXX
 	[wsl1] > tio-proxy -r COM3
 
-Optionally specify stream number or the default is stream 1:
+Optionally specify stream number and fft sampling time (default is on stream 1 and a 10 second sampling time)
 
-    cargo run <stream_id>
+    cargo run <stream_id> <fft_time>
