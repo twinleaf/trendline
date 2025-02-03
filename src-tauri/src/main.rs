@@ -105,7 +105,6 @@ fn get_rpctype(
     RpcMeta::parse(device.rpc("rpc.info", name).unwrap()).arg_type
 }
 
-#[tauri::command]
 fn rpc(args: &[String]) -> std::io::Result<String> {
     let mut opts = tio_opts();
     opts.optopt(
@@ -291,7 +290,6 @@ fn calc_fft(signals: Option<&Vec<f32>>, fs: f32 ) -> (Vec<f32>, Vec<f32>) {
 }
 
 fn match_value(data: ColumnData) -> f32 {
-    
     match data {
         ColumnData::Int(x) => x as f32,
         ColumnData::UInt(x) => x as f32,
@@ -338,6 +336,7 @@ fn stream_data(window: Window) {
         }
         //Note: Found that without a sleep the javascript does not load in emit properly
         thread::sleep(Duration::from_secs(1));
+
         //Emit graph labels
         let mut fft_sort: HashMap<String, Vec<String>> = HashMap::new();
         for names in stream_desc.col_name.clone() {
@@ -428,17 +427,18 @@ fn fft_data(window: Window) {
 
             if sample.stream.stream_id == stream_id{
                 for column in &sample.columns{                  
-                    if fft_signals.iter().all(|(_col, value)| value.len() >= 200) {
-                        fft_signals.iter_mut().for_each(|(_col, value)| {value.remove(0);});
-                    }
-                    fft_signals.entry(column.desc.name.clone()).or_default().push(match_value(column.value.clone()));
-
                     if let Some(rate) = sampling_rates.get(&stream_id){
                         let decimation_rate = rate[1];
                         let fs = rate[0]/ decimation_rate;
-                        let fs_float = fs as f32;
-                        if fft_signals.iter().all(|(_col, value)| value.len() >= fs.try_into().unwrap()) {
-                            let (freq, power) = calc_fft(fft_signals.get(&column.desc.name.clone()), fs_float);
+
+                        fft_signals.entry(column.desc.name.clone()).or_default().push(match_value(column.value.clone()));
+                        if fft_signals.iter().all(|(_col, value)| value.len() >= (fs*10).try_into().unwrap()) {
+                            fft_signals.iter_mut().for_each(|(_col, value)| {value.remove(0);});
+                        }
+
+                        //TODO: adjustable timespan? Currently defaults to 10 second calculation (resize breaks past length of fs) 
+                        if fft_signals.iter().all(|(_col, value)| value.len() >= (fs*10 -1).try_into().unwrap()) {
+                            let (freq, power) = calc_fft(fft_signals.get(&column.desc.name.clone()), fs as f32);
                             if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){
                                 let parts: Vec<&str> = column.desc.name.split('.').collect();
                                 let prefix = parts[0].to_string();
@@ -468,7 +468,7 @@ fn main(){
         .setup(|app| {
             let window = tauri::WindowBuilder::new(app, "main")
                 .inner_size(800., 600.)
-                .title("Twinleaf UI") 
+                .title("Twinleaf Trendline") 
                 .build()?;
 
             let _graph = window.add_child(
