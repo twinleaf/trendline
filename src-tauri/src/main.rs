@@ -334,8 +334,6 @@ fn stream_data(window: Window) {
                 }
             }
         }
-        //Note: Found that without a sleep the javascript does not load in emit properly
-        thread::sleep(Duration::from_secs(1));
 
         //Emit graph labels
         let mut fft_sort: HashMap<String, Vec<String>> = HashMap::new();
