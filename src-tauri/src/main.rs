@@ -5,7 +5,7 @@ use getopts::Options;
 
 use tauri::{Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window};
 use welch_sde::{Build, SpectralDensity};
-use std::{env, thread, time::Duration};
+use std::{env, thread};
 use std::collections::{HashMap, HashSet};
 
 #[derive(serde::Serialize, Clone)]
@@ -443,7 +443,7 @@ fn fft_data(window: Window) {
                             fft_signals.iter_mut().for_each(|(_col, value)| {value.remove(0);});
                         }
 
-                        //Note: (resize on fft breaks past length of fs) 
+                        //Note: (resize on fft is breaking past length of fs) 
                         if fft_signals.iter().all(|(_col, value)| value.len() >= (fs*time_span as u32 -1).try_into().unwrap()) {
                             let (freq, power) = calc_fft(fft_signals.get(&column.desc.name.clone()), fs as f32);
                             if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){

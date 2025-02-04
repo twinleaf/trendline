@@ -1,10 +1,5 @@
-# Lily
+# Trendline
 Graphical interface tool for Twinleaf sensor stream data. Equipped with RPC controls and fast fourier transform analysis
-
-### Development
-On linux, there is a dependency on libudev; to install it use:
-
-	sudo apt install libudev-dev  # debian linux
 
 ### Installation
 Be sure to confirm all twinleaf-rust crate dependencies are satisfied.
@@ -15,7 +10,7 @@ Connect the sensor to a proxy via twinleaf-rust proxy tool
 
     tio-proxy --auto
 
-When there are more than one serial port available, it is necessary to specify the port
+When there is more than one serial port available, it is necessary to specify the port
 
     [linux]> tio-proxy -r /dev/ttyACM0
 	[macOS]> tio-proxy -r /dev/cu.usbserialXXXXXX
