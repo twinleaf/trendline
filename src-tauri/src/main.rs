@@ -375,10 +375,12 @@ fn stream_data(window: Window) {
                 let decimation_info = sampling_rates.get(&sample.stream.stream_id);
                 if let Some(sampling) = decimation_info {
                     let fs = sampling[0] as f32/ sampling[1] as f32;
-                    if fs >= 20.0 && graph_backlog.iter().all(|col| col.len() >= (fs / 20.0).ceil() as usize){
-                        let _ = window.emit("main", &graph_backlog);
-                        graph_backlog.iter_mut().for_each(|col| col.clear());
-                    }
+                    if fs >= 20.0 {
+                        if graph_backlog.iter().all(|col| col.len() >= (fs / 20.0).ceil() as usize){
+                            let _ = window.emit("main", &graph_backlog);
+                            graph_backlog.iter_mut().for_each(|col| col.clear());
+                        }
+                    } 
                     else {
                         let _ = window.emit("main", &graph_backlog);
                         graph_backlog.iter_mut().for_each(|col| col.clear());
