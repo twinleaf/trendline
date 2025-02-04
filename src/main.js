@@ -117,6 +117,7 @@ new Promise((resolve) => {
         })
         attachInputListeners();
         attachToggleListeners();
+        attachButtonListeners();
 
         const inputChange = document.querySelectorAll('.InputCommands');
         const toggleChange = document.querySelectorAll('.checkCommands') 
@@ -333,6 +334,7 @@ function createFFT(eventName, containerId, labels) {
             } 
             gotSeries = true;
         }
+        //TODO Freeze resolve
         new Promise((resolve) => {
             const plotCreated = setInterval(() => {
                 if (fftPlot !== undefined) {
@@ -343,7 +345,9 @@ function createFFT(eventName, containerId, labels) {
         }).then(() => {
             for (let i = 0; i< spectrum[0].length; i++){
                 for (let j = 0; j< spectrum.length; j++){
-                    fftPlot.data[j].push(spectrum[j][i])
+                    if (spectrum[i][j] !== undefined) {
+                        fftPlot.data[j].push(spectrum[j][i])
+                    }
                 }
             }
     
@@ -482,5 +486,14 @@ function attachToggleListeners() {
             })
         });
     });
+}
+
+function attachButtonListeners() {
+    const buttonChange = document.querySelectorAll('.buttonCommands');
+    buttonChange.forEach(button => {
+        button.addEventListener("click", () => {
+            webpage.emit("onLoad", button.id);
+        })
+    })  
 }
 

@@ -18,4 +18,4 @@ When there is more than one serial port available, it is necessary to specify th
 
 Optionally specify stream number and fft sampling time (default is on stream 1 and a 10 second sampling time)
 
-    cargo run <stream_id> <fft_time>
+    cargo run [stream_id] [fft_time]

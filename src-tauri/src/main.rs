@@ -5,7 +5,7 @@ use getopts::Options;
 
 use tauri::{Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window};
 use welch_sde::{Build, SpectralDensity};
-use std::{env, thread};
+use std::{env, path::Prefix, thread};
 use std::collections::{HashMap, HashSet};
 
 #[derive(serde::Serialize, Clone)]
@@ -505,6 +505,7 @@ fn main(){
                 let mut arg: Vec<String> = vec![env::args().collect(), "rpc".to_string()]; 
                 let rpccall: String = serde_json::from_str(event.payload()).unwrap();
                 let _ = &arg.push(rpccall.clone());
+                
                 if let Ok(passed) = rpc(&arg[2..]) {
                     new_window.emit("returnOnLoad", (rpccall.clone(), passed.clone())).unwrap();
                 }
