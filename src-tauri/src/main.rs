@@ -5,7 +5,7 @@ use getopts::Options;
 
 use tauri::{Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window};
 use welch_sde::{Build, SpectralDensity};
-use std::{env, path::Prefix, thread};
+use std::{env, thread};
 use std::collections::{HashMap, HashSet};
 
 #[derive(serde::Serialize, Clone)]

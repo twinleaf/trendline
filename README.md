@@ -2,6 +2,8 @@
 Graphical interface tool for Twinleaf sensor stream data. Equipped with RPC controls and fast fourier transform analysis
 
 ### Installation
+[To install Rust and Cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html)
+
 Be sure to confirm all twinleaf-rust crate dependencies are satisfied.
 
 To run: 
