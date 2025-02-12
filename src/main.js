@@ -250,7 +250,7 @@ new Promise((resolve) => {
 });
 
 window.onload = () => { 
-    let timePoints = 10;
+    let timePoints = 100;
     let startTime = Date.now();
 
     webpage.listen("main", (event) => {
