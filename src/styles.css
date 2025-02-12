@@ -14,7 +14,19 @@
   overflow-y: scroll
 }
 
-.header{
+.tabs{
+  display: flex;
+  position: relative;
+  background-color: #040604;
+  border-radius: 10px;
+  color: white;
+  padding: 10px;
+  border: none;
+  cursor: pointer;
+  width: auto;
+}
+
+.header, .connectports{
   text-align: left;
   padding: 10px;
   border-width: 1px;
@@ -22,6 +34,10 @@
   background-color: #4CAF50;
   border-color: white;
   border-radius: 10px; 
+}
+
+.connectports label{
+  padding: 10px;
 }
 
 #deviceName{
