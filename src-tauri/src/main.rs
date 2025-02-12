@@ -7,6 +7,7 @@ use tauri::{Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl
 use welch_sde::{Build, SpectralDensity};
 use std::{env, thread};
 use std::collections::{HashMap, HashSet};
+mod utils;
 
 #[derive(serde::Serialize, Clone)]
 struct GraphLabel{
@@ -470,16 +471,43 @@ fn fft_data(window: Window) {
         }
     });
 }
+
+#[tauri::command]
+fn serial_ports(window:Window){
+    thread::spawn(move || {
+        thread::sleep(std::time::Duration::from_secs(1));
+
+        let ports = serialport::available_ports().expect("No ports found!");
+        let mut port_names:  Vec<String> = Vec::new();
+        for p in ports {
+            port_names.push(p.port_name);
+        }
+        let _ = window.emit("ports", port_names);
+    });
+}
+
 fn main(){
     tauri::Builder::default()
         .setup(|app| {
-            let window = tauri::WindowBuilder::new(app, "main")
+            let window = tauri::WindowBuilder::new(app, "window")
                 .inner_size(800., 600.)
                 .title("Trendline") 
                 .build()?;
 
             let _graph = window.add_child(
                 tauri::webview::WebviewBuilder::new("stream-1", WebviewUrl::App(Default::default()))
+                    .auto_resize(),
+                    LogicalPosition::new(0., 0.),
+                    LogicalSize::new(800., 600.),
+                )?;
+
+            let serial_window = tauri::WindowBuilder::new(app, "window-2")
+                .inner_size(800.,600.)
+                .title("Connecting")
+                .build()?;
+
+            let serials = serial_window.add_child(
+                tauri::webview::WebviewBuilder::new("serials",WebviewUrl::App("serial.html".into()))
                     .auto_resize(),
                     LogicalPosition::new(0., 0.),
                     LogicalSize::new(800., 600.),
@@ -511,11 +539,20 @@ fn main(){
                 }
             });
 
+            //let main_window = app.get_webview("default").unwrap();
+            let _event_id = app.listen("connect", move |event|{
+                let port: String = serde_json::from_str(event.payload()).unwrap();
+                println!("Connecting to:{}", port);
+                //let _ = main_window.emit("serialinfo", &port);
+                utils::tio_proxy::args(port);
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             stream_data, 
-            fft_data])
+            fft_data,
+            serial_ports])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
     
