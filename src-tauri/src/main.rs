@@ -267,24 +267,22 @@ fn rpc_controls(args: &[String], column_names: Vec<String>) -> Vec<String>  {
 
 fn calc_fft(signals: Option<&Vec<f32>>, fs: f32 ) -> (Vec<f32>, Vec<f32>) {
     if let Some(signal) = signals{
-        if signal.len() <= 500{
-            let welch: SpectralDensity<f32> =
-                SpectralDensity::<f32>::builder(signal, fs).build();
+        let welch: SpectralDensity<f32> =
+            SpectralDensity::<f32>::builder(signal, fs).build();
+        
+        let result = std::panic::catch_unwind(|| {welch.periodogram();});
+        if result.is_err(){
+            return (vec![], vec![]);
+        } else {
+            let sd = welch.periodogram();
+            let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
+            let mut power_spectrum: Vec<f32> = sd.to_vec();
             
-            let result = std::panic::catch_unwind(|| {welch.periodogram();});
-            if result.is_err(){
-                return (vec![], vec![]);
-            } else {
-                let sd = welch.periodogram();
-                let frequencies: Vec<f32> = sd.frequency().into_iter().collect();
-                let mut power_spectrum: Vec<f32> = sd.to_vec();
-                
-                for value in &mut power_spectrum {
-                    *value = value.sqrt();
-                }
-                return (frequencies, power_spectrum)
+            for value in &mut power_spectrum {
+                *value = value.sqrt();
             }
-        } 
+            return (frequencies, power_spectrum)
+        }
     }
     (vec![], vec![])
 }
@@ -345,12 +343,7 @@ fn stream_data(window: Window) {
         let header = format!("{}\nSerial: {}\nStream: {}", meta.device.name, meta.device.serial_number, stream_id);
         let _= window.emit("graph_labels", (header, stream_desc.clone()));
 
-        //Emit FFT Graph setup
-        let mut key_names: Vec<String> = Vec::new();
-        for key in fft_sort.keys(){
-            key_names.push(key.to_string())
-        }
-        let _ = window.emit("fftgraphs", (key_names, fft_sort));
+        let _ = window.emit("fftgraphs", fft_sort);
 
         //Emitting RPC Commands
         let rpc_results = rpc_controls(&args, stream_desc.col_name.clone());
@@ -420,8 +413,14 @@ fn fft_data(window: Window) {
         //get sampling & decimation rate, column metadata
         let meta = device.get_metadata();
         let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
+        let mut sorted_columns: HashMap<String, Vec<String>> = HashMap::new();
         for stream in meta.streams.values() {
             sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
+            for col in &stream.columns {
+                let parts: Vec<&str> = col.name.split('.').collect();
+                let prefix = parts[0].to_string();
+                sorted_columns.entry(prefix).or_default().push(col.name.to_string());
+            }
         }
 
         let mut fft_signals: HashMap<String, Vec<f32>> = HashMap::new();
@@ -463,7 +462,12 @@ fn fft_data(window: Window) {
                         for value in values{
                             spectrum_data.push(value.to_vec());
                         }
-                        let _ = window.emit(&name.clone(), spectrum_data);
+
+                        if let Some(columns) = sorted_columns.get(name){
+                            if spectrum_data.len() == columns.len() + 1{
+                                let _ = window.emit(&name.clone(), spectrum_data);
+                            }
+                        }
                     }
                 }
             }
