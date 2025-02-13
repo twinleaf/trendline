@@ -37,16 +37,15 @@ webpage.once("rpcs", (event) => {
 })
 
 webpage.once("fftgraphs", (event) => {
-    const [graphs, sorted] = event.payload;
-    let labels = [];
-    for (let keys in sorted){            
+    const sorted = event.payload;
+    
+    for (let keys in sorted){    
+        let labels = [];        
         for (let value in sorted[keys] ){
             labels.push(sorted[keys][value])
         }
+        createFFT(keys, `${keys}`, labels)   
     }
-    graphs.forEach((graph, _index) => {
-        createFFT(graph, `${graph}`, labels)
-    })
 })
 
 new Promise((resolve) => {
@@ -324,7 +323,6 @@ function createFFT(eventName, containerId, labels) {
     // Listen for the event and update the graph
     webpage.listen(eventName, (event) => {
         const spectrum = event.payload;
-        console.log(spectrum)
         if (!gotSeries) {
             for (let i = 1; i< spectrum.length; i++) {
                 seriesConfig.push({
