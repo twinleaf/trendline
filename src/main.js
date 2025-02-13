@@ -311,13 +311,15 @@ window.onload = () => {
     }); 
 };
 
-var seriesConfig  = [{label: "Frequency (Hz)"}];
-let gotSeries = false;
+
 function createFFT(eventName, containerId, labels) {
     const template = document.getElementById('fft-template');
     const clone = template.content.cloneNode(true);
     const container = clone.querySelector('.canvas-container');
     container.id = containerId;
+    
+    var seriesConfig  = [{label: "Frequency (Hz)"}];
+    let gotSeries = false;
     let fftPlot;
 
     // Listen for the event and update the graph
