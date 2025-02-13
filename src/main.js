@@ -324,6 +324,7 @@ function createFFT(eventName, containerId, labels) {
     // Listen for the event and update the graph
     webpage.listen(eventName, (event) => {
         const spectrum = event.payload;
+        console.log(spectrum)
         if (!gotSeries) {
             for (let i = 1; i< spectrum.length; i++) {
                 seriesConfig.push({
