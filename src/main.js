@@ -324,6 +324,7 @@ function createFFT(eventName, containerId, labels) {
     // Listen for the event and update the graph
     webpage.listen(eventName, (event) => {
         const spectrum = event.payload;
+        console.log(spectrum)
         if (!gotSeries) {
             for (let i = 1; i< spectrum.length; i++) {
                 seriesConfig.push({
@@ -345,7 +346,7 @@ function createFFT(eventName, containerId, labels) {
         }).then(() => {
             for (let i = 0; i< spectrum[0].length; i++){
                 for (let j = 0; j< spectrum.length; j++){
-                    if (spectrum[i][j] !== undefined) {
+                    if (spectrum[j][i] !== undefined) {
                         fftPlot.data[j].push(spectrum[j][i])
                     }
                 }
