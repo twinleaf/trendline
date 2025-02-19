@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![allow(warnings)] 
 use twinleaf::{data::{ColumnData, Device}, tio::{self}};
 use tio::{proto::DeviceRoute, proxy, util};
 use getopts::Options;

@@ -86,11 +86,11 @@ new Promise((resolve) => {
 
             commands.forEach(command => {
                 let addElement;
-                if (command === 'enable') {
+                if (command === 'enable' && prefix !== 'cell.therm.auto') {
                     addElement = document.createElement('input');
                     addElement.type = 'checkbox';
                     addElement.className = "checkCommands";
-                } else if (command === 'reset'|| command === 'capture') {
+                } else if (command === 'reset'|| command === 'capture' || (prefix ==='cell.therm.auto' && command === 'enable')) {
                     addElement = document.createElement('button');
                     addElement.innerText = command;
                     addElement.className = "buttonCommands";
@@ -290,14 +290,6 @@ window.onload = () => {
         }) 
     });
 
-    const buttonChange = document.querySelectorAll('.buttonCommands');
-    buttonChange.forEach(clickButton => {
-        clickButton.addEventListener("click", function() {   
-            call = [clickButton.id, clickButton.value];              
-            webpage.emit('returningRPCName', call);      
-        })
-    })
-
     const inputChange = document.querySelectorAll('.InputCommands');
     webpage.listen("returnRPC", (event) => {
         let [name, inputValue] = event.payload;
@@ -493,7 +485,15 @@ function attachButtonListeners() {
     const buttonChange = document.querySelectorAll('.buttonCommands');
     buttonChange.forEach(button => {
         button.addEventListener("click", () => {
-            webpage.emit("onLoad", button.id);
+            call = [button.id, button.value];
+            if (button.id === 'cell.therm.auto.enable') {
+                call = [button.id, "1"]
+            }
+            webpage.emit("returningRPCName", call);
+
+            document.querySelectorAll('.checkboxes').forEach(checkbox => {
+                refreshRPC(checkbox)
+            })
         })
     })  
 }
