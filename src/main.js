@@ -217,11 +217,11 @@ new Promise((resolve) => {
                                 return;
                             }
                         })
-                        document.getElementById('FFT').style.display = stayDisplayed? 'block': 'none';
+                        document.getElementById('FFT').style.display = 'block';
                         node.style.display = stayDisplayed? 'block' : 'none';
                     } else {
                         node.style.display = 'none'
-                        document.getElementById('FFT').style.display = 'none'
+                        document.getElementById('FFT').style.display = 'none';
                     }
                 })
             })
@@ -317,6 +317,7 @@ function createFFT(eventName, containerId, labels) {
     // Listen for the event and update the graph
     webpage.listen(eventName, (event) => {
         const spectrum = event.payload;
+        console.log(spectrum)
         if (!gotSeries) {
             for (let i = 1; i< spectrum.length; i++) {
                 seriesConfig.push({
@@ -336,22 +337,20 @@ function createFFT(eventName, containerId, labels) {
                 }
             }, 100);
         }).then(() => {
-            for (let i = 0; i< spectrum[0].length; i++){
+            for (let i = 0; i< spectrum[1].length; i++){
                 for (let j = 0; j< spectrum.length; j++){
                     if (spectrum[j][i] !== undefined) {
                         fftPlot.data[j].push(spectrum[j][i])
                     }
                 }
             }
-    
-            while (fftPlot.data[0].length > 500){
+            while (fftPlot.data[1].length > Math.floor((spectrum[1].length*4)/10)*10 ){
                 for (let i = 0; i < fftPlot.data.length; i++){
                     fftPlot.data[i].shift();
                 }
             }
             fftPlot.setData(fftPlot.data, true);
         })
-        
     });
     document.getElementById('FFT').appendChild(container);
     new Promise((resolve) => {
