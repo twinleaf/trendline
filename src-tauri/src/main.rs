@@ -507,7 +507,7 @@ fn serial_ports(window:Window){
 fn main(){
     tauri::Builder::default()
         .setup(|app| {
-            let window = tauri::WindowBuilder::new(app, "window")
+            let window = tauri::WindowBuilder::new(app, "window-1")
                 .inner_size(800., 600.)
                 .title("Trendline") 
                 .build()?;
@@ -524,7 +524,7 @@ fn main(){
                 .title("Connecting")
                 .build()?;
 
-            let serials = serial_window.add_child(
+            let _serials = serial_window.add_child(
                 tauri::webview::WebviewBuilder::new("serials",WebviewUrl::App("serial.html".into()))
                     .auto_resize(),
                     LogicalPosition::new(0., 0.),
@@ -557,11 +557,9 @@ fn main(){
                 }
             });
 
-            //let main_window = app.get_webview("default").unwrap();
             let _event_id = app.listen("connect", move |event|{
                 let port: String = serde_json::from_str(event.payload()).unwrap();
                 println!("Connecting to:{}", port);
-                //let _ = main_window.emit("serialinfo", &port);
                 utils::tio_proxy::args(port);
             });
 
