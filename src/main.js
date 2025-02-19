@@ -83,14 +83,13 @@ new Promise((resolve) => {
             title.innerText = prefix + ' ';
             rpcDiv.appendChild(title);
             rpcDiv.appendChild(document.createElement('br'))
-
             commands.forEach(command => {
                 let addElement;
-                if (command === 'enable' && prefix !== 'cell.therm.auto') {
+                if (command === 'enable' && prefix.split('.').slice(2, 3).join('.') !== 'auto') {
                     addElement = document.createElement('input');
                     addElement.type = 'checkbox';
                     addElement.className = "checkCommands";
-                } else if (command === 'reset'|| command === 'capture' || (prefix ==='cell.therm.auto' && command === 'enable')) {
+                } else if (command === 'reset'|| command === 'capture' || (prefix.split('.').slice(2, 3).join('.') ==='auto' && command === 'enable')) {
                     addElement = document.createElement('button');
                     addElement.innerText = command;
                     addElement.className = "buttonCommands";
