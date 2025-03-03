@@ -223,7 +223,7 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
     Ok(result)
 }
 
-fn rpc_controls(args: &[String], column_names: Vec<String>) -> Vec<String>  {
+fn rpc_controls(args: &[String], column_names: Vec<String>) -> Vec<(String, bool)>  {
     let opts = tio_opts();
     let (_matches, root, route) = tio_parseopts(opts, args);
     let proxy = proxy::Interface::new(&root);
@@ -231,7 +231,7 @@ fn rpc_controls(args: &[String], column_names: Vec<String>) -> Vec<String>  {
 
     let nrpcs: u16 = device.get("rpc.listinfo").unwrap();
 
-    let mut rpc_controls: Vec<String> = Vec::new();
+    let mut rpc_controls: Vec<(String, bool)> = Vec::new();
     let mut seen_controls: HashSet<String> = HashSet::new();
     let mut control_names: HashMap<String, Vec<String>> = HashMap::new();
 
@@ -243,21 +243,25 @@ fn rpc_controls(args: &[String], column_names: Vec<String>) -> Vec<String>  {
         } 
     }
 
-    let mut rpc_map: HashMap<String, Vec<String>> = HashMap::new();
+    let mut rpc_map: HashMap<String, Vec<(String, bool)>> = HashMap::new();
+    let mut button = false;
     for rpc_id in 0u16..nrpcs {
-        let (_meta, name): (u16, String) = device.rpc("rpc.listinfo", rpc_id).unwrap();
+        let (meta, name): (u16, String) = device.rpc("rpc.listinfo", rpc_id).unwrap();
+        let meta = RpcMeta::parse(meta);
+        if meta.write && meta.read{button = true}
+        else {button = false}
         let parts: Vec<&str> = name.split('.').collect();
         if parts.len() >= 3{
             let prefix = format!("{}.{}", parts[0], parts[1]);
-            rpc_map.entry(prefix).or_default().push(name.clone());
+            rpc_map.entry(prefix).or_default().push((name.clone(), button));
         }
     } 
 
     for prefix in control_names.keys() {
         if let Some(rpc_names) = rpc_map.get(prefix) {
-            for name in rpc_names{
+            for (name, writeable) in rpc_names{
                 if !seen_controls.contains(name) {
-                    rpc_controls.push(name.clone());
+                    rpc_controls.push((name.clone(), *writeable));
                     seen_controls.insert(name.clone());
                 }
             }
@@ -343,7 +347,6 @@ fn stream_data(window: Window) {
         }
         let header = format!("{}\nSerial: {}\nStream: {}", meta.device.name, meta.device.serial_number, stream_id);
         let _= window.emit("graph_labels", (header, stream_desc.clone()));
-
         let _ = window.emit("fftgraphs", fft_sort);
 
         //Emitting RPC Commands

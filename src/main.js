@@ -32,13 +32,14 @@ webpage.once("graph_labels", (event) => {
 
 webpage.once("rpcs", (event) => {
     const controls = event.payload;
-    for (let i = 0; i< controls.length; i++) {rpcs.push(controls[i])}
+    for (const group in controls) {
+        rpcs.push(controls[group])
+    }
     rpcloaded = true
 })
 
 webpage.once("fftgraphs", (event) => {
     const sorted = event.payload;
-    
     for (let keys in sorted){    
         let labels = [];        
         for (let value in sorted[keys] ){
@@ -64,16 +65,17 @@ new Promise((resolve) => {
         //write out rpc divs
         const rpcGroups = new Map();
         rpcs.forEach(rpc => {
-            const prefix = rpc.split('.').slice(0, -1).join('.');
-            const suffix = rpc.split('.').slice(-1).join('.');
+            const prefix = rpc[0].split('.').slice(0, -1).join('.');
+            const suffix = rpc[0].split('.').slice(-1).join('.');
             if (!rpcGroups.has(prefix)) {
                 rpcGroups.set(prefix, []);
             }
-            rpcGroups.get(prefix).push(suffix);
+            rpcGroups.get(prefix).push([suffix, rpc[1]]);
         })
 
         const rpcsContainer = document.getElementById('RPCCommands')
-        rpcGroups.forEach((commands, prefix) => {
+
+        for (const prefix of rpcGroups.keys()){
             const rpcDiv = document.createElement('div');
             rpcDiv.id = prefix;
             rpcDiv.className = 'controls'
@@ -83,15 +85,17 @@ new Promise((resolve) => {
             title.innerText = prefix + ' ';
             rpcDiv.appendChild(title);
             rpcDiv.appendChild(document.createElement('br'))
-            commands.forEach(command => {
+
+            const suffixgroup = rpcGroups.get(prefix);
+            suffixgroup.forEach(([suffix, writeable]) => {
                 let addElement;
-                if (command === 'enable' && prefix.split('.').slice(2, 3).join('.') !== 'auto') {
+                if (suffix === 'enable') {
                     addElement = document.createElement('input');
                     addElement.type = 'checkbox';
                     addElement.className = "checkCommands";
-                } else if (command === 'reset'|| command === 'capture' || (prefix.split('.').slice(2, 3).join('.') ==='auto' && command === 'enable')) {
+                } else if (!writeable){
                     addElement = document.createElement('button');
-                    addElement.innerText = command;
+                    addElement.innerText = suffix;
                     addElement.className = "buttonCommands";
                 } else {
                     addElement = document.createElement('input');
@@ -99,20 +103,22 @@ new Promise((resolve) => {
                     addElement.step = 0.1;
                     addElement.className = "InputCommands";
                 }
-                addElement.id = `${prefix}.${command}`;
+                addElement.id = `${prefix}.${suffix}`;
 
-                if (command != 'reset' && command != 'capture'){
+                if (writeable){
                     const label = document.createElement('label');
                     label.htmlFor = addElement.id;
-                    label.innerText = command + ' '
+                    label.innerText = suffix + ' '
                     label.appendChild(addElement)
                     rpcDiv.appendChild(label);
                 } else{rpcDiv.appendChild(addElement)}
 
                 rpcDiv.appendChild(document.createElement('br'))
+                
+                rpcsContainer.appendChild(rpcDiv)
             })
-            rpcsContainer.appendChild(rpcDiv)
-        })
+        }
+
         attachInputListeners();
         attachToggleListeners();
         attachButtonListeners();
@@ -216,11 +222,11 @@ new Promise((resolve) => {
                                 return;
                             }
                         })
-                        document.getElementById('FFT').style.display = 'block';
+                        document.getElementById('FFT').style.display = stayDisplayed? 'block': 'none';
                         node.style.display = stayDisplayed? 'block' : 'none';
                     } else {
                         node.style.display = 'none'
-                        document.getElementById('FFT').style.display = 'none';
+                        document.getElementById('FFT').style.display = 'none'
                     }
                 })
             })
@@ -289,6 +295,14 @@ window.onload = () => {
         }) 
     });
 
+    const buttonChange = document.querySelectorAll('.buttonCommands');
+    buttonChange.forEach(clickButton => {
+        clickButton.addEventListener("click", function() {   
+            call = [clickButton.id, clickButton.value];              
+            webpage.emit('returningRPCName', call);      
+        })
+    })
+
     const inputChange = document.querySelectorAll('.InputCommands');
     webpage.listen("returnRPC", (event) => {
         let [name, inputValue] = event.payload;
@@ -302,21 +316,18 @@ window.onload = () => {
     }); 
 };
 
-
+var seriesConfig  = [{label: "Frequency (Hz)"}];
+let gotSeries = false;
 function createFFT(eventName, containerId, labels) {
     const template = document.getElementById('fft-template');
     const clone = template.content.cloneNode(true);
     const container = clone.querySelector('.canvas-container');
     container.id = containerId;
-    
-    var seriesConfig  = [{label: "Frequency (Hz)"}];
-    let gotSeries = false;
     let fftPlot;
 
     // Listen for the event and update the graph
     webpage.listen(eventName, (event) => {
         const spectrum = event.payload;
-        console.log(spectrum)
         if (!gotSeries) {
             for (let i = 1; i< spectrum.length; i++) {
                 seriesConfig.push({
@@ -336,20 +347,22 @@ function createFFT(eventName, containerId, labels) {
                 }
             }, 100);
         }).then(() => {
-            for (let i = 0; i< spectrum[1].length; i++){
+            for (let i = 0; i< spectrum[0].length; i++){
                 for (let j = 0; j< spectrum.length; j++){
-                    if (spectrum[j][i] !== undefined) {
+                    if (spectrum[i][j] !== undefined) {
                         fftPlot.data[j].push(spectrum[j][i])
                     }
                 }
             }
-            while (fftPlot.data[1].length > Math.floor((spectrum[1].length*4)/10)*10 ){
+    
+            while (fftPlot.data[0].length > 500){
                 for (let i = 0; i < fftPlot.data.length; i++){
                     fftPlot.data[i].shift();
                 }
             }
             fftPlot.setData(fftPlot.data, true);
         })
+        
     });
     document.getElementById('FFT').appendChild(container);
     new Promise((resolve) => {
@@ -483,15 +496,7 @@ function attachButtonListeners() {
     const buttonChange = document.querySelectorAll('.buttonCommands');
     buttonChange.forEach(button => {
         button.addEventListener("click", () => {
-            call = [button.id, button.value];
-            if (button.id === 'cell.therm.auto.enable') {
-                call = [button.id, "1"]
-            }
-            webpage.emit("returningRPCName", call);
-
-            document.querySelectorAll('.checkboxes').forEach(checkbox => {
-                refreshRPC(checkbox)
-            })
+            webpage.emit("onLoad", button.id);
         })
     })  
 }
