@@ -222,10 +222,9 @@ new Promise((resolve) => {
                                 return;
                             }
                         })
-                        document.getElementById('FFT').style.display = stayDisplayed? 'block': 'none';
+                        document.getElementById('FFT').style.display = 'block';
                         node.style.display = stayDisplayed? 'block' : 'none';
                     } else {
-                        node.style.display = 'none'
                         document.getElementById('FFT').style.display = 'none'
                     }
                 })
@@ -349,7 +348,7 @@ function createFFT(eventName, containerId, labels) {
         }).then(() => {
             for (let i = 0; i< spectrum[0].length; i++){
                 for (let j = 0; j< spectrum.length; j++){
-                    if (spectrum[i][j] !== undefined) {
+                    if (spectrum[j][i] !== undefined) {
                         fftPlot.data[j].push(spectrum[j][i])
                     }
                 }
