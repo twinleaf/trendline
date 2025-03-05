@@ -315,6 +315,8 @@ window.onload = () => {
     }); 
 };
 
+var seriesConfig  = [{label: "Frequency (Hz)"}];
+let gotSeries = false;
 function createFFT(eventName, containerId, labels) {
     const template = document.getElementById('fft-template');
     const clone = template.content.cloneNode(true);
@@ -338,7 +340,7 @@ function createFFT(eventName, containerId, labels) {
             } 
             gotSeries = true;
         }
-
+        //TODO Freeze resolve
         new Promise((resolve) => {
             const plotCreated = setInterval(() => {
                 if (fftPlot !== undefined) {
