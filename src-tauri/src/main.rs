@@ -440,16 +440,16 @@ fn fft_data(window: Window) {
             let mut fft_power: HashMap<String, Vec<Vec<f32>>> = HashMap::new();
 
             if sample.stream.stream_id == stream_id{
-                for column in &sample.columns{                  
-                    if let Some(rate) = sampling_rates.get(&stream_id){
-                        let decimation_rate = rate[1];
-                        let fs = rate[0]/ decimation_rate;
+                if let Some(rate) = sampling_rates.get(&stream_id){
+                    let decimation_rate = rate[1];
+                    let fs = rate[0]/ decimation_rate;
 
+                    for column in &sample.columns{                  
                         fft_signals.entry(column.desc.name.clone()).or_default().push(match_value(column.value.clone()));
                         if fft_signals.iter().all(|(_col, value)| value.len() >= (fs*time_span as u32).try_into().unwrap()) {
                             fft_signals.iter_mut().for_each(|(_col, value)| {value.remove(0);});
                         }
-
+    
                         //Note: (resize on fft is breaking past length of fs) 
                         if fft_signals.iter().all(|(_col, value)| value.len() >= (fs*time_span as u32 -1).try_into().unwrap()) {
                             let (freq, power) = calc_fft(fft_signals.get(&column.desc.name.clone()), fs as f32);
@@ -461,19 +461,28 @@ fn fft_data(window: Window) {
                             }
                         }
                     }
-                }
-
-                for (name, values) in &mut fft_power{
-                    let mut spectrum_data: Vec<Vec<f32>> = Vec::new();
-                    if let Some(freq_result) = fft_freq.get(name) {
-                        spectrum_data.push(freq_result.to_vec());
-                        for value in values{
-                            spectrum_data.push(value.to_vec());
-                        }
-
-                        if let Some(columns) = sorted_columns.get(name){
-                            if spectrum_data.len() == columns.len() + 1{
-                                let _ = window.emit(&name.clone(), spectrum_data);
+    
+                    for (name, values) in &mut fft_power{
+                        let mut spectrum_data: Vec<Vec<f32>> = Vec::new();
+                        if let Some(freq_result) = fft_freq.get(name) {
+                            spectrum_data.push(freq_result.to_vec());
+                            for value in values{
+                                spectrum_data.push(value.to_vec());
+                            }
+    
+                            if let Some(columns) = sorted_columns.get(name){
+                                if spectrum_data.len() == columns.len() + 1{
+                                    let averaged_spec_data: Vec<Vec<f32>> = spectrum_data
+                                        .iter()
+                                        .map(|col| {
+                                            let chunk_size = (col.len() as f32/ (fs as f32/20.0)).ceil() as usize;
+                                            col.chunks(chunk_size)
+                                                .map(|chunk| chunk.iter().sum::<f32>() /chunk.len() as f32)
+                                                .collect()
+                                        })
+                                        .collect();
+                                    let _ = window.emit(&name.clone(), averaged_spec_data);
+                                }
                             }
                         }
                     }

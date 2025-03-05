@@ -324,7 +324,7 @@ function createFFT(eventName, containerId, labels) {
 
     let seriesConfig  = [{label: "Frequency (Hz)"}];
     let gotSeries = false;
-    
+
     // Listen for the event and update the graph
     webpage.listen(eventName, (event) => {
         const spectrum = event.payload;
@@ -347,7 +347,7 @@ function createFFT(eventName, containerId, labels) {
                 }
             }, 100);
         }).then(() => {
-            for ( i in spectrum.length) {
+            for (let i = 0; i < spectrum.length; i++) {
                 fftPlot.data[i] = [];
             }
 
@@ -358,14 +358,6 @@ function createFFT(eventName, containerId, labels) {
                     }
                 }
             }
-    
-            //when to shift fftPlot.data?
-            /*while (fftPlot.data[0].length > 500){
-                for (let i = 0; i < fftPlot.data.length; i++){
-                    fftPlot.data[i].shift();
-                }
-            }*/
-
             fftPlot.setData(fftPlot.data, true);
         })
         
