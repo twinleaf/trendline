@@ -312,6 +312,12 @@ fn stream_data(window: Window) {
     let args: Vec<String> = env::args().collect();   
     let opts = tio_opts();
     let (_matches, root, route) = tio_parseopts(opts, &args);
+    let stream_id: u8 = if args.len() >1 {
+        match args[1].parse(){
+            Ok(val) => val,
+            Err(_e) => 1
+        }
+    } else {1};
 
     thread::spawn(move || {
         let proxy = proxy::Interface::new(&root);
