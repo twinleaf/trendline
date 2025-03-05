@@ -272,8 +272,11 @@ fn rpc_controls(args: &[String], column_names: Vec<String>) -> Vec<(String, bool
 
 fn calc_fft(signals: Option<&Vec<f32>>, fs: f32 ) -> (Vec<f32>, Vec<f32>) {
     if let Some(signal) = signals{
+        let mean = signal.iter().sum::<f32>() / signal.len() as f32;
+        let mean_adjusted_signal: Vec<f32> = signal.iter().map(|x| x - mean).collect();
+
         let welch: SpectralDensity<f32> =
-            SpectralDensity::<f32>::builder(signal, fs).build();
+            SpectralDensity::<f32>::builder(&mean_adjusted_signal, fs).build();
         
         let result = std::panic::catch_unwind(|| {welch.periodogram();});
         if result.is_err(){
@@ -473,15 +476,16 @@ fn fft_data(window: Window) {
                             if let Some(columns) = sorted_columns.get(name){
                                 if spectrum_data.len() == columns.len() + 1{
                                     let averaged_spec_data: Vec<Vec<f32>> = spectrum_data
-                                        .iter()
-                                        .map(|col| {
-                                            let chunk_size = (col.len() as f32/ (fs as f32/20.0)).ceil() as usize;
-                                            col.chunks(chunk_size)
-                                                .map(|chunk| chunk.iter().sum::<f32>() /chunk.len() as f32)
-                                                .collect()
-                                        })
-                                        .collect();
-                                    let _ = window.emit(&name.clone(), averaged_spec_data);
+                                    .iter()
+                                    .map(|col| {
+                                        let chunk_size = (col.len() as f32/ (fs as f32/20.0)).ceil() as usize;
+                                        col.chunks(chunk_size)
+                                            .map(|chunk| chunk.iter().sum::<f32>() /chunk.len() as f32)
+                                            .collect()
+                                    })
+                                    .collect();
+                                    
+                                    let _ = window.emit(&name.clone(), spectrum_data);
                                 }
                             }
                         }
