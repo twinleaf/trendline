@@ -315,8 +315,6 @@ window.onload = () => {
     }); 
 };
 
-var seriesConfig  = [{label: "Frequency (Hz)"}];
-let gotSeries = false;
 function createFFT(eventName, containerId, labels) {
     const template = document.getElementById('fft-template');
     const clone = template.content.cloneNode(true);
@@ -324,6 +322,9 @@ function createFFT(eventName, containerId, labels) {
     container.id = containerId;
     let fftPlot;
 
+    let seriesConfig  = [{label: "Frequency (Hz)"}];
+    let gotSeries = false;
+    
     // Listen for the event and update the graph
     webpage.listen(eventName, (event) => {
         const spectrum = event.payload;
@@ -337,7 +338,7 @@ function createFFT(eventName, containerId, labels) {
             } 
             gotSeries = true;
         }
-        //TODO Freeze resolve
+
         new Promise((resolve) => {
             const plotCreated = setInterval(() => {
                 if (fftPlot !== undefined) {
@@ -346,6 +347,10 @@ function createFFT(eventName, containerId, labels) {
                 }
             }, 100);
         }).then(() => {
+            for ( i in spectrum.length) {
+                fftPlot.data[i] = [];
+            }
+
             for (let i = 0; i< spectrum[0].length; i++){
                 for (let j = 0; j< spectrum.length; j++){
                     if (spectrum[j][i] !== undefined) {
@@ -354,11 +359,13 @@ function createFFT(eventName, containerId, labels) {
                 }
             }
     
-            while (fftPlot.data[0].length > 500){
+            //when to shift fftPlot.data?
+            /*while (fftPlot.data[0].length > 500){
                 for (let i = 0; i < fftPlot.data.length; i++){
                     fftPlot.data[i].shift();
                 }
-            }
+            }*/
+
             fftPlot.setData(fftPlot.data, true);
         })
         
