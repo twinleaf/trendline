@@ -139,7 +139,7 @@ new Promise((resolve) => {
 
             const label = document.createElement('label');
             label.htmlFor = checkbox.id;
-            label.innerText = column_desc.column[i]
+            label.innerHTML = column_desc.column[i]
             const lineBreak = document.createElement('br');
 
             const canvas = document.createElement('div');
@@ -264,6 +264,16 @@ window.onload = () => {
                 chart.data[0].push(elapsed)
                 chart.data[1].push(values[index][i])
 
+                document.querySelectorAll('.checkboxes').forEach(checkbox => {
+                    checkbox.labels.forEach(label => {
+                        let nameParts = column_desc.column[index].split(' ')
+                        const title = label.innerHTML.split(' ').slice(0, nameParts.length ).join(' ');
+                        if (column_desc.column[index] == title){
+                            label.innerHTML = column_desc.column[index] + ' ' + values[index][i].toFixed(4)
+                        }
+                    })
+                })
+
                 let firstLogTime = chart.data[0][0]
                 let recentLogTime = chart.data[0][chart.data[0].length -1]
 
@@ -331,7 +341,7 @@ function createFFT(eventName, containerId, labels) {
         if (!gotSeries) {
             for (let i = 1; i< spectrum.length; i++) {
                 seriesConfig.push({
-                    label: `${labels[i-1]} (V/√Hz)`, 
+                    label: `${labels[i-1]} (${column_desc.units[i-1]}/√Hz)`, 
                     stroke: `hsl(${i*130}, 30%, 35%)`,
                     points: {show: false}
                 })
@@ -347,10 +357,6 @@ function createFFT(eventName, containerId, labels) {
                 }
             }, 100);
         }).then(() => {
-            /*for (let i = 0; i < spectrum.length; i++) {
-                fftPlot.data[i] = [];
-            }*/
-
             for (let i = 0; i< spectrum[0].length; i++){
                 for (let j = 0; j< spectrum.length; j++){
                     if (spectrum[j][i] !== undefined) {
