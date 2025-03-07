@@ -269,7 +269,9 @@ window.onload = () => {
                         let nameParts = column_desc.column[index].split(' ')
                         const title = label.innerHTML.split(' ').slice(0, nameParts.length ).join(' ');
                         if (column_desc.column[index] == title){
-                            label.innerHTML = column_desc.column[index] + ' ' + values[index][i].toFixed(4)
+                            if (!isNaN(values[index][i]) && values[index][i] !== null) {label.innerHTML = column_desc.column[index] + ' ' + values[index][i].toFixed(4)}
+                            else {label.innerHTML = column_desc.column[index] + ' ' + values[index][i]}
+                            
                         }
                     })
                 })
