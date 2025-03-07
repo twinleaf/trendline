@@ -439,20 +439,22 @@ fn fft_data(window: Window) {
                 let decimation_rate = rate[1];
                 let fs = rate[0]/ decimation_rate;
 
-                for column in &sample.columns{               
+                for column in sample.columns{               
                     fft_signals.entry(column.desc.name.clone()).or_default().push(match_value(column.value.clone()));
-                    if fft_signals.iter().all(|(_col, value)| value.len() >= (fs*time_span as u32).try_into().unwrap()) {
-                        fft_signals.iter_mut().for_each(|(_col, value)| {value.remove(0);});
-                    }
-                    
-                    //Note: (resize on fft is breaking past length of fs) 
-                    if fft_signals.iter().all(|(_col, value)| value.len() >= (fs*time_span as u32 -1).try_into().unwrap()) {
-                        let (freq, power) = calc_fft(fft_signals.get(&column.desc.name.clone()), fs as f32);
-                        if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){
-                            let parts: Vec<&str> = column.desc.name.split('.').collect();
-                            let prefix = parts[0].to_string();
-                            fft_power.entry(prefix.clone()).or_default().push(power.clone());
-                            fft_freq.entry(prefix.clone()).or_insert_with(||freq.clone());
+
+                    if let  Some(col_value) = fft_signals.get_mut(&column.desc.name.clone()){
+                        if col_value.len() >= (fs*time_span as u32).try_into().unwrap(){
+                            col_value.remove(0);
+                        }
+                        //Note: (resize on fft is breaking past length of fs) 
+                        if col_value.len() >= (fs*time_span as u32 -1).try_into().unwrap() {
+                            let (freq, power) = calc_fft(fft_signals.get(&column.desc.name.clone()), fs as f32);
+                            if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){
+                                let parts: Vec<&str> = column.desc.name.split('.').collect();
+                                let prefix = parts[0].to_string();
+                                fft_power.entry(prefix.clone()).or_default().push(power.clone());
+                                fft_freq.entry(prefix.clone()).or_insert_with(||freq.clone());
+                            }
                         }
                     }
                 }
