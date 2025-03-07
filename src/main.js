@@ -10,9 +10,10 @@ const webpage = getCurrentWebviewWindow();
 const column_desc ={
     column: [],
     column_id: [],
-    units: []
+    units: [],
+    stream_num: []
 }
-var graphs = [];
+const graphsByStream = {};
 var rpcs = [];
 var serial = []; 
 let labelloaded = false;
@@ -26,6 +27,11 @@ webpage.once("graph_labels", (event) => {
         column_desc.column.push(label.col_desc[name])
         column_desc.column_id.push(label.col_name[name])
         column_desc.units.push(label.col_unit[name])
+        column_desc.stream_num.push(label.col_stream[name])
+    }
+
+    for (let i = Math.min(...column_desc.stream_num); i <= Math.max(...column_desc.stream_num); i++) {
+        streamGraphs(i.toString());
     }
     labelloaded = true
 })
@@ -183,7 +189,12 @@ new Promise((resolve) => {
 
             const data = [[],[]]
             const uplot = new uPlot(options, data, document.getElementById(canvas.id))
-            graphs.push(uplot)
+            
+            const streamNum = column_desc.stream_num[i];
+            if (!graphsByStream[streamNum]) {
+                graphsByStream[streamNum] = [];
+            }
+            graphsByStream[streamNum].push(uplot);
             makeResizable(canvas.id, uplot)
 
             const fftpop = document.getElementById('showPlot')
@@ -253,59 +264,6 @@ new Promise((resolve) => {
 });
 
 window.onload = () => { 
-    let timePoints = 100;
-    let startTime = Date.now();
-
-    webpage.listen("main", (event) => {
-        const values = event.payload;
-        const elapsed = (Date.now() - startTime) /1000;
-        graphs.forEach((chart, index) => {  
-            for (let i = 0; i < values[index].length; i++) {  
-                chart.data[0].push(elapsed)
-                chart.data[1].push(values[index][i])
-
-                document.querySelectorAll('.checkboxes').forEach(checkbox => {
-                    checkbox.labels.forEach(label => {
-                        let nameParts = column_desc.column[index].split(' ')
-                        const title = label.innerHTML.split(' ').slice(0, nameParts.length ).join(' ');
-                        if (column_desc.column[index] == title){
-                            if (!isNaN(values[index][i]) && values[index][i] !== null) {label.innerHTML = column_desc.column[index] + ' ' + values[index][i].toFixed(4)}
-                            else {label.innerHTML = column_desc.column[index] + ' ' + values[index][i]}
-                            
-                        }
-                    })
-                })
-
-                let firstLogTime = chart.data[0][0]
-                let recentLogTime = chart.data[0][chart.data[0].length -1]
-
-                if ((recentLogTime - firstLogTime) > timePoints){
-                    for (let i = 0; i < chart.data.length; i++){
-                        chart.data[i].shift();
-                    }
-                }
-            }   
-            const timeSpan = document.getElementById('timeSpan');
-            timeSpan.addEventListener('keypress', function(e) {
-                if (e.key == "Enter") {
-                    timePoints = in_range(timeSpan);
-                    let firstLogTime = chart.data[0][0]
-                    let recentLogTime = chart.data[0][chart.data[0].length -1]
-                    while ((recentLogTime - firstLogTime)> timePoints) {
-                        for (let i = 0; i < chart.data.length; i++){
-                            chart.data[i].shift();
-                        }
-                        firstLogTime = chart.data[0][0]
-                        recentLogTime = chart.data[0][chart.data[0].length -1]
-                    } 
-                    timeSpan.innerHTML = timePoints;
-                    timeSpan.value = timePoints;
-                }
-            }) 
-            chart.setData(chart.data, true);
-        }) 
-    });
-
     const buttonChange = document.querySelectorAll('.buttonCommands');
     buttonChange.forEach(clickButton => {
         clickButton.addEventListener("click", function() {   
@@ -326,6 +284,69 @@ window.onload = () => {
         })
     }); 
 };
+
+function streamGraphs(eventName){
+    let timePoints = 100;
+    let startTime = Date.now();
+
+    webpage.listen(eventName, (event) => {
+        const values = event.payload;
+        const elapsed = (Date.now() - startTime) / 1000;
+        const streamNum = parseInt(eventName);
+        const startIndex = column_desc.stream_num.findIndex(num => num === streamNum);
+
+        if (graphsByStream[streamNum]) {
+            graphsByStream[streamNum].forEach((chart, index) => {
+                const columnIndex = startIndex + index;
+                for (let i = 0; i < values[index].length; i++) {
+                    chart.data[0].push(elapsed);
+                    chart.data[1].push(values[index][i]);
+
+                    document.querySelectorAll('.checkboxes').forEach(checkbox => {
+                        checkbox.labels.forEach(label => {
+                            let nameParts = column_desc.column[columnIndex].split(' ');
+                            const title = label.innerHTML.split(' ').slice(0, nameParts.length).join(' ');
+                            if (column_desc.column[columnIndex] == title && column_desc.stream_num[columnIndex] == streamNum) {
+                                if (!isNaN(values[index][i]) && values[index][i] !== null) {
+                                    label.innerHTML = column_desc.column[columnIndex] + ' ' + values[index][i].toFixed(4);}
+                                else{
+                                    label.innerHTML = column_desc.column[columnIndex] + ' ' + values[index][i]
+                                }
+                            }
+                        });
+                    });
+
+                    let firstLogTime = chart.data[0][0];
+                    let recentLogTime = chart.data[0][chart.data[0].length - 1];
+
+                    if ((recentLogTime - firstLogTime) > timePoints) {
+                        for (let i = 0; i < chart.data.length; i++) {
+                            chart.data[i].shift();
+                        }
+                    }
+                }
+                const timeSpan = document.getElementById('timeSpan');
+                timeSpan.addEventListener('keypress', function(e) {
+                    if (e.key == "Enter") {
+                        timePoints = in_range(timeSpan);
+                        let firstLogTime = chart.data[0][0];
+                        let recentLogTime = chart.data[0][chart.data[0].length - 1];
+                        while ((recentLogTime - firstLogTime) > timePoints) {
+                            for (let i = 0; i < chart.data.length; i++) {
+                                chart.data[i].shift();
+                            }
+                            firstLogTime = chart.data[0][0];
+                            recentLogTime = chart.data[0][chart.data[0].length - 1];
+                        }
+                        timeSpan.innerHTML = timePoints;
+                        timeSpan.value = timePoints;
+                    }
+                });
+                chart.setData(chart.data, true);
+            });
+        }
+    });
+}
 
 function createFFT(eventName, containerId, labels) {
     const template = document.getElementById('fft-template');
