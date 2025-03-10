@@ -307,11 +307,11 @@ function streamGraphs(eventName){
                             let nameParts = column_desc.column[columnIndex].split(' ');
                             const title = label.innerHTML.split(' ').slice(0, nameParts.length).join(' ');
                             if (column_desc.column[columnIndex] == title && column_desc.stream_num[columnIndex] == streamNum) {
-                                if (!isNaN(values[index][i]) && values[index][i] !== null) {
-                                    label.innerHTML = column_desc.column[columnIndex] + ' ' + values[index][i].toFixed(4);}
-                                else{
-                                    label.innerHTML = column_desc.column[columnIndex] + ' ' + values[index][i]
-                                }
+                                let valueDisplay = values[index][i]
+                                if (!isNaN(values[index][i]) && values[index][i] !== null && values[index][i] % 1 !== 0) {
+                                    valueDisplay = values[index][i].toFixed(4);}
+
+                                label.innerHTML = column_desc.column[columnIndex] + ' ' + valueDisplay
                             }
                         });
                     });
