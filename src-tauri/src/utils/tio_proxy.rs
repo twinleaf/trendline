@@ -89,8 +89,17 @@ fn create_listener_thread(
     Ok(())
 }
 
-pub fn args(name: String) {
-    let args: Vec<String> = vec!["tio-proxy".to_string(), name];
+pub fn getDevices() -> Vec<String> {
+    let mut urls = Vec::new();
+    for serial in  enum_devices(true){
+        urls.push(serial.url.clone());
+    }
+    urls
+}
+
+pub fn args(names: Vec<String>) {
+    let mut args: Vec<String> = vec!["tio-proxy".to_string()];
+    for name in names{args.push(name)}
     run(args);
 }
 

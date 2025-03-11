@@ -15,6 +15,7 @@ webpage.once("ports", (event) => {
     
 });
 
+
 new Promise((resolve) => {
     const checkLoad = setInterval(() => {
         if (names_loaded) {
@@ -25,6 +26,7 @@ new Promise((resolve) => {
 }).then(() => {
     setTimeout(() => {
         const connectbox = document.getElementById('ports');
+        
         port_names.forEach(name => {
             const port = document.createElement('button')
             port.innerText = "Connect";
@@ -44,6 +46,11 @@ new Promise((resolve) => {
             serial.addEventListener("click", function() {
                 webpage.emit('connect', serial.id)
             })
+        })
+
+        document.getElementById('typeButton').addEventListener("click", function(){
+            let enteredValue = document.getElementById('textfield')
+            webpage.emit('connect', enteredValue.value)
         })
     }, 100)
 })

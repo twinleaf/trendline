@@ -8,9 +8,12 @@ use tauri::{http::header::Values, Emitter, Listener, LogicalPosition, LogicalSiz
 use welch_sde::{Build, SpectralDensity};
 use std::{env, thread};
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, atomic::{Ordering, AtomicBool}};
 mod utils;
 
-#[derive(serde::Serialize, Clone, Debug)]
+static mut SERIALCONNECTED: bool = false;
+
+#[derive(serde::Serialize, Clone)]
 struct GraphLabel{
     col_name: Vec<String>, 
     col_desc: Vec<String>,
@@ -308,10 +311,14 @@ fn match_value(data: ColumnData) -> f32 {
 }
 
 #[tauri::command]
-fn stream_data(window: Window) {
+async fn stream_data(window: Window) {
+    let flag = Arc::new(AtomicBool::new(false));
+    let flag2 = Arc::clone(&flag);
+
     let args: Vec<String> = env::args().collect();   
     let opts = tio_opts();
-    let (_matches, root, route) = tio_parseopts(opts, &args);
+    let (matches, root, route) = tio_parseopts(opts, &args);
+
     let stream_id: u8 = if args.len() >1 {
         match args[1].parse(){
             Ok(val) => val,
@@ -319,11 +326,15 @@ fn stream_data(window: Window) {
         }
     } else {1};
 
-    thread::spawn(move || {
+    let parked= thread::spawn(move || {
+        while !flag2.load(Ordering::Relaxed) {
+            thread::park();
+        }
+
         let proxy = proxy::Interface::new(&root);
         let device = proxy.device_full(route).unwrap();
         let mut device = Device::new(device);
-        
+
         //get sampling & decimation rate, column metadata
         let meta = device.get_metadata();
         let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
@@ -400,11 +411,24 @@ fn stream_data(window: Window) {
             } 
         }
     });
+
+    loop {
+        thread::sleep(std::time::Duration::from_millis(1000));
+        unsafe {
+            if SERIALCONNECTED {
+                flag.store(true, Ordering::Relaxed);
+                parked.thread().unpark();
+                break;
+            }
+        }
+    }
 }
 
-
 #[tauri::command]
-fn fft_data(window: Window) {
+async fn fft_data(window: Window) {
+    let flag = Arc::new(AtomicBool::new(false));
+    let flag2 = Arc::clone(&flag);
+
     let args: Vec<String> = env::args().collect();   
     let opts = tio_opts();
     let (_matches, root, route) = tio_parseopts(opts, &args);
@@ -416,7 +440,11 @@ fn fft_data(window: Window) {
         } 
     } else{10};
 
-    thread::spawn(move || {
+    let fft_parked = thread::spawn(move || {
+        while !flag2.load(Ordering::Relaxed) {
+            thread::park();
+        }  
+
         let proxy = proxy::Interface::new(&root);
         let device = proxy.device_full(route).unwrap();
         let mut device = Device::new(device);
@@ -494,19 +522,29 @@ fn fft_data(window: Window) {
             
         }
     });
+
+    loop {
+        thread::sleep(std::time::Duration::from_millis(1000));
+        unsafe {
+            if SERIALCONNECTED {
+                flag.store(true, Ordering::Relaxed);
+                fft_parked.thread().unpark();
+                break;
+            }
+        }
+    }
 }
 
 #[tauri::command]
-fn serial_ports(window:Window){
+fn serial_ports(window: Window) {
     thread::spawn(move || {
         thread::sleep(std::time::Duration::from_secs(1));
-
-        let ports = serialport::available_ports().expect("No ports found!");
-        let mut port_names:  Vec<String> = Vec::new();
-        for p in ports {
-            port_names.push(p.port_name);
-        }
-        let _ = window.emit("ports", port_names);
+        let serials = utils::tio_proxy::getDevices();
+        let ports: Vec<&str> = serials.iter()
+            .flat_map(|serial| serial.split("serial://"))
+            .filter(|&i| !i.is_empty())
+            .collect();
+        let _ = window.emit("ports", ports);
     });
 }
 
@@ -526,15 +564,14 @@ fn main(){
                 )?;
 
             let serial_window = tauri::WindowBuilder::new(app, "window-2")
-                .inner_size(800.,600.)
-                .title("Connecting")
+                .inner_size(400., 250.)
                 .build()?;
 
             let _serials = serial_window.add_child(
                 tauri::webview::WebviewBuilder::new("serials",WebviewUrl::App("serial.html".into()))
                     .auto_resize(),
                     LogicalPosition::new(0., 0.),
-                    LogicalSize::new(800., 600.),
+                    LogicalSize::new(400., 300.),
                 )?;
 
             //App listens for the RPC call and returns the result to the specified window
@@ -565,8 +602,15 @@ fn main(){
 
             let _event_id = app.listen("connect", move |event|{
                 let port: String = serde_json::from_str(event.payload()).unwrap();
-                println!("Connecting to:{}", port);
-                utils::tio_proxy::args(port);
+                let arguments: Vec<String> = port.split(' ').map(|x| x.to_string()).collect();
+                if port == "tcp://localhost".to_string(){
+                    unsafe{SERIALCONNECTED = true}
+                } else{
+                    println!("Connecting to:{:?}", arguments);
+                    unsafe{SERIALCONNECTED = true}
+                    utils::tio_proxy::args(arguments);
+                }
+                
             });
 
             Ok(())

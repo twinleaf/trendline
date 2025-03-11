@@ -39,6 +39,10 @@
 .connectports label{
   padding: 10px;
 }
+.connectports input, p{
+  margin-left:10px;
+  margin-bottom:10px;
+}
 
 #deviceName{
   display: block;
