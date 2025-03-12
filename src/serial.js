@@ -52,6 +52,11 @@ new Promise((resolve) => {
             let enteredValue = document.getElementById('textfield')
             webpage.emit('connect', enteredValue.value)
         })
+
+        document.getElementById('textfield').addEventListener("keypress", function(e) {
+            if (e.key == "Enter") {webpage.emit('connect', document.getElementById('textfield').value)}
+
+        })
     }, 100)
 })
 

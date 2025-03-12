@@ -16,8 +16,9 @@ const column_desc ={
 const graphsByStream = {};
 var rpcs = [];
 var serial = []; 
-let labelloaded = false;
-let rpcloaded = false;
+const complexPlots = []
+let labelLoaded = false;
+let rpcLoaded = false;
 
 webpage.once("graph_labels", (event) => {
     const [header, label] = event.payload;
@@ -30,10 +31,7 @@ webpage.once("graph_labels", (event) => {
         column_desc.stream_num.push(label.col_stream[name])
     }
 
-    for (let i = Math.min(...column_desc.stream_num); i <= Math.max(...column_desc.stream_num); i++) {
-        streamGraphs(i.toString());
-    }
-    labelloaded = true
+    labelLoaded = true
 })
 
 webpage.once("rpcs", (event) => {
@@ -41,23 +39,32 @@ webpage.once("rpcs", (event) => {
     for (const group in controls) {
         rpcs.push(controls[group])
     }
-    rpcloaded = true
+    rpcLoaded = true
 })
 
 webpage.once("fftgraphs", (event) => {
-    const sorted = event.payload;
-    for (let keys in sorted){    
+    const [real, complex] = event.payload;
+    //TODO: reduce verbosity
+    for (let keys in real){    
         let labels = [];        
-        for (let value in sorted[keys] ){
-            labels.push(sorted[keys][value])
+        for (let value in real[keys] ){
+            labels.push(real[keys][value])
         }
         createFFT(keys, `${keys}`, labels)   
+    }
+    for (let keys in complex){
+        let labels = [];
+        for (let value in complex[keys]) {
+            labels.push(complex[keys][value])
+            complexPlots.push(complex[keys][value])
+        }
+        createFFT(`${complex[keys][0].split('.').slice(0,1)}${keys}`, labels)   
     }
 })
 
 new Promise((resolve) => {
     const checkLoad = setInterval(() => {
-        if (labelloaded && rpcloaded) {
+        if (labelLoaded && rpcLoaded) {
             clearInterval(checkLoad);
             resolve();
         }
@@ -197,7 +204,6 @@ new Promise((resolve) => {
             graphsByStream[streamNum].push(uplot);
             makeResizable(canvas.id, uplot)
 
-            const fftpop = document.getElementById('showPlot')
             const checkboxes = document.querySelectorAll('.checkboxes');
 
             checkbox.addEventListener("change", (event) => {
@@ -222,24 +228,6 @@ new Promise((resolve) => {
                     }
                 })
             });
-            
-            fftpop.addEventListener("change", () => {
-                document.getElementById('FFT').childNodes.forEach(node => {
-                    if (fftpop.checked){
-                        let stayDisplayed = false;
-                        checkboxes.forEach(checkbox => {
-                            if (checkbox.id.split('.').slice(0,1).toString() == node.id.toString() && checkbox.checked) {
-                                stayDisplayed = true;
-                                return;
-                            }
-                        })
-                        document.getElementById('FFT').style.display = 'block';
-                        node.style.display = stayDisplayed? 'block' : 'none';
-                    } else {
-                        document.getElementById('FFT').style.display = 'none'
-                    }
-                })
-            })
 
             refreshRPC(checkbox)
 
@@ -260,30 +248,38 @@ new Promise((resolve) => {
                 })
             });
         }
+
+        for (let i = Math.min(...column_desc.stream_num); i <= Math.max(...column_desc.stream_num); i++) {
+            streamGraphs(i.toString());
+        }
+
+        const ffts = document.getElementById('showPlot')
+        ffts.addEventListener("change", () => {
+            document.getElementById('FFT').childNodes.forEach(node => {
+                if (ffts.checked){
+                    let stayDisplayed = false;
+                    document.querySelectorAll('.checkboxes').forEach(checkbox => {
+                        let idParts = checkbox.id.split('.');
+                        //again need better way to identify complex plot
+                        if (complexPlots.includes(checkbox.id) && `${idParts.slice(0,1).toString()}${idParts.slice(-1).join().charAt(0)}` == node.id.toString() && checkbox.checked) {
+                            stayDisplayed = true;
+                            return;
+                        } else if (idParts.slice(0,1).toString() == node.id.toString() && checkbox.checked) {
+                            stayDisplayed = true;
+                            return;
+                        }
+                    })
+                    document.getElementById('FFT').style.display = 'block';
+                    node.style.display = stayDisplayed? 'block' : 'none';
+                } else {document.getElementById('FFT').style.display = 'none'}
+            })
+        })
+
+        /*document.getElementById('requestFFT').addEventListener("keypress", function(e) {
+            if (e.key == "Enter") {webpage.emit('FFT request', document.getElementById('requestFFT').value)}
+        })*/
     }, 1000);
 });
-
-window.onload = () => { 
-    const buttonChange = document.querySelectorAll('.buttonCommands');
-    buttonChange.forEach(clickButton => {
-        clickButton.addEventListener("click", function() {   
-            call = [clickButton.id, clickButton.value];              
-            webpage.emit('returningRPCName', call);      
-        })
-    })
-
-    const inputChange = document.querySelectorAll('.InputCommands');
-    webpage.listen("returnRPC", (event) => {
-        let [name, inputValue] = event.payload;
-        inputChange.forEach(rpccall => {
-            if (rpccall.id == name) {
-                rpccall.value = inputValue;
-                rpccall.textContent = inputValue;
-                rpccall.innerHTML = inputValue;
-            }
-        })
-    }); 
-};
 
 function streamGraphs(eventName){
     let timePoints = 100;
@@ -348,17 +344,16 @@ function streamGraphs(eventName){
     });
 }
 
-function createFFT(eventName, containerId, labels) {
+function createFFT(eventName, labels) {
     const template = document.getElementById('fft-template');
     const clone = template.content.cloneNode(true);
     const container = clone.querySelector('.canvas-container');
-    container.id = containerId;
+    container.id = eventName;
     let fftPlot;
 
     let seriesConfig  = [{label: "Frequency (Hz)"}];
     let gotSeries = false;
 
-    // Listen for the event and update the graph
     webpage.listen(eventName, (event) => {
         const spectrum = event.payload;
         if (!gotSeries) {
@@ -428,7 +423,7 @@ function createFFT(eventName, containerId, labels) {
             };
             let chart = new uPlot(opt, data, container);
             fftPlot = chart;
-            makeResizable(containerId, chart);
+            makeResizable(container.id, chart);
         }, 500);
     })
 }
@@ -490,6 +485,17 @@ function refreshRPC(checkbox) {
             } 
         })
     })
+
+    webpage.listen("returnRPC", (event) => {
+        let [name, inputValue] = event.payload;
+        document.querySelectorAll('.InputCommands').forEach(rpccall => {
+            if (rpccall.id == name) {
+                rpccall.value = inputValue;
+                rpccall.textContent = inputValue;
+                rpccall.innerHTML = inputValue;
+            }
+        })
+    }); 
 }
 
 function attachInputListeners() {

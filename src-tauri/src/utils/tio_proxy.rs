@@ -89,7 +89,7 @@ fn create_listener_thread(
     Ok(())
 }
 
-pub fn getDevices() -> Vec<String> {
+pub fn get_devices() -> Vec<String> {
     let mut urls = Vec::new();
     for serial in  enum_devices(true){
         urls.push(serial.url.clone());
