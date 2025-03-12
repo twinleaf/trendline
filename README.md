@@ -1,22 +1,25 @@
 # Trendline
-Graphical interface tool for Twinleaf sensor stream data. Equipped with RPC controls and fast fourier transform analysis
+Graphical interface tool for Twinleaf sensor stream data. Equipped with RPC controls, real and complex fast fourier transform analysis
 
-### Installation
-[To install Rust and Cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html)
+#### Installation
+---
+[Installing Rust and Cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html)
 
-Be sure to confirm all twinleaf-rust crate dependencies are satisfied.
+Confirm all twinleaf-rust crate dependencies are satisfied.
+Note that tauri has dependencies on Windows: Microsoft Visual Studio C++ build tools and Webview2
 
-To run: 
+#### Running Program
+---
+With the src-tauri folder run the following command. Optionally specify the calculated time duration on FFT window or default to 10 seconds
 
-Connect the sensor to a proxy via twinleaf-rust proxy tool
+        cargo run [time]
 
-    tio-proxy --auto
+Connect the sensor to a proxy via the serial device window. 
+If the proxy is already connected use the default:
+        
+        tcp://localhost
 
-When there is more than one serial port available, it is necessary to specify the port
+Otherwise identify the port from the list of serials or specify the url path
 
-    [linux]> tio-proxy -r /dev/ttyACM0
-	[macOS]> tio-proxy -r /dev/cu.usbserialXXXXXX
-	[wsl1] > tio-proxy -r COM3
+<img src="sample.png" alt="Serials" width="300" height="140">
 
-To run the program in the src-tauri folder:
-    cargo run 

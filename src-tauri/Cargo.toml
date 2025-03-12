@@ -18,6 +18,7 @@ welch-sde = "0.1.0"
 serde_yaml = "0.9.34"
 serialport = "4.7.0"
 chrono = "0.4.39"
+rustfft = "6.2.0"
 
 [build-dependencies]
 tauri-build = { version = "2.0.3", features = [] }

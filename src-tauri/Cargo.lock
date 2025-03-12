@@ -4157,6 +4157,7 @@ dependencies = [
  "chrono",
  "crossbeam",
  "getopts",
+ "rustfft",
  "serde",
  "serde_json",
  "serde_yaml",
