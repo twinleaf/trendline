@@ -16,7 +16,6 @@ const column_desc ={
 const graphsByStream = {};
 var rpcs = [];
 var serial = []; 
-const complexPlots = []
 let labelLoaded = false;
 let rpcLoaded = false;
 
@@ -42,26 +41,7 @@ webpage.once("rpcs", (event) => {
     rpcLoaded = true
 })
 
-webpage.once("fftgraphs", (event) => {
-    const [real, complex] = event.payload;
-    //TODO: reduce verbosity
-    for (let keys in real){    
-        let labels = [];        
-        for (let value in real[keys] ){
-            labels.push(real[keys][value])
-        }
-        createFFT(keys, `${keys}`, labels)   
-    }
-    for (let keys in complex){
-        let labels = [];
-        for (let value in complex[keys]) {
-            labels.push(complex[keys][value])
-            complexPlots.push(complex[keys][value])
-        }
-        createFFT(`${complex[keys][0].split('.').slice(0,1)}${keys}`, labels)   
-    }
-})
-
+//Massive timeout to construct page elements, could benefit from some restructuring
 new Promise((resolve) => {
     const checkLoad = setInterval(() => {
         if (labelLoaded && rpcLoaded) {
@@ -162,6 +142,12 @@ new Promise((resolve) => {
             checkboxesContainer.appendChild(checkbox);
             checkboxesContainer.appendChild(label);
             checkboxesContainer.appendChild(lineBreak);
+
+            fftSelection = document.createElement('option')
+            fftSelection.value = column_desc.column_id[i]
+            fftSelection.innerHTML = column_desc.column_id[i]
+
+            document.getElementById('requestFFT').appendChild(fftSelection)
             
             let options = {
                 width: 800, 
@@ -254,29 +240,57 @@ new Promise((resolve) => {
             });
         }
 
+        //Create stream graph listeners
         for (let i = Math.min(...column_desc.stream_num); i <= Math.max(...column_desc.stream_num); i++) {
             streamGraphs(i.toString());
         }
 
-        const ffts = document.getElementById('showPlot')
-        ffts.addEventListener("change", () => {
-            document.getElementById('FFT').childNodes.forEach(node => {
-                if (ffts.checked){
-                    let stayDisplayed = false;
-                    document.querySelectorAll('.checkboxes').forEach(checkbox => {
-                        let idParts = checkbox.id.split('.');
-                        //again need better way to identify complex plot
-                        if (complexPlots.includes(checkbox.id) && `${idParts.slice(0,1).toString()}${idParts.slice(-1).join().charAt(0)}` == node.id.toString() && checkbox.checked) {
-                            stayDisplayed = true;
-                            return;
-                        } else if (idParts.slice(0,1).toString() == node.id.toString() && checkbox.checked) {
-                            stayDisplayed = true;
-                            return;
-                        }
-                    })
-                    document.getElementById('FFT').style.display = 'block';
-                    node.style.display = stayDisplayed? 'block' : 'none';
-                } else {document.getElementById('FFT').style.display = 'none'}
+        //FFT Plot
+        let opt = {
+            title: `Power spectrum`,
+            width: 800,
+            height: 300,
+            series: [{label: "Frequency (Hz)"}, 
+                    {label: "Spectrum (1/√Hz)",
+                    stroke: "blue",
+                    points: {show: false}
+                    }],
+            scales: {
+                x: {
+                    time: false,
+                    auto: true,
+                    distr: 3
+                },
+                y: { distr: 3 }
+            },
+            axes: [
+                {},
+                { size: 100, values: (u, v) => v }
+            ]
+        };
+        let chart = new uPlot(opt, [[],[]], document.getElementById('FFT'));
+        makeResizable('FFT', chart);
+
+        let selection = document.getElementById('requestFFT')
+        selection.addEventListener("change", ()=> {
+            webpage.emit('fftName', selection.value)
+            document.getElementById('FFT').style.display = 'block';
+            let eventName = selection.value.split('.').join('').toString()
+            webpage.listen(eventName, (event) => {
+                const [freq, power] = event.payload;
+
+                chart.data[0] = [];
+                chart.data[1] = [];
+                for (let i = 0; i< freq.length; i++){
+                    chart.data[0].push(freq[i])
+                    chart.data[1].push(power[i])
+                }
+                
+                //TODO: Need to determine an appropriate length to shift on
+                /*while (chart.data[0].length > 500){
+                    for (let i = 0; i < chart.data.length; i++){chart.data[i].shift();}
+                }*/
+                chart.setData(chart.data, true);
             })
         })
     }, 1000);
@@ -343,98 +357,6 @@ function streamGraphs(eventName){
             });
         }
     });
-}
-
-function createFFT(eventName, labels) {
-    const template = document.getElementById('fft-template');
-    const clone = template.content.cloneNode(true);
-    const container = clone.querySelector('.canvas-container');
-    container.id = eventName;
-    let fftPlot;
-
-    let seriesConfig  = [{label: "Frequency (Hz)"}];
-    let gotSeries = false;
-
-    webpage.listen(eventName, (event) => {
-        const spectrum = event.payload;
-        if (!gotSeries) {
-            for (let i = 1; i< spectrum.length; i++) {
-                seriesConfig.push({
-                    label: `${labels[i-1]} (${column_desc.units[i-1]}/√Hz)`, 
-                    stroke: `hsl(${i*130}, 30%, 35%)`,
-                    points: {show: false}
-                })
-            } 
-            gotSeries = true;
-        }
-
-        new Promise((resolve) => {
-            const plotCreated = setInterval(() => {
-                if (fftPlot !== undefined) {
-                    clearInterval(plotCreated);
-                    resolve();
-                }
-            }, 100);
-        }).then(() => {
-            for (let i = 0; i< spectrum[0].length; i++){
-                for (let j = 0; j< spectrum.length; j++){
-                    if (spectrum[j][i] !== undefined) {
-                        fftPlot.data[j].push(spectrum[j][i])
-                    }
-                }
-            }
-
-            while (fftPlot.data[0].length > 500){
-                for (let i = 0; i < fftPlot.data.length; i++){
-                    fftPlot.data[i].shift();
-                }
-            }
-            fftPlot.setData(fftPlot.data, true);
-        })
-        
-    });
-    document.getElementById('FFT').appendChild(container);
-    new Promise((resolve) => {
-        const checkSeriesConfig = setInterval(() => {
-            if (gotSeries) {
-                clearInterval(checkSeriesConfig);
-                resolve();
-            }
-        }, 100);
-    }).then(() => {
-        setTimeout(() => {
-            let data = Array.from({ length: seriesConfig.length }, () => []);
-            let opt = {
-                title: `${eventName} power spectrum`,
-                width: 800,
-                height: 300,
-                series: seriesConfig,
-                scales: {
-                    x: {
-                        time: false,
-                        auto: true, //use a min and max if auto scaling doesn't work on logarithmic graph?
-                        distr: 3
-                    },
-                    y: { distr: 3, 
-                        auto: true
-                     }
-                },
-                axes: [
-                    {},
-                    { size: 100, values: (u, v) => v }
-                ]
-            };
-            let chart = new uPlot(opt, data, container);
-            fftPlot = chart;
-            makeResizable(container.id, chart);
-
-            window.addEventListener("resize", () =>{
-                let width = container.clientWidth
-                chart.setSize({ width, height: 300});  
-            })
-
-        }, 500);
-    })
 }
 
 function makeResizable(elementId, uplotInstance) {
