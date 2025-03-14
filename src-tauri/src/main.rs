@@ -230,12 +230,7 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
     Ok(result)
 }
 
-fn rpc_controls(args: &[String], column_names: Vec<String>) -> Vec<(String, bool)>  {
-    let opts = tio_opts();
-    let (_matches, root, route) = tio_parseopts(opts, args);
-    let proxy = proxy::Interface::new(&root);
-    let device = proxy.device_rpc(route).unwrap();
-
+fn rpc_controls(device: &mut Device, column_names: Vec<String>) -> Vec<(String, bool)>  {
     let nrpcs: u16 = device.get("rpc.listinfo").unwrap();
 
     let mut rpc_controls: Vec<(String, bool)> = Vec::new();
@@ -394,7 +389,7 @@ async fn stream_data(window: Window) {
         let _= window.emit("graph_labels", (header, stream_desc.clone()));
 
         //Emitting RPC Commands
-        let rpc_results = rpc_controls(&args, stream_desc.col_name.clone());
+        let rpc_results = rpc_controls(&mut device, stream_desc.col_name.clone());
         window.emit("rpcs", rpc_results).unwrap();
 
         let mut stream_backlog: HashMap<u8, Vec<Vec<f32>>> = HashMap::new();
