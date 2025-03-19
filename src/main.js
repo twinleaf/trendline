@@ -274,10 +274,6 @@ new Promise((resolve) => {
                 } else {document.getElementById('FFT').style.display = 'none'}
             })
         })
-
-        /*document.getElementById('requestFFT').addEventListener("keypress", function(e) {
-            if (e.key == "Enter") {webpage.emit('FFT request', document.getElementById('requestFFT').value)}
-        })*/
     }, 1000);
 });
 

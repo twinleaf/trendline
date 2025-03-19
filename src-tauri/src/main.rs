@@ -9,7 +9,7 @@ use welch_sde::{Build, SpectralDensity};
 use rustfft::{FftPlanner, num_complex::Complex};
 use std::{env, thread};
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, atomic::{Ordering, AtomicBool}};
+use std::sync::{Arc, Mutex, atomic::{Ordering, AtomicBool}};
 mod utils;
 
 static mut SERIALCONNECTED: bool = false;
@@ -336,233 +336,257 @@ fn match_value(data: ColumnData) -> f32 {
 
 #[tauri::command]
 async fn stream_data(window: Window) {
-    let flag = Arc::new(AtomicBool::new(false));
-    let flag2 = Arc::clone(&flag);
+    let window_arc = Arc::new(Mutex::new(window));
+    let initial_load = Arc::new(AtomicBool::new(false));
+    let initial_clone = initial_load.clone();
 
-    let args: Vec<String> = env::args().collect(); 
-    let opts = tio_opts();
-    let (matches, root, route) = tio_parseopts(opts, &args);
+    loop{
+        let window_clone = Arc::clone(&window_arc);
 
-    let stream_id: u8 = if args.len() >1 {
-        match args[1].parse(){
-            Ok(val) => val,
-            Err(_e) => 1
-        }
-    } else {1};
+        let flag = Arc::new(AtomicBool::new(false));
+        let flag2 = Arc::clone(&flag);
 
-    let parked= thread::spawn(move || {
-        while !flag2.load(Ordering::Relaxed) {
-            thread::park();
-        }
+        let args: Vec<String> = env::args().collect(); 
+        let opts = tio_opts();
+        let (_matches, root, route) = tio_parseopts(opts, &args);
 
-        let proxy = proxy::Interface::new(&root);
-        let device = proxy.device_full(route).unwrap();
-        let mut device = Device::new(device);
+        let parked= thread::spawn(move || {
+            while !flag2.load(Ordering::Relaxed) {thread::park();}
 
-        //get sampling & decimation rate, column metadata
-        let meta = device.get_metadata();
-        let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
-        let mut stream_info: Vec<(u8, String, String, String)> = Vec::new();
-        let mut stream_desc = GraphLabel{
-            col_name: Vec::new(),
-            col_desc: Vec::new(),
-            col_unit: Vec::new(),
-            col_stream: Vec::new()
-        };
-        
-        for stream in meta.streams.values() {
-            sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
-            for col in &stream.columns {
-                stream_info.push((stream.stream.stream_id, col.name.clone(), col.description.clone(), col.units.clone()));
-            }
-        }
+            let window = window_clone.lock().unwrap();
+            let proxy = proxy::Interface::new(&root);
+            let device = proxy.device_full(route).unwrap();
+            let mut device = Device::new(device);
 
-        stream_info.sort_by_key(|k| k.0);
-        for (stream_id, name, desc, unit) in stream_info {
-            stream_desc.col_name.push(name);
-            stream_desc.col_desc.push(desc);
-            stream_desc.col_unit.push(unit);
-            stream_desc.col_stream.push(stream_id);
-        }
-
-        let header = format!("{}\nSerial: {}", meta.device.name, meta.device.serial_number);
-        let _= window.emit("graph_labels", (header, stream_desc.clone()));
-
-        //Emitting RPC Commands
-        let rpc_results = rpc_controls(&mut device, stream_desc.col_name.clone());
-        window.emit("rpcs", rpc_results).unwrap();
-
-        let mut stream_backlog: HashMap<u8, Vec<Vec<f32>>> = HashMap::new();
-
-        //Emitting Stream Data
-        loop {
-            let sample = device.next();
-            let mut col_pos = 0;
-            let mut graph_backlog: Vec<Vec<f32>> = vec![Vec::new(); sample.columns.len()];
-
-            for column in &sample.columns{                  
-                graph_backlog[col_pos].push(match_value(column.value.clone()));
-                col_pos += 1;
-            }
+            //get sampling & decimation rate, column metadata
+            let meta = device.get_metadata();
+            let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
+            let mut stream_info: Vec<(u8, String, String, String)> = Vec::new();
+            let mut stream_desc = GraphLabel{
+                col_name: Vec::new(),
+                col_desc: Vec::new(),
+                col_unit: Vec::new(),
+                col_stream: Vec::new()
+            };
             
-            stream_backlog
-                .entry(sample.stream.stream_id)
-                .or_insert_with(|| vec![Vec::new(); sample.columns.len()])
-                .iter_mut()
-                .zip(graph_backlog.iter())
-                .for_each(|(existing, new)| existing.extend(new.iter().cloned()));
-    
+            for stream in meta.streams.values() {
+                sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
+                for col in &stream.columns {
+                    stream_info.push((stream.stream.stream_id, col.name.clone(), col.description.clone(), col.units.clone()));
+                }
+            }
 
-            if let Some(sampling) = sampling_rates.get(&sample.stream.stream_id) {
-                let fs = sampling[0] as f32/ sampling[1] as f32;
-                let threshold = (fs/ 20.0).ceil() as usize;
-                if let Some(values) = stream_backlog.get_mut(&sample.stream.stream_id){
-                    if values.iter().all(|col| col.len() >= threshold){
-                        let averaged_backlog: Vec<Vec<f32>> = graph_backlog
-                            .iter()
-                            .map(|col| {
-                                let sum: f32 = col.iter().sum();
-                                let avg = sum/col.len() as f32;
-                                vec![avg]
-                            })
-                            .collect();
-                        let _ = window.emit(&sample.stream.stream_id.clone().to_string(), &averaged_backlog);
-                        values.iter_mut().for_each(|col| col.clear());
-                   }
-                };
+            stream_info.sort_by_key(|k| k.0);
+            for (stream_id, name, desc, unit) in stream_info {
+                stream_desc.col_name.push(name);
+                stream_desc.col_desc.push(desc);
+                stream_desc.col_unit.push(unit);
+                stream_desc.col_stream.push(stream_id);
+            }
+
+            let header = format!("{}\nSerial: {}", meta.device.name, meta.device.serial_number);
+            let _= window.emit("graph_labels", (header, stream_desc.clone()));
+
+            //Emitting RPC Commands
+            let rpc_results = rpc_controls(&mut device, stream_desc.col_name.clone());
+            window.emit("rpcs", rpc_results).unwrap();
+
+            let mut stream_backlog: HashMap<u8, Vec<Vec<f32>>> = HashMap::new();
+
+            //Emitting Stream Data
+            loop {
+                let sample = device.next();
+                let mut col_pos = 0;
+                let mut graph_backlog: Vec<Vec<f32>> = vec![Vec::new(); sample.columns.len()];
+
+                for column in &sample.columns{                  
+                    graph_backlog[col_pos].push(match_value(column.value.clone()));
+                    col_pos += 1;
+                }
+                
+                stream_backlog
+                    .entry(sample.stream.stream_id)
+                    .or_insert_with(|| vec![Vec::new(); sample.columns.len()])
+                    .iter_mut()
+                    .zip(graph_backlog.iter())
+                    .for_each(|(existing, new)| existing.extend(new.iter().cloned()));
+        
+
+                if let Some(sampling) = sampling_rates.get(&sample.stream.stream_id) {
+                    let fs = sampling[0] as f32/ sampling[1] as f32;
+                    let threshold = (fs/ 20.0).ceil() as usize;
+                    if let Some(values) = stream_backlog.get_mut(&sample.stream.stream_id){
+                        if values.iter().all(|col| col.len() >= threshold){
+                            let averaged_backlog: Vec<Vec<f32>> = graph_backlog
+                                .iter()
+                                .map(|col| {
+                                    let sum: f32 = col.iter().sum();
+                                    let avg = sum/col.len() as f32;
+                                    vec![avg]
+                                })
+                                .collect();
+                            let _ = window.emit(&sample.stream.stream_id.clone().to_string(), &averaged_backlog);
+                            values.iter_mut().for_each(|col| col.clear());
+                    }
+                    };
+                }
+            }
+        });
+
+        loop {
+            thread::sleep(std::time::Duration::from_millis(1000));
+            unsafe {
+                if SERIALCONNECTED {
+                    flag.store(true, Ordering::Relaxed);
+                    parked.thread().unpark();
+                    break;
+                }
             }
         }
-    });
 
-    loop {
-        thread::sleep(std::time::Duration::from_millis(1000));
-        unsafe {
-            if SERIALCONNECTED {
-                flag.store(true, Ordering::Relaxed);
-                parked.thread().unpark();
-                break;
+        let result = parked.join();
+        if result.is_err(){
+            println!("Thread panicked, program may have dropped data");
+            if !initial_clone.load(Ordering::SeqCst) { //close app if initial load fails (likely proxy disconnect)
+                std::process::exit(1);
+            } else{ 
+                initial_load.store(true, Ordering::SeqCst);
+                thread::sleep(std::time::Duration::from_secs(2));
             }
-        }
+        };
     }
 }
 
 #[tauri::command]
 async fn fft_data(window: Window) {
-    let flag = Arc::new(AtomicBool::new(false));
-    let flag2 = Arc::clone(&flag);
+    let window_arc = Arc::new(Mutex::new(window));
 
-    let args: Vec<String> = env::args().collect();   
-    let opts = tio_opts();
-    let (_matches, root, route) = tio_parseopts(opts, &args);
- 
-    let time_span: u8 = if args.len() > 2 {
-        match args[2].parse() {
-            Ok(val) => val, 
-            Err(_e) => 10
-        } 
-    } else { 10 };
+    loop{
+        let window_clone = Arc::clone(&window_arc);
 
-    let fft_parked = thread::spawn(move || {
-        while !flag2.load(Ordering::Relaxed) {thread::park();} 
-        
-        let proxy = proxy::Interface::new(&root);
-        let device = proxy.device_full(route).unwrap();
-        let mut device = Device::new(device);
+        let flag = Arc::new(AtomicBool::new(false));
+        let flag2 = Arc::clone(&flag);
 
-        //get sampling & decimation rate, column metadata
-        let meta = device.get_metadata();
-        let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
-        let mut fft_sort: HashMap<String, Vec<String>> = HashMap::new();
-        let mut complex_ffts: HashMap<String, Vec<String>> = HashMap::new();
-        for stream in meta.streams.values() {
-            sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
-            for col in &stream.columns {
-                //TODO: Better method to identify complex ffts
-                if col.name.chars().nth_back(1).unwrap().is_numeric() {
-                    match col.name.chars().last().unwrap() {
-                        'x' => {complex_ffts.entry(col.name.chars().nth_back(1).unwrap().to_string()).or_default().insert(0, col.name.clone());}
-                        'y' => {complex_ffts.entry(col.name.chars().nth_back(1).unwrap().to_string()).or_default().insert(1, col.name.clone());}
-                        _ => {}
+        let args: Vec<String> = env::args().collect();   
+        let opts = tio_opts();
+        let (_matches, root, route) = tio_parseopts(opts, &args);
+    
+        let time_span: u8 = if args.len() > 2 {
+            match args[2].parse() {
+                Ok(val) => val, 
+                Err(_e) => 10
+            } 
+        } else { 10 };
+
+        let fft_parked = thread::spawn(move || {
+            while !flag2.load(Ordering::Relaxed) {thread::park();} //park thread until proxy is connected
+            
+            let window = window_clone.lock().unwrap();
+            let proxy = proxy::Interface::new(&root);
+            let device = proxy.device_full(route).unwrap();
+            let mut device = Device::new(device);
+
+            //get sampling & decimation rate, column metadata
+            let meta = device.get_metadata();
+            let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
+            let mut fft_sort: HashMap<String, Vec<String>> = HashMap::new();
+            let mut complex_ffts: HashMap<String, Vec<String>> = HashMap::new();
+            for stream in meta.streams.values() {
+                sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
+                for col in &stream.columns {
+                    //TODO: Better method to identify complex ffts
+                    if col.name.chars().nth_back(1).unwrap().is_numeric() {
+                        match col.name.chars().last().unwrap() {
+                            'x' => {complex_ffts.entry(col.name.chars().nth_back(1).unwrap().to_string()).or_default().insert(0, col.name.clone());}
+                            'y' => {complex_ffts.entry(col.name.chars().nth_back(1).unwrap().to_string()).or_default().insert(1, col.name.clone());}
+                            _ => {}
+                        }
+                    } else{
+                        let parts: Vec<&str> = col.name.split('.').collect();
+                        let prefix = parts[0].to_string();
+                        fft_sort.entry(prefix).or_default().push(col.name.clone());
                     }
-                } else{
-                    let parts: Vec<&str> = col.name.split('.').collect();
-                    let prefix = parts[0].to_string();
-                    fft_sort.entry(prefix).or_default().push(col.name.clone());
                 }
             }
-        }
-        //TODO: extend complex_ffts off fft_sort during pass?
-        let _ = window.emit("fftgraphs", (&fft_sort, &complex_ffts));
-        let mut fft_signals: HashMap<String, Vec<f32>> = HashMap::new();
+            //TODO: extend complex_ffts off fft_sort during pass?
+            let _ = window.emit("fftgraphs", (&fft_sort, &complex_ffts));
+            let mut fft_signals: HashMap<String, Vec<f32>> = HashMap::new();
 
-        //Emitting FFT Data
-        loop{ 
-            let sample = device.next();
-            let mut fft_freq: HashMap<String, Vec<f32>> = HashMap::new();
-            let mut fft_power: HashMap<String, Vec<Vec<f32>>> = HashMap::new();
+            //Emitting FFT Data
+            loop{ 
+                let sample = device.next();
+                let mut fft_freq: HashMap<String, Vec<f32>> = HashMap::new();
+                let mut fft_power: HashMap<String, Vec<Vec<f32>>> = HashMap::new();
 
-            if let Some(rate) = sampling_rates.get(&sample.stream.stream_id){
-                let decimation_rate = rate[1];
-                let fs = rate[0]/ decimation_rate;
+                if let Some(rate) = sampling_rates.get(&sample.stream.stream_id){
+                    let decimation_rate = rate[1];
+                    let fs = rate[0]/ decimation_rate;
 
-                for column in sample.columns{               
-                    fft_signals.entry(column.desc.name.clone()).or_default().push(match_value(column.value.clone()));
+                    for column in sample.columns{               
+                        fft_signals.entry(column.desc.name.clone()).or_default().push(match_value(column.value.clone()));
 
-                    if let Some(col_value) = fft_signals.get_mut(&column.desc.name.clone()){
-                        while col_value.len() >= (fs*time_span as u32).try_into().unwrap(){
-                            col_value.remove(0);
-                        }
-                        let parts: Vec<&str> = column.desc.name.split('.').collect();
-                        //TODO: Streamline finding column name, need a better method instead of looking for a number at the second to last element
-                        if complex_ffts.values().any(|x| x.iter().any(|v| *v == column.desc.name)) {
-                            if col_value.len() >= (fs * time_span as u32 - 1).try_into().unwrap() {
-                                if let Some(value) = complex_ffts.get(&column.desc.name.chars().nth_back(1).unwrap().to_string()) {
-                                    if let Some(xvalue) = fft_signals.get(&value[0]) {
-                                        if let Some(yvalue) = fft_signals.get(&value[1]) {
-                                            let (freq, power) = complex_fft(fs, xvalue.to_vec(), yvalue.to_vec());
-                                            if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()) {
-                                                let number: String = format!("{}{}", parts[0], column.desc.name.clone().chars().nth_back(1).unwrap().to_string());
-                                                fft_power.entry(number.clone()).or_default().insert(0, power.clone());
-                                                fft_freq.entry(number).or_insert_with(|| freq.clone());
+                        if let Some(col_value) = fft_signals.get_mut(&column.desc.name.clone()){
+                            while col_value.len() >= (fs*time_span as u32).try_into().unwrap(){
+                                col_value.remove(0);
+                            }
+                            let parts: Vec<&str> = column.desc.name.split('.').collect();
+                            //TODO: Streamline finding column name, need a better method instead of looking for a number at the second to last element
+                            if complex_ffts.values().any(|x| x.iter().any(|v| *v == column.desc.name)) {
+                                if col_value.len() >= (fs * time_span as u32 - 1).try_into().unwrap() {
+                                    if let Some(value) = complex_ffts.get(&column.desc.name.chars().nth_back(1).unwrap().to_string()) {
+                                        if let Some(xvalue) = fft_signals.get(&value[0]) {
+                                            if let Some(yvalue) = fft_signals.get(&value[1]) {
+                                                let (freq, power) = complex_fft(fs, xvalue.to_vec(), yvalue.to_vec());
+                                                if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()) {
+                                                    let number: String = format!("{}{}", parts[0], column.desc.name.clone().chars().nth_back(1).unwrap().to_string());
+                                                    fft_power.entry(number.clone()).or_default().insert(0, power.clone());
+                                                    fft_freq.entry(number).or_insert_with(|| freq.clone());
+                                                }
                                             }
                                         }
                                     }
                                 }
-                            }
-                        } else {
-                            if col_value.len() >= (fs*time_span as u32 -1).try_into().unwrap() {
-                                let (freq, power) = calc_fft(col_value.to_vec(), fs as f32);
-                                if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){
-                                    fft_power.entry(parts[0].to_string().clone()).or_default().push(power.clone());
-                                    fft_freq.entry(parts[0].to_string().clone()).or_insert_with(||freq.clone());
+                            } else {
+                                if col_value.len() >= (fs*time_span as u32 -1).try_into().unwrap() {
+                                    let (freq, power) = calc_fft(col_value.to_vec(), fs as f32);
+                                    if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){
+                                        fft_power.entry(parts[0].to_string().clone()).or_default().push(power.clone());
+                                        fft_freq.entry(parts[0].to_string().clone()).or_insert_with(||freq.clone());
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                for (name, values) in &mut fft_power{
-                    let mut spectrum_data: Vec<Vec<f32>> = Vec::new();
-                    if let Some(freq_result) = fft_freq.get(name) {
-                        spectrum_data.push(freq_result.to_vec());
-                        for value in values{spectrum_data.push(value.to_vec());}
-                        let _ = window.emit(&name.clone(), spectrum_data);
-                    } 
+                    for (name, values) in &mut fft_power{
+                        let mut spectrum_data: Vec<Vec<f32>> = Vec::new();
+                        if let Some(freq_result) = fft_freq.get(name) {
+                            spectrum_data.push(freq_result.to_vec());
+                            for value in values{spectrum_data.push(value.to_vec());}
+                            let _ = window.emit(&name.clone(), spectrum_data);
+                        } 
+                    }
                 }
-            }
-            
-        } 
-    });
+                
+            } 
+        });
 
-    loop {
-        thread::sleep(std::time::Duration::from_millis(1000));
-        unsafe {
-            if SERIALCONNECTED {
-                flag.store(true, Ordering::Relaxed);
-                fft_parked.thread().unpark();
-                break;
+        loop {
+            thread::sleep(std::time::Duration::from_millis(1000));
+            unsafe {
+                if SERIALCONNECTED {
+                    flag.store(true, Ordering::Relaxed);
+                    fft_parked.thread().unpark();
+                    break;
+                }
             }
         }
+
+        let result = fft_parked.join();
+        if result.is_err(){
+            println!("Thread panicked, program may have dropped data on the fft");
+            thread::sleep(std::time::Duration::from_secs(2));
+        };
     }
 }
 
