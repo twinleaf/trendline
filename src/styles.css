@@ -88,6 +88,7 @@
   margin-top: 5px;
   border-top-style: double;
   border-bottom-style: double;
+  display: none;
 }
 
 .buttonCommands, .fft{
@@ -130,6 +131,7 @@ position: relative;
   overflow: auto;
   margin: auto;
   position: relative;
+  display: none
 }
 
 #FFT {

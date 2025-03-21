@@ -92,7 +92,6 @@ new Promise((resolve) => {
             const rpcDiv = document.createElement('div');
             rpcDiv.id = prefix;
             rpcDiv.className = 'controls'
-            rpcDiv.style.display = 'none';
 
             const title = document.createElement('paragraph');
             title.innerText = prefix + ' ';
@@ -158,7 +157,6 @@ new Promise((resolve) => {
             const canvas = document.createElement('div');
             canvas.id = `canvas${i}`;
             canvas.classList = 'canvas-container';
-            canvas.style.display = 'none';
             canvasesContainer.appendChild(canvas)
 
             checkboxesContainer.appendChild(checkbox);
@@ -203,6 +201,13 @@ new Promise((resolve) => {
             }
             graphsByStream[streamNum].push(uplot);
             makeResizable(canvas.id, uplot)
+
+            //This gets overrided if the user uses interact.js to resize div instead of adjusting with window
+            //could get rid of js, this also doesn't set size with respect to the height
+            window.addEventListener("resize", () =>{ 
+                let width = container.clientWidth
+                chart2.setSize({ width, height: 300});  
+            })
 
             const checkboxes = document.querySelectorAll('.checkboxes');
 
@@ -362,7 +367,7 @@ function createFFT(eventName, labels) {
             } 
             gotSeries = true;
         }
-        //TODO Freeze resolve
+
         new Promise((resolve) => {
             const plotCreated = setInterval(() => {
                 if (fftPlot !== undefined) {
@@ -407,10 +412,12 @@ function createFFT(eventName, labels) {
                 scales: {
                     x: {
                         time: false,
-                        auto: true,
+                        auto: true, //use a min and max if auto scaling doesn't work on logarithmic graph?
                         distr: 3
                     },
-                    y: { distr: 3 }
+                    y: { distr: 3, 
+                        auto: true
+                     }
                 },
                 axes: [
                     {},
@@ -420,6 +427,12 @@ function createFFT(eventName, labels) {
             let chart = new uPlot(opt, data, container);
             fftPlot = chart;
             makeResizable(container.id, chart);
+
+            window.addEventListener("resize", () =>{
+                let width = container.clientWidth
+                chart.setSize({ width, height: 300});  
+            })
+
         }, 500);
     })
 }
