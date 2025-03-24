@@ -115,11 +115,6 @@ new Promise((resolve) => {
         attachToggleListeners();
         attachButtonListeners();
         streamsRPCSetup(); //setting up charts for RPC
-        
-        //Create stream graph listeners
-        for (let i = Math.min(...column_desc.stream_num); i <= Math.max(...column_desc.stream_num); i++) {
-            streamGraphs(i.toString());
-        }
 
         //FFT Plot
         let opt = {
@@ -201,7 +196,7 @@ function streamsRPCSetup(){
         checkboxesContainer.appendChild(label);
         checkboxesContainer.appendChild(lineBreak);
 
-        fftSelection = document.createElement('option')
+        const fftSelection = document.createElement('option')
         fftSelection.value = column_desc.column_id[i]
         fftSelection.innerHTML = column_desc.column_id[i]
 
@@ -298,51 +293,6 @@ function streamsRPCSetup(){
     for (let i = Math.min(...column_desc.stream_num); i <= Math.max(...column_desc.stream_num); i++) {
         streamGraphs(i.toString());
     }
-
-    //FFT Plot
-    let opt = {
-        title: `Power spectrum`,
-        width: 800,
-        height: 300,
-        series: [{label: "Frequency (Hz)"}, 
-                {label: "Spectrum (1/√Hz)",
-                stroke: "blue",
-                points: {show: false}
-                }],
-        scales: {
-            x: {
-                time: false,
-                auto: true,
-                distr: 3
-            },
-            y: { distr: 3 }
-        },
-        axes: [
-            {},
-            { size: 100, values: (u, v) => v }
-        ]
-    };
-    let chart = new uPlot(opt, [[],[]], document.getElementById('FFT'));
-    makeResizable('FFT', chart);
-
-    let selection = document.getElementById('requestFFT')
-    selection.addEventListener("change", ()=> {
-        webpage.emit('fftName', selection.value)
-        document.getElementById('FFT').style.display = 'block';
-        let eventName = selection.value.split('.').join('').toString()
-        webpage.listen(eventName, (event) => {
-            const [freq, power] = event.payload;
-
-            chart.data[0] = [];
-            chart.data[1] = [];
-            for (let i = 0; i< freq.length; i++){
-                chart.data[0].push(freq[i])
-                chart.data[1].push(power[i])
-            }
-            
-            chart.setData(chart.data, true);
-        })
-    });
 };
 
 function streamGraphs(eventName){
