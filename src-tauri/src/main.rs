@@ -7,7 +7,7 @@ use getopts::Options;
 use tauri::{App, Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window};
 use welch_sde::{Build, SpectralDensity};
 use rustfft::{FftPlanner, num_complex::Complex};
-use std::{env, thread};
+use std::{env, fmt::Arguments, thread};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, atomic::{Ordering, AtomicBool}};
 mod utils;
@@ -347,9 +347,6 @@ async fn stream_data(window: Window) {
         let args: Vec<String> = env::args().collect(); 
         let opts = tio_opts();
         let (_matches, root, route) = tio_parseopts(opts, &args);
-        let args: Vec<String> = env::args().collect(); 
-        let opts = tio_opts();
-        let (_matches, root, route) = tio_parseopts(opts, &args);
 
         let parked= thread::spawn(move || {
             while !flag2.load(Ordering::Relaxed) {
@@ -359,29 +356,9 @@ async fn stream_data(window: Window) {
             let window = window_clone.lock().unwrap();
             let proxy = proxy::Interface::new(&root);
             let device = proxy.device_full(route).unwrap();
-            let mut device = Device::new(device);
-            let window = window_clone.lock().unwrap();
-            let proxy = proxy::Interface::new(&root);
-            let device = proxy.device_full(route).unwrap();
+
             let mut device = Device::new(device);
 
-            //get sampling & decimation rate, column metadata
-            let meta = device.get_metadata();
-            let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
-            let mut stream_info: Vec<(u8, String, String, String)> = Vec::new();
-            let mut stream_desc = GraphLabel{
-                col_name: Vec::new(),
-                col_desc: Vec::new(),
-                col_unit: Vec::new(),
-                col_stream: Vec::new()
-            };
-            
-            for stream in meta.streams.values() {
-                sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
-                for col in &stream.columns {
-                    stream_info.push((stream.stream.stream_id, col.name.clone(), col.description.clone(), col.units.clone()));
-                }
-            }
             //get sampling & decimation rate, column metadata
             let meta = device.get_metadata();
             let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
@@ -609,13 +586,18 @@ async fn fft_data(window: Window) {
 fn serial_ports(window: Window) {
     thread::spawn(move || {
         thread::sleep(std::time::Duration::from_secs(1));
-        let serials = utils::tio_proxy::getDevices();
+        let serials = utils::tio_proxy::get_devices();
         let ports: Vec<&str> = serials.iter()
             .flat_map(|serial| serial.split("serial://"))
             .filter(|&i| !i.is_empty())
             .collect();
         let _ = window.emit("ports", ports);
     }); 
+}
+
+#[tauri::command]
+async fn connect_proxy(arguments: Vec<String>){
+    utils::tio_proxy::args(arguments);
 }
 
 fn main(){
@@ -676,9 +658,10 @@ fn main(){
                 if port == "tcp://localhost".to_string(){
                     unsafe{SERIALCONNECTED = true}
                 } else{
-                    println!("Connecting to:{}", arguments[0]);
                     unsafe{SERIALCONNECTED = true}
-                    utils::tio_proxy::args(arguments);
+                    tauri::async_runtime::spawn(async move{
+                        connect_proxy(arguments).await;
+                    });
                 }
                 
             });

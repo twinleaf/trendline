@@ -114,132 +114,8 @@ new Promise((resolve) => {
         attachInputListeners();
         attachToggleListeners();
         attachButtonListeners();
-
-        const inputChange = document.querySelectorAll('.InputCommands');
-        const toggleChange = document.querySelectorAll('.checkCommands') 
-
-        //write out a chart for each column 
-        const rpcType = document.querySelectorAll('.controls');
-        for (let i = 0; i < column_desc.column.length; i++) {
-            const checkboxesContainer = document.getElementById('dropdown');
-            const canvasesContainer = document.getElementById('canvases');
-
-            const checkbox = document.createElement('input');
-            checkbox.type = "checkbox";
-            checkbox.id = column_desc.column_id[i]
-            checkbox.className = 'checkboxes'
-
-            const label = document.createElement('label');
-            label.htmlFor = checkbox.id;
-            label.innerHTML = column_desc.column[i]
-            const lineBreak = document.createElement('br');
-
-            const canvas = document.createElement('div');
-            canvas.id = `canvas${i}`;
-            canvas.classList = 'canvas-container';
-            canvasesContainer.appendChild(canvas)
-
-            checkboxesContainer.appendChild(checkbox);
-            checkboxesContainer.appendChild(label);
-            checkboxesContainer.appendChild(lineBreak);
-
-            fftSelection = document.createElement('option')
-            fftSelection.value = column_desc.column_id[i]
-            fftSelection.innerHTML = column_desc.column_id[i]
-
-            document.getElementById('requestFFT').appendChild(fftSelection)
-            
-            let options = {
-                width: 800, 
-                height: 300,
-                series: [
-                    {label: 'Time'},
-                    { 
-                        label: `${column_desc.column_id[i]}(${column_desc.units[i]})`,
-                        stroke: 'red',
-                        points: { show: false },    
-                        value: (u, v) => v  
-    
-                    },
-                ],
-                axes: [
-                    {},
-                    {
-                        size: 80,
-                        values: (u, v) => v
-                    }
-                ],
-                scales: {
-                    x: {
-                    time: false,
-                    distr: 2,
-                    auto: true,
-                    }
-                }
-            }
-
-            const data = [[],[]]
-            const uplot = new uPlot(options, data, document.getElementById(canvas.id))
-            
-            const streamNum = column_desc.stream_num[i];
-            if (!graphsByStream[streamNum]) {
-                graphsByStream[streamNum] = [];
-            }
-            graphsByStream[streamNum].push(uplot);
-            makeResizable(canvas.id, uplot)
-
-            //This gets overrided if the user uses interact.js to resize div instead of adjusting with window
-            //could get rid of js, this also doesn't set size with respect to the height
-            window.addEventListener("resize", () =>{ 
-                let width = container.clientWidth
-                chart2.setSize({ width, height: 300});  
-            })
-
-            const checkboxes = document.querySelectorAll('.checkboxes');
-
-            checkbox.addEventListener("change", (event) => {
-                const canvas = document.getElementById(`canvas${i}`)
-                canvas.style.display = event.target.checked ? 'block' : 'none';
-                
-                rpcType.forEach(rpcControl => {
-                    let stayDisplayed = false;
-                    if (checkbox.id.split('.').slice(0,1).toString() == rpcControl.id.split('.').slice(0, 1).toString()) {
-                        if (checkbox.checked){
-                            stayDisplayed = true;
-                            rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
-                        }
-                        else {
-                            checkboxes.forEach(checkbox => { 
-                                if (checkbox.id.split('.').slice(0,1).toString() == rpcControl.id.split('.').slice(0, 1).toString() && checkbox.checked){
-                                    stayDisplayed = true
-                                }
-                            })
-                            rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
-                        }
-                    }
-                })
-            });
-
-            refreshRPC(checkbox)
-
-            //display rpc values on load
-            webpage.listen("returnOnLoad", (event) => {
-                let [name, inputValue] = event.payload;
-                inputChange.forEach(rpccall => {
-                    if (rpccall.id == name) {
-                        rpccall.value = inputValue;
-                        rpccall.textContent = inputValue;
-                        rpccall.innerHTML = inputValue;
-                    }
-                })
-                toggleChange.forEach(toggle => {
-                    if (toggle.id == name && inputValue == 1){
-                        toggle.checked = true;
-                    }
-                })
-            });
-        }
-
+        streamsRPCSetup(); //setting up charts for RPC
+        
         //Create stream graph listeners
         for (let i = Math.min(...column_desc.stream_num); i <= Math.max(...column_desc.stream_num); i++) {
             streamGraphs(i.toString());
@@ -259,9 +135,11 @@ new Promise((resolve) => {
                 x: {
                     time: false,
                     auto: true,
-                    distr: 3
+                    distr: 1
                 },
-                y: { distr: 3 }
+                y: { distr: 3, 
+                    auto: true
+                 }
             },
             axes: [
                 {},
@@ -271,30 +149,201 @@ new Promise((resolve) => {
         let chart = new uPlot(opt, [[],[]], document.getElementById('FFT'));
         makeResizable('FFT', chart);
 
+        window.addEventListener("resize", () =>{chart.setSize({ width: document.getElementById('FFT').clientWidth, height: 300});})
+
         let selection = document.getElementById('requestFFT')
         selection.addEventListener("change", ()=> {
             webpage.emit('fftName', selection.value)
             document.getElementById('FFT').style.display = 'block';
+            chart.setSize({width: document.getElementById('FFT').clientWidth, height:300})
             let eventName = selection.value.split('.').join('').toString()
             webpage.listen(eventName, (event) => {
                 const [freq, power] = event.payload;
-
                 chart.data[0] = [];
                 chart.data[1] = [];
                 for (let i = 0; i< freq.length; i++){
                     chart.data[0].push(freq[i])
                     chart.data[1].push(power[i])
                 }
-                
-                //TODO: Need to determine an appropriate length to shift on
-                /*while (chart.data[0].length > 500){
-                    for (let i = 0; i < chart.data.length; i++){chart.data[i].shift();}
-                }*/
+
                 chart.setData(chart.data, true);
             })
         })
     }, 1000);
 });
+
+function streamsRPCSetup(){
+    const inputChange = document.querySelectorAll('.InputCommands');
+    const toggleChange = document.querySelectorAll('.checkCommands') 
+
+    //write out a chart for each column 
+    const rpcType = document.querySelectorAll('.controls');
+    for (let i = 0; i < column_desc.column.length; i++) {
+        const checkboxesContainer = document.getElementById('dropdown');
+        const canvasesContainer = document.getElementById('canvases');
+
+        const checkbox = document.createElement('input');
+        checkbox.type = "checkbox";
+        checkbox.id = column_desc.column_id[i]
+        checkbox.className = 'checkboxes'
+
+        const label = document.createElement('label');
+        label.htmlFor = checkbox.id;
+        label.innerHTML = column_desc.column[i]
+        const lineBreak = document.createElement('br');
+
+        const canvas = document.createElement('div');
+        canvas.id = `canvas${i}`;
+        canvas.classList = 'canvas-container';
+        canvasesContainer.appendChild(canvas)
+
+        checkboxesContainer.appendChild(checkbox);
+        checkboxesContainer.appendChild(label);
+        checkboxesContainer.appendChild(lineBreak);
+
+        fftSelection = document.createElement('option')
+        fftSelection.value = column_desc.column_id[i]
+        fftSelection.innerHTML = column_desc.column_id[i]
+
+        document.getElementById('requestFFT').appendChild(fftSelection)
+        
+        let options = {
+            width: 800, 
+            height: 300,
+            series: [
+                {label: 'Time'},
+                { 
+                    label: `${column_desc.column_id[i]}(${column_desc.units[i]})`,
+                    stroke: 'red',
+                    points: { show: false },    
+                    value: (u, v) => v  
+
+                },
+            ],
+            axes: [
+                {},
+                {
+                    size: 80,
+                    values: (u, v) => v
+                }
+            ],
+            scales: {
+                x: {
+                time: false,
+                distr: 2,
+                auto: true,
+                }
+            }
+        }
+
+        const data = [[],[]]
+        const uplot = new uPlot(options, data, document.getElementById(canvas.id))
+        
+        const streamNum = column_desc.stream_num[i];
+        if (!graphsByStream[streamNum]) {
+            graphsByStream[streamNum] = [];
+        }
+        graphsByStream[streamNum].push(uplot);
+        makeResizable(canvas.id, uplot)
+
+        //Setting canvas width to the size of the window, makeResizable element could just be removed if height specification is not needed
+        window.addEventListener("resize", () =>{uplot.setSize({ width: canvas.clientWidth, height: 300});  })
+
+        const checkboxes = document.querySelectorAll('.checkboxes');
+        checkbox.addEventListener("change", (event) => {
+            const canvas = document.getElementById(`canvas${i}`)
+            canvas.style.display = event.target.checked ? 'block' : 'none';
+            uplot.setSize({ width: canvas.clientWidth, height: 300});  
+            
+            rpcType.forEach(rpcControl => {
+                let stayDisplayed = false;
+                if (checkbox.id.split('.').slice(0,1).toString() == rpcControl.id.split('.').slice(0, 1).toString()) {
+                    if (checkbox.checked){
+                        stayDisplayed = true;
+                        rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
+                    }
+                    else {
+                        checkboxes.forEach(checkbox => { 
+                            if (checkbox.id.split('.').slice(0,1).toString() == rpcControl.id.split('.').slice(0, 1).toString() && checkbox.checked){
+                                stayDisplayed = true
+                            }
+                        })
+                        rpcControl.style.display = stayDisplayed? 'inline-block' : 'none';
+                    }
+                }
+            })
+        });
+
+        refreshRPC(checkbox)
+
+        //display rpc values on load
+        webpage.listen("returnOnLoad", (event) => {
+            let [name, inputValue] = event.payload;
+            inputChange.forEach(rpccall => {
+                if (rpccall.id == name) {
+                    rpccall.value = inputValue;
+                    rpccall.textContent = inputValue;
+                    rpccall.innerHTML = inputValue;
+                }
+            })
+            toggleChange.forEach(toggle => {
+                if (toggle.id == name && inputValue == 1){
+                    toggle.checked = true;
+                }
+            })
+        });
+    }
+
+    //Create stream graph listeners
+    for (let i = Math.min(...column_desc.stream_num); i <= Math.max(...column_desc.stream_num); i++) {
+        streamGraphs(i.toString());
+    }
+
+    //FFT Plot
+    let opt = {
+        title: `Power spectrum`,
+        width: 800,
+        height: 300,
+        series: [{label: "Frequency (Hz)"}, 
+                {label: "Spectrum (1/√Hz)",
+                stroke: "blue",
+                points: {show: false}
+                }],
+        scales: {
+            x: {
+                time: false,
+                auto: true,
+                distr: 3
+            },
+            y: { distr: 3 }
+        },
+        axes: [
+            {},
+            { size: 100, values: (u, v) => v }
+        ]
+    };
+    let chart = new uPlot(opt, [[],[]], document.getElementById('FFT'));
+    makeResizable('FFT', chart);
+
+    let selection = document.getElementById('requestFFT')
+    selection.addEventListener("change", ()=> {
+        webpage.emit('fftName', selection.value)
+        document.getElementById('FFT').style.display = 'block';
+        let eventName = selection.value.split('.').join('').toString()
+        webpage.listen(eventName, (event) => {
+            const [freq, power] = event.payload;
+
+            chart.data[0] = [];
+            chart.data[1] = [];
+            for (let i = 0; i< freq.length; i++){
+                chart.data[0].push(freq[i])
+                chart.data[1].push(power[i])
+            }
+            
+            chart.setData(chart.data, true);
+        })
+    });
+};
 
 function streamGraphs(eventName){
     let timePoints = 100;
