@@ -130,11 +130,9 @@ new Promise((resolve) => {
                 x: {
                     time: false,
                     auto: true,
-                    distr: 1
-                },
-                y: { distr: 3, 
-                    auto: true
-                 }
+                    distr: 2
+                }, 
+                y: {distr: 3}
             },
             axes: [
                 {},
@@ -143,7 +141,6 @@ new Promise((resolve) => {
         };
         let chart = new uPlot(opt, [[],[]], document.getElementById('FFT'));
         makeResizable('FFT', chart);
-
         window.addEventListener("resize", () =>{chart.setSize({ width: document.getElementById('FFT').clientWidth, height: 300});})
 
         let selection = document.getElementById('requestFFT')
@@ -154,6 +151,7 @@ new Promise((resolve) => {
             let eventName = selection.value.split('.').join('').toString()
             webpage.listen(eventName, (event) => {
                 const [freq, power] = event.payload;
+                console.log(freq);
                 chart.data[0] = [];
                 chart.data[1] = [];
                 for (let i = 0; i< freq.length; i++){
