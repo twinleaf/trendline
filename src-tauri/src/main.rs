@@ -1,16 +1,22 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![allow(warnings)] 
-use twinleaf::{data::{ColumnData, Device}, tio::{self}};
+//#![allow(warnings)] 
+/*Broken version of project, attempt to create single proxy and pass device ports to tauri functions
+Tauri functions are invoked from the frontend,we can't pass the port as a parameter unless we use Tauri's
+state management system. Defining the proxy within the Tauri app builder doesn't seem to be able reach 
+the tauri commands. 
+*/
+
+use twinleaf::{data::{ColumnData, Device}, tio::{self, Port}};
 use tio::{proto::DeviceRoute, proxy, util};
 use getopts::Options;
 
-use tauri::{App, Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window};
+use tauri::{State, Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window};
 use welch_sde::{Build, SpectralDensity};
 use rustfft::{FftPlanner, num_complex::Complex};
-use std::{env, fmt::Arguments, thread};
+use std::{env, thread};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, atomic::{Ordering, AtomicBool}};
-mod utils;
+pub mod utils;
 
 static mut SERIALCONNECTED: bool = false;
 static mut FFT: String = String::new();
@@ -114,7 +120,7 @@ fn get_rpctype(
     RpcMeta::parse(device.rpc("rpc.info", name).unwrap()).arg_type
 }
 
-fn rpc(args: &[String]) -> std::io::Result<String> {
+fn rpc(args: &[String], device: &Option<Port>) -> std::io::Result<String> {
     let mut opts = tio_opts();
     opts.optopt(
         "t",
@@ -129,7 +135,7 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
         "type",
     );
     opts.optflag("d", "", "Debug printouts.");
-    let (matches, root, route) = tio_parseopts(opts, args);
+    let (matches, _root, _route) = tio_parseopts(opts, args);
 
     let rpc_name = if matches.free.is_empty() {
         panic!("must specify rpc name")
@@ -146,89 +152,79 @@ fn rpc(args: &[String]) -> std::io::Result<String> {
     };
 
     let debug = matches.opt_present("d");
+    if let Some(device) = device {
+        let mut result = "default".to_string();
 
-    let (status_send, proxy_status) = crossbeam::channel::bounded::<proxy::Event>(100);
-    let proxy = proxy::Interface::new_proxy(&root, None, Some(status_send));
-    let device = proxy.device_rpc(route).unwrap();
-    let mut result = "default".to_string() ;
-
-    let req_type = if let Some(req_type) = matches.opt_str("req-type") {
-        Some(req_type)
-    } else if rpc_arg.is_some() {
-        let t = get_rpctype(&rpc_name, &device);
-        Some(if t.is_empty() { "string".to_string() } else { t })
-    } else {None};
-
-    let reply = match device.raw_rpc(
-        &rpc_name,
-        &if rpc_arg.is_none() {
-            vec![]
-        } else {
-            let s = rpc_arg.unwrap();
-            match &req_type.as_ref().unwrap()[..] {
-                "u8" => s.parse::<u8>().unwrap().to_le_bytes().to_vec(),
-                "u16" => s.parse::<u16>().unwrap().to_le_bytes().to_vec(),
-                "u32" => s.parse::<u32>().unwrap().to_le_bytes().to_vec(),
-                "u64" => s.parse::<u32>().unwrap().to_le_bytes().to_vec(),
-                "i8" => s.parse::<i8>().unwrap().to_le_bytes().to_vec(),
-                "i16" => s.parse::<i16>().unwrap().to_le_bytes().to_vec(),
-                "i32" => s.parse::<i32>().unwrap().to_le_bytes().to_vec(),
-                "i64" => s.parse::<i32>().unwrap().to_le_bytes().to_vec(),
-                "f32" => s.parse::<f32>().unwrap().to_le_bytes().to_vec(),
-                "f64" => s.parse::<f64>().unwrap().to_le_bytes().to_vec(),
-                "string" => s.as_bytes().to_vec(),
-                _ => panic!("Invalid type"),
-            }
-        },
-    ) {
-        Ok(rep) => rep,
-        Err(err) => {
-            if debug {
-                drop(proxy);
-                println!("RPC failed: {:?}", err);
-                for s in proxy_status.try_iter() {
-                    println!("{:?}", s);
-                }
-            }
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, "RPC failed"));
-        }
-    };
-
-    if !reply.is_empty() {
-        let rep_type = if let Some(rep_type) = matches.opt_str("rep-type") {
-            Some(rep_type)
-        } else if req_type.is_none() {
-            let t = get_rpctype(&rpc_name, &device);
+        let req_type = if let Some(req_type) = matches.opt_str("req-type") {
+            Some(req_type)
+        } else if rpc_arg.is_some() {
+            let t = get_rpctype(&rpc_name, device);
             Some(if t.is_empty() { "string".to_string() } else { t })
-        } else {req_type};
-    
-        let reply_str = match &rep_type.as_ref().unwrap()[..] {
-            "u8" => u8::from_le_bytes(reply[0..1].try_into().unwrap()).to_string(),
-            "u16" => u16::from_le_bytes(reply[0..2].try_into().unwrap()).to_string(),
-            "u32" => u32::from_le_bytes(reply[0..4].try_into().unwrap()).to_string(),
-            "u64" => u64::from_le_bytes(reply[0..8].try_into().unwrap()).to_string(),
-            "i8" => i8::from_le_bytes(reply[0..1].try_into().unwrap()).to_string(),
-            "i16" => i16::from_le_bytes(reply[0..2].try_into().unwrap()).to_string(),
-            "i32" => i32::from_le_bytes(reply[0..4].try_into().unwrap()).to_string(),
-            "i64" => i64::from_le_bytes(reply[0..8].try_into().unwrap()).to_string(),
-            "f32" => f32::from_le_bytes(reply[0..4].try_into().unwrap()).to_string(),
-            "f64" => f64::from_le_bytes(reply[0..8].try_into().unwrap()).to_string(),
-            "string" => format!(
-                "\"{}\" {:?}",
-                std::str::from_utf8(&reply).unwrap_or_default(),
-                reply
-            ),
-            _ => panic!("Invalid type"),
+        } else { None };
+
+        let reply = match device.raw_rpc(
+            &rpc_name,
+            &if rpc_arg.is_none() {
+                vec![]
+            } else {
+                let s = rpc_arg.unwrap();
+                match &req_type.as_ref().unwrap()[..] {
+                    "u8" => s.parse::<u8>().unwrap().to_le_bytes().to_vec(),
+                    "u16" => s.parse::<u16>().unwrap().to_le_bytes().to_vec(),
+                    "u32" => s.parse::<u32>().unwrap().to_le_bytes().to_vec(),
+                    "u64" => s.parse::<u32>().unwrap().to_le_bytes().to_vec(),
+                    "i8" => s.parse::<i8>().unwrap().to_le_bytes().to_vec(),
+                    "i16" => s.parse::<i16>().unwrap().to_le_bytes().to_vec(),
+                    "i32" => s.parse::<i32>().unwrap().to_le_bytes().to_vec(),
+                    "i64" => s.parse::<i32>().unwrap().to_le_bytes().to_vec(),
+                    "f32" => s.parse::<f32>().unwrap().to_le_bytes().to_vec(),
+                    "f64" => s.parse::<f64>().unwrap().to_le_bytes().to_vec(),
+                    "string" => s.as_bytes().to_vec(),
+                    _ => panic!("Invalid type"),
+                }
+            },
+        ) {
+            Ok(rep) => rep,
+            Err(err) => {
+                if debug {
+                    println!("RPC failed: {:?}", err);
+                }
+                return Err(std::io::Error::new(std::io::ErrorKind::Other, "RPC failed"));
+            }
         };
-        result = reply_str.clone();
-    }
-    drop(proxy);
-    for s in proxy_status.iter() {
-        if debug {
-            println!("{:?}", s);
+
+        if !reply.is_empty() {
+            let rep_type = if let Some(rep_type) = matches.opt_str("rep-type") {
+                Some(rep_type)
+            } else if req_type.is_none() {
+                let t = get_rpctype(&rpc_name, device);
+                Some(if t.is_empty() { "string".to_string() } else { t })
+            } else { req_type };
+
+            let reply_str = match &rep_type.as_ref().unwrap()[..] {
+                "u8" => u8::from_le_bytes(reply[0..1].try_into().unwrap()).to_string(),
+                "u16" => u16::from_le_bytes(reply[0..2].try_into().unwrap()).to_string(),
+                "u32" => u32::from_le_bytes(reply[0..4].try_into().unwrap()).to_string(),
+                "u64" => u64::from_le_bytes(reply[0..8].try_into().unwrap()).to_string(),
+                "i8" => i8::from_le_bytes(reply[0..1].try_into().unwrap()).to_string(),
+                "i16" => i16::from_le_bytes(reply[0..2].try_into().unwrap()).to_string(),
+                "i32" => i32::from_le_bytes(reply[0..4].try_into().unwrap()).to_string(),
+                "i64" => i64::from_le_bytes(reply[0..8].try_into().unwrap()).to_string(),
+                "f32" => f32::from_le_bytes(reply[0..4].try_into().unwrap()).to_string(),
+                "f64" => f64::from_le_bytes(reply[0..8].try_into().unwrap()).to_string(),
+                "string" => format!(
+                    "\"{}\" {:?}",
+                    std::str::from_utf8(&reply).unwrap_or_default(),
+                    reply
+                ),
+                _ => panic!("Invalid type"),
+            };
+            result = reply_str.clone();
         }
+        Ok(result)
+    } else {
+        panic!("Invalid port!")
     }
-    Ok(result)
 }
 
 fn rpc_controls(device: &mut Device, column_names: Vec<String>) -> Vec<(String, bool)>  {
@@ -335,111 +331,106 @@ fn match_value(data: ColumnData) -> f32 {
     }
 }
 
-#[tauri::command]
-async fn stream_data(window: Window) {
+#[tauri::command] 
+async fn stream_data(window: Window, state: State<'_, Arc<Mutex<Option<Port>>>>) -> Result<(), String> {
     let window_arc = Arc::new(Mutex::new(window));
     let initial_load = Arc::new(AtomicBool::new(false));
     let initial_clone = initial_load.clone();
-
-    loop{
+    
+    loop {
         let window_clone = Arc::clone(&window_arc);
-
+        let state_clone = Arc::clone(&state);
         let flag = Arc::new(AtomicBool::new(false));
         let flag2 = Arc::clone(&flag);
-
-        let args: Vec<String> = env::args().collect(); 
-        let opts = tio_opts();
-        let (_matches, root, route) = tio_parseopts(opts, &args);
-
-        let parked= thread::spawn(move || {
-            while !flag2.load(Ordering::Relaxed) {
-                thread::park();
-            }
-
-            let window = window_clone.lock().unwrap();
-            let proxy = proxy::Interface::new(&root);
-            let device = proxy.device_full(route).unwrap();
-
-            let mut device = Device::new(device);
-
-            //get sampling & decimation rate, column metadata
-            let meta = device.get_metadata();
-            let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
-            let mut stream_info: Vec<(u8, String, String, String)> = Vec::new();
-            let mut stream_desc = GraphLabel{
-                col_name: Vec::new(),
-                col_desc: Vec::new(),
-                col_unit: Vec::new(),
-                col_stream: Vec::new()
-            };
-            
-            for stream in meta.streams.values() {
-                sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
-                for col in &stream.columns {
-                    stream_info.push((stream.stream.stream_id, col.name.clone(), col.description.clone(), col.units.clone()));
-                }
-            }
-
-            stream_info.sort_by_key(|k| k.0);
-            for (stream_id, name, desc, unit) in stream_info {
-                stream_desc.col_name.push(name);
-                stream_desc.col_desc.push(desc);
-                stream_desc.col_unit.push(unit);
-                stream_desc.col_stream.push(stream_id);
-            }
-
-            let header = format!("{}\nSerial: {}", meta.device.name, meta.device.serial_number);
-            let _= window.emit("graph_labels", (header, stream_desc.clone()));
-
-            //Emitting RPC Commands
-            let rpc_results = rpc_controls(&mut device, stream_desc.col_name.clone());
-            window.emit("rpcs", rpc_results).unwrap();
-
-            let mut stream_backlog: HashMap<u8, Vec<Vec<f32>>> = HashMap::new();
-
-            //Emitting Stream Data
-            loop {
-                let sample = device.next();
-                let mut col_pos = 0;
-                let mut graph_backlog: Vec<Vec<f32>> = vec![Vec::new(); sample.columns.len()];
-
-                for column in &sample.columns{                  
-                    graph_backlog[col_pos].push(match_value(column.value.clone()));
-                    col_pos += 1;
-                }
-                
-                stream_backlog
-                    .entry(sample.stream.stream_id)
-                    .or_insert_with(|| vec![Vec::new(); sample.columns.len()])
-                    .iter_mut()
-                    .zip(graph_backlog.iter())
-                    .for_each(|(existing, new)| existing.extend(new.iter().cloned()));
         
-
-                if let Some(sampling) = sampling_rates.get(&sample.stream.stream_id) {
-                    let fs = sampling[0] as f32/ sampling[1] as f32;
-                    let threshold = (fs/ 20.0).ceil() as usize;
-                    if let Some(values) = stream_backlog.get_mut(&sample.stream.stream_id){
-                        if values.iter().all(|col| col.len() >= threshold){
-                            let averaged_backlog: Vec<Vec<f32>> = graph_backlog
-                                .iter()
-                                .map(|col| {
-                                    let sum: f32 = col.iter().sum();
-                                    let avg = sum/col.len() as f32;
-                                    vec![avg]
-                                })
-                                .collect();
-                            let _ = window.emit(&sample.stream.stream_id.clone().to_string(), &averaged_backlog);
-                            values.iter_mut().for_each(|col| col.clear());
+        let parked = thread::spawn(move || {
+            while !flag2.load(Ordering::Relaxed) { thread::park(); }
+            let window = window_clone.lock().unwrap();
+            let mut state = state_clone.lock().unwrap();
+            if let Some(port) = state.take() {
+                let mut device = Device::new(port);
+                //get sampling & decimation rate, column metadata
+                let meta = device.get_metadata();
+                let mut sampling_rates: HashMap< u8, Vec<u32>> = HashMap::new();
+                let mut stream_info: Vec<(u8, String, String, String)> = Vec::new();
+                let mut stream_desc = GraphLabel{
+                    col_name: Vec::new(),
+                    col_desc: Vec::new(),
+                    col_unit: Vec::new(),
+                    col_stream: Vec::new()
+                };
+                
+                for stream in meta.streams.values() {
+                    sampling_rates.insert(stream.stream.stream_id, vec![stream.segment.sampling_rate, stream.segment.decimation]);
+                    for col in &stream.columns {
+                        stream_info.push((stream.stream.stream_id, col.name.clone(), col.description.clone(), col.units.clone()));
                     }
-                    };
                 }
-            }
+
+                stream_info.sort_by_key(|k| k.0);
+                for (stream_id, name, desc, unit) in stream_info {
+                    stream_desc.col_name.push(name);
+                    stream_desc.col_desc.push(desc);
+                    stream_desc.col_unit.push(unit);
+                    stream_desc.col_stream.push(stream_id);
+                }
+
+                let header = format!("{}\nSerial: {}", meta.device.name, meta.device.serial_number);
+                let _= window.emit("graph_labels", (header, stream_desc.clone()));
+
+                //Emitting RPC Commands
+                let rpc_results = rpc_controls(&mut device, stream_desc.col_name.clone());
+                window.emit("rpcs", rpc_results).unwrap();
+
+                let mut stream_backlog: HashMap<u8, Vec<Vec<f32>>> = HashMap::new();
+
+                //Emitting Stream Data
+                loop {
+                    let sample = device.next();
+                    let mut col_pos = 0;
+                    let mut graph_backlog: Vec<Vec<f32>> = vec![Vec::new(); sample.columns.len()];
+
+                    for column in &sample.columns{                  
+                        graph_backlog[col_pos].push(match_value(column.value.clone()));
+                        col_pos += 1;
+                    }
+                    
+                    stream_backlog
+                        .entry(sample.stream.stream_id)
+                        .or_insert_with(|| vec![Vec::new(); sample.columns.len()])
+                        .iter_mut()
+                        .zip(graph_backlog.iter())
+                        .for_each(|(existing, new)| existing.extend(new.iter().cloned()));
+            
+
+                    if let Some(sampling) = sampling_rates.get(&sample.stream.stream_id) {
+                        let fs = sampling[0] as f32/ sampling[1] as f32;
+                        let threshold = (fs/ 20.0).ceil() as usize;
+                        if let Some(values) = stream_backlog.get_mut(&sample.stream.stream_id){
+                            if values.iter().all(|col| col.len() >= threshold){
+                                let averaged_backlog: Vec<Vec<f32>> = graph_backlog
+                                    .iter()
+                                    .map(|col| {
+                                        let sum: f32 = col.iter().sum();
+                                        let avg = sum/col.len() as f32;
+                                        vec![avg]
+                                    })
+                                    .collect();
+                                let _ = window.emit(&sample.stream.stream_id.clone().to_string(), &averaged_backlog);
+                                values.iter_mut().for_each(|col| col.clear());
+                        }
+                        };
+                    }
+                }
+            } else{
+                eprintln!("No port specified");
+                std::process::exit(1);
+            };
         });
     
         loop {
             thread::sleep(std::time::Duration::from_millis(1000));
-            unsafe {
+            unsafe{
                 if SERIALCONNECTED {
                     flag.store(true, Ordering::Relaxed);
                     parked.thread().unpark();
@@ -462,20 +453,15 @@ async fn stream_data(window: Window) {
 }
 
 #[tauri::command]
-async fn fft_data(window: Window) {
+async fn fft_data(window: Window, state: State<'_, Arc<Mutex<Option<Port>>>>) -> Result<(), String> {
     let window_arc = Arc::new(Mutex::new(window));
-    let initial_load = Arc::new(AtomicBool::new(false));
-    let initial_clone = initial_load.clone();
-
-    loop{
+    loop {
         let window_clone = Arc::clone(&window_arc);
+        let state_clone = Arc::clone(&state);
         let flag = Arc::new(AtomicBool::new(false));
         let flag2 = Arc::clone(&flag);
 
         let args: Vec<String> = env::args().collect();   
-        let opts = tio_opts();
-        let (_matches, root, route) = tio_parseopts(opts, &args);
-
         let mut fft_column = String::new();
         let time_span: u8 = if args.len() > 1 {
             match args[1].parse() {
@@ -484,90 +470,92 @@ async fn fft_data(window: Window) {
             } 
         } else { 10 };
 
-        let refresh_rate: u8 = if args.len() >2{
-            match args[2].parse(){
+        let refresh_rate: u8 = if args.len() > 2 {
+            match args[2].parse() {
                 Ok(val) => val,
                 Err(_e) => 3,
             }
-        } else{ 3 };
-
+        } else { 3 };
+        
         let fft_parked = thread::spawn(move || {
             while !flag2.load(Ordering::Relaxed) {
                 thread::park();
             }
             let window = window_clone.lock().unwrap();
-            unsafe{fft_column = FFT.clone()}
+            unsafe { fft_column = FFT.clone(); }
 
-            let proxy = proxy::Interface::new(&root);
-            let device = proxy.device_full(route).unwrap();
-            let mut device = Device::new(device);
+            let mut state = state_clone.lock().unwrap();
+            if let Some(port) = state.take() {
+                let mut device = Device::new(port);
+                //get sampling & decimation rate, column metadata
+                let meta = device.get_metadata();
+                let mut sampling_rate: Vec<u32> = Vec::new();
+                let mut complex_ffts: Vec<String> = vec![];
+                
+                for stream in meta.streams.values() {
+                    for col in &stream.columns {
+                        if col.name[..col.name.len()-1] == fft_column[..fft_column.len()-1] {
+                            sampling_rate.push(stream.segment.sampling_rate);
+                            sampling_rate.push(stream.segment.decimation);
+                            if col.name.chars().nth_back(1).unwrap().is_numeric() {
+                                match col.name.chars().last().unwrap() {
+                                    'x' => {complex_ffts.push(col.name.clone());}
+                                    'y' => {complex_ffts.push(col.name.clone());}
+                                    _ => {}
+                                }
+                            } 
+                        }
+                    }
+                }   
+                let fs = sampling_rate[0]/ sampling_rate[1];
+                let mut fft_signals: Vec<Vec<f32>> = vec![vec![], vec![]];
 
-            //get sampling & decimation rate, column metadata
-            let meta = device.get_metadata();
-            let mut sampling_rate: Vec<u32> = Vec::new();
-            let mut complex_ffts: Vec<String> = vec![];
-            
-            for stream in meta.streams.values() {
-                for col in &stream.columns {
-                    if col.name[..col.name.len()-1] == fft_column[..fft_column.len()-1] {
-                        sampling_rate.push(stream.segment.sampling_rate);
-                        sampling_rate.push(stream.segment.decimation);
-                        if col.name.chars().nth_back(1).unwrap().is_numeric() {
-                            match col.name.chars().last().unwrap() {
-                                'x' => {complex_ffts.push(col.name.clone());}
-                                'y' => {complex_ffts.push(col.name.clone());}
+                //Emitting FFT Data
+                loop{ 
+                    let sample = device.next();            
+                    for column in sample.columns{   
+                        //complex fft
+                        if complex_ffts.contains(&column.desc.name) {
+                            match column.desc.name.chars().last().unwrap() {
+                                'x' => {if let Some(x_vec)  = fft_signals.get_mut(0){x_vec.push(match_value(column.value.clone()));}}
+                                'y' => {if let Some(y_vec)  = fft_signals.get_mut(1){y_vec.push(match_value(column.value.clone()));}}
                                 _ => {}
                             }
-                        } 
+                        } else if column.desc.name == fft_column { //real fft
+                            if let Some(fft) = fft_signals.get_mut(0){fft.push(match_value(column.value.clone()))};
+                        }
                     }
-                }
-            }   
-            let fs = sampling_rate[0]/ sampling_rate[1];
-            let mut fft_signals: Vec<Vec<f32>> = vec![vec![], vec![]];
 
-            //Emitting FFT Data
-            loop{ 
-                let sample = device.next();            
-                for column in sample.columns{   
-                    //complex fft
-                    if complex_ffts.contains(&column.desc.name) {
-                        let parts: Vec<&str> = column.desc.name.split('.').collect();
-                        match column.desc.name.chars().last().unwrap() {
-                            'x' => {if let Some(x_vec)  = fft_signals.get_mut(0){x_vec.push(match_value(column.value.clone()));}}
-                            'y' => {if let Some(y_vec)  = fft_signals.get_mut(1){y_vec.push(match_value(column.value.clone()));}}
-                            _ => {}
+                    //TODO: How to refresh the last three seconds
+                    if fft_signals[0].len() == (fs*time_span as u32) as usize {
+                        if !fft_signals[1].is_empty() {
+                            let (freq, power) = complex_fft(fs, fft_signals[0].to_vec(), fft_signals[1].to_vec());                       
+                            if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()) {
+                                let _ = window.emit(&fft_column.clone().replace(".", ""), (&freq, &power));
+                            }
+                        } else{
+                            let (freq, power) = calc_fft(fft_signals[0].to_vec(), fs as f32);
+                            if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){
+                                let _ = window.emit(&fft_column.clone().replace(".", ""), (&freq, &power));
+                            }
                         }
-                    } else if column.desc.name == fft_column { //real fft
-                        if let Some(fft) = fft_signals.get_mut(0){fft.push(match_value(column.value.clone()))};
+                        fft_signals.iter_mut().for_each(|col| {
+                            if !col.is_empty() {
+                                col.drain(0..((fs*refresh_rate as u32) as usize));
+                            }
+                        });  
                     }
                 }
-
-                //TODO: How to refresh the last three seconds
-                if fft_signals[0].len() == (fs*time_span as u32) as usize {
-                    if !fft_signals[1].is_empty() {
-                        let (freq, power) = complex_fft(fs, fft_signals[0].to_vec(), fft_signals[1].to_vec());                       
-                        if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()) {
-                            let _ = window.emit(&fft_column.clone().replace(".", ""), (&freq, &power));
-                        }
-                    } else{
-                        let (freq, power) = calc_fft(fft_signals[0].to_vec(), fs as f32);
-                        if !freq.is_empty() && !power.is_empty() && !freq.iter().any(|&x| x.is_nan()) && !power.iter().any(|&x| x.is_nan()){
-                            let _ = window.emit(&fft_column.clone().replace(".", ""), (&freq, &power));
-                        }
-                    }
-                    fft_signals.iter_mut().for_each(|col| {
-                        if !col.is_empty() {
-                            col.drain(0..((fs*refresh_rate as u32) as usize));
-                        }
-                    });  
-                }
-            } 
+            }else{
+                eprintln!("No port passed");
+                std::process::exit(1);
+            };
         });
 
         loop {
             thread::sleep(std::time::Duration::from_millis(1000));
-            unsafe {
-                if SERIALCONNECTED && !FFT.is_empty()  {
+            unsafe{
+                if SERIALCONNECTED && !FFT.is_empty(){
                     flag.store(true, Ordering::Relaxed);
                     fft_parked.thread().unpark();
                     break;
@@ -588,7 +576,7 @@ async fn fft_data(window: Window) {
 fn serial_ports(window: Window) {
     thread::spawn(move || {
         thread::sleep(std::time::Duration::from_secs(1));
-        let serials = utils::tio_proxy::get_devices();
+        let serials = utils::serials::get_devices();
         let ports: Vec<&str> = serials.iter()
             .flat_map(|serial| serial.split("serial://"))
             .filter(|&i| !i.is_empty())
@@ -597,12 +585,7 @@ fn serial_ports(window: Window) {
     }); 
 }
 
-#[tauri::command]
-async fn connect_proxy(arguments: Vec<String>){
-    utils::tio_proxy::args(arguments);
-}
-
-fn main(){
+fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let window = tauri::WindowBuilder::new(app, "window-1")
@@ -629,57 +612,95 @@ fn main(){
                     LogicalSize::new(400., 300.),
                 )?;
 
-            //App listens for the RPC call and returns result
+            let args: Vec<String> = env::args().collect();
+            let opts = tio_opts();
+            let (_matches, _root, route) = tio_parseopts(opts, &args);
+
+            //MAIN BREAKING POINT/FOCUS HERE
+            /*Question of if it is tauri causing app to disconnect??
+              Running a proxy in fn main and passing the object to a spawned thread has no issues
+              Trying to run device.get_metadata() within the app builder here has no issues, however
+              the proxy doesn't seem to be able to reach the async tauri functions. 
+            */
+            /*let port = proxy.device_full(route.clone()).unwrap();
+            let mut device = Device::new(port);
+            println!("{:?}", device.get_metadata());*/
+
+            let proxy = proxy::Interface::new(&args[1]);
+            let port1 = proxy.device_full(route.clone()).unwrap();
+            let port2 = proxy.device_full(route.clone()).unwrap();
+            let port3 = proxy.device_rpc(route.clone()).unwrap();
+            let port4 = proxy.device_rpc(route.clone()).unwrap();
+
+            let app_port1 = Arc::new(Mutex::new(Some(port1)));
+            let app_port2 = Arc::new(Mutex::new(Some(port2)));
+            let app_port3 = Arc::new(Mutex::new(Some(port3)));
+            let app_port4 = Arc::new(Mutex::new(Some(port4)));
+            
+            app.manage(proxy);
+            app.manage(app_port1.clone());
+            app.manage(app_port2.clone());
+            app.manage(app_port3.clone());
+            app.manage(app_port4.clone());
+
+            // App listens for the RPC call and returns result
             let main_window = app.get_webview("stream-1").unwrap();
             let new_window = app.get_webview("stream-1").unwrap();
-            app.listen("returningRPCName", move |event| {
-                let mut arg: Vec<String> = vec![env::args().collect(), "rpc".to_string()];   
-                let rpccall: Vec<String> = serde_json::from_str(event.payload()).unwrap();
-                for command in &rpccall {
-                    let _ = &arg.push(command.to_string());
-                }
-                if let Ok(passed) = rpc(&arg[2..]) {
-                    println!("Returning {} {}", rpccall[0], passed.clone());
-                    let _ = main_window.emit("returnRPC", (rpccall[0].clone(), passed.clone()));
-                }
-            });
-
-            //on load the current rpc values are loaded into the corresponding input fields
-            app.listen("onLoad", move |event| {
-                let mut arg: Vec<String> = vec![env::args().collect(), "rpc".to_string()]; 
-                let rpccall: String = serde_json::from_str(event.payload()).unwrap();
-                let _ = &arg.push(rpccall.clone());
-                if let Ok(passed) = rpc(&arg[2..]) {
-                    new_window.emit("returnOnLoad", (rpccall.clone(), passed.clone())).unwrap();
+            app.listen("returningRPCName", {
+                let app_port4 = app_port4.clone();
+                move |event| {
+                    let mut arg: Vec<String> = vec![env::args().collect(), "rpc".to_string()];   
+                    let rpccall: Vec<String> = serde_json::from_str(event.payload()).unwrap();
+                    for command in &rpccall {
+                        let _ = &arg.push(command.to_string());
+                    }
+                    let mut app_port4 = app_port4.lock().unwrap();
+                    if let Some(port4) = app_port4.take() {
+                        if let Ok(passed) = rpc(&arg[2..], &Some(port4)) {
+                            println!("Returning {} {}", rpccall[0], passed.clone());
+                            let _ = main_window.emit("returnRPC", (rpccall[0].clone(), passed.clone()));
+                        }
+                    }
                 }
             });
 
-            app.listen("connect", move |event|{
-                let port: String = serde_json::from_str(event.payload()).unwrap();
-                let arguments: Vec<String> = port.split(' ').map(|x| x.to_string()).collect();
-                if port == "tcp://localhost".to_string(){
-                    unsafe{SERIALCONNECTED = true}
-                } else{
-                    unsafe{SERIALCONNECTED = true}
-                    tauri::async_runtime::spawn(async move{
-                        connect_proxy(arguments).await;
-                    });
+            // On load the current RPC values are loaded into the corresponding input fields
+            app.listen("onLoad", {
+                let app_port3 = app_port3.clone();
+                move |event| {
+                    let mut arg: Vec<String> = vec![env::args().collect(), "rpc".to_string()]; 
+                    let rpccall: String = serde_json::from_str(event.payload()).unwrap();
+                    let _ = &arg.push(rpccall.clone());
+
+                    let mut app_port3 = app_port3.lock().unwrap();
+                    if let Some(port3) = app_port3.take() {
+                        if let Ok(passed) = rpc(&arg[2..], &Some(port3)) {
+                            new_window.emit("returnOnLoad", (rpccall.clone(), passed.clone())).unwrap();
+                        }
+                    }
                 }
-                
+            });
+
+            //NOTE: Passing USB Serial from command line at the moment. This is unused
+            app.listen("connect", {
+                move |event| {
+                    let port: String = serde_json::from_str(event.payload()).unwrap();
+                    let arguments: Vec<String> = port.split(' ').map(|x| x.to_string()).collect();
+                    unsafe { SERIALCONNECTED = true; }
+                }
             });
 
             app.listen("fftName", move |event| {
-                let requestFFT: String = serde_json::from_str(event.payload()).unwrap();
-                unsafe{FFT = requestFFT;}
+                let request_fft: String = serde_json::from_str(event.payload()).unwrap();
+                unsafe { FFT = request_fft; }
             });
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             stream_data,
             fft_data,
-            serial_ports])
+            serial_ports
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-    
 }
