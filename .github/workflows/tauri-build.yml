@@ -67,7 +67,7 @@ jobs:
           zip -r build/app-${{ matrix.platform }}.zip ./path/to/your/build/output
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: build-${{ matrix.platform }}
           path: build/app-${{ matrix.platform }}.zip
@@ -77,19 +77,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts (macOS)
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: build-macos-latest
           path: ./macos-build
 
       - name: Download artifacts (Linux)
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: build-ubuntu-latest
           path: ./linux-build
 
       - name: Download artifacts (Windows)
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: build-windows-latest
           path: ./windows-build
