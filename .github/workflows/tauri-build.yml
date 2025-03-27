@@ -64,7 +64,7 @@ jobs:
       - name: Package the build
         run: |
           mkdir -p build
-          zip -r build/app-${{ matrix.platform }}.zip ./path/to/your/build/output
+          zip -r build/app-${{ matrix.platform }}.zip ./target/release
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
