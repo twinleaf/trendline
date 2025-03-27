@@ -49,6 +49,9 @@ jobs:
       - name: install frontend dependencies
         run: yarn install
 
+      - name: Navigate to Rust project directory
+        run: cd src-tauri
+
       - name: Build the project
         run: cargo build --release
 
