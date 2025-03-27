@@ -657,15 +657,12 @@ fn main(){
             app.listen("connect", move |event|{
                 let port: String = serde_json::from_str(event.payload()).unwrap();
                 let arguments: Vec<String> = port.split(' ').map(|x| x.to_string()).collect();
-                if port == "tcp://localhost".to_string(){
-                    unsafe{SERIALCONNECTED = true}
-                } else{
-                    unsafe{SERIALCONNECTED = true}
+                if port != "tcp://localhost".to_string(){
                     tauri::async_runtime::spawn(async move{
                         connect_proxy(arguments).await;
                     });
                 }
-                
+                unsafe{SERIALCONNECTED = true}
             });
 
             app.listen("fftName", move |event| {

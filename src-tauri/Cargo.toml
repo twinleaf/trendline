@@ -23,6 +23,10 @@ rustfft = "6.2.0"
 [build-dependencies]
 tauri-build = { version = "2.0.3", features = [] }
 
-
+[package.metadata.tauri]
+icon = [
+    "icons/trendline.icns",
+    "icons/icon.ico"
+]
 
 

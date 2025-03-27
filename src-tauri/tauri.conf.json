@@ -15,6 +15,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/trendline.icns"]
+    "icon": [
+      "icons/trendline.icns", 
+      "icons/icon.ico"
+    ]
   }
 }
