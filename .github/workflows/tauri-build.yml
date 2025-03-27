@@ -4,9 +4,8 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
+    tags:
+      - 'v1.0.0'
 
 jobs:
   publish-tauri:
@@ -48,13 +47,7 @@ jobs:
 
       - name: install frontend dependencies
         run: yarn install
-
-      - name: Navigate to Rust project directory
-        run: cd trendline/src-tauri
-
-      - name: Build the project
-        run: cargo build --release
-
+        
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -65,15 +58,6 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
-
-      - name: Check build output
-        run: ls -alh ./target/release
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: trendline-${{ matrix.platform }}
-          path: ./target/release/trendline
 
   create-release:
     needs: publish-tauri
