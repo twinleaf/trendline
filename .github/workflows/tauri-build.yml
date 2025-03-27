@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   publish-tauri:
@@ -51,9 +54,87 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: app-v__VERSION__ # the action automatically replaces \_\_VERSION\_\_ with the app version.
+          tagName: app-v__VERSION__ # the action automatically replaces __VERSION__ with the app version.
           releaseName: 'App v__VERSION__'
           releaseBody: 'See the assets to download this version and install.'
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Package the build
+        run: |
+          mkdir -p build
+          zip -r build/app-${{ matrix.platform }}.zip ./path/to/your/build/output
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: build-${{ matrix.platform }}
+          path: build/app-${{ matrix.platform }}.zip
+
+  create-release:
+    needs: publish-tauri
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts (macOS)
+        uses: actions/download-artifact@v2
+        with:
+          name: build-macos-latest
+          path: ./macos-build
+
+      - name: Download artifacts (Linux)
+        uses: actions/download-artifact@v2
+        with:
+          name: build-ubuntu-latest
+          path: ./linux-build
+
+      - name: Download artifacts (Windows)
+        uses: actions/download-artifact@v2
+        with:
+          name: build-windows-latest
+          path: ./windows-build
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: |
+            Changelog for release ${{ github.ref }}:
+            - Feature 1
+            - Feature 2
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset (macOS)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./macos-build/app-macos-latest.zip
+          asset_name: app-macos-latest.zip
+          asset_content_type: application/zip
+
+      - name: Upload Release Asset (Linux)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./linux-build/app-ubuntu-latest.zip
+          asset_name: app-ubuntu-latest.zip
+          asset_content_type: application/zip
+
+      - name: Upload Release Asset (Windows)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./windows-build/app-windows-latest.zip
+          asset_name: app-windows-latest.zip
+          asset_content_type: application/zip
