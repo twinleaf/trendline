@@ -1,12 +1,7 @@
-# Trendline
+# Tauri + SvelteKit + TypeScript
 
-Graphical interface tool for Twinleaf sensor stream data. Equipped with RPC controls and fast fourier transform analysis.
+This template should help get you started developing with Tauri, SvelteKit and TypeScript in Vite.
 
-## Building
+## Recommended IDE Setup
 
-First, [install the Rust toolchain.](https://doc.rust-lang.org/cargo/getting-started/installation.html).
-On Linux, install the [prerequisites](https://v2.tauri.app/start/prerequisites/) for your operating system.
-
-Navigate to the src-tauri folder and run using the following command. Optionally specify the calculated FFT time duration (default 10 seconds) and refresh frequency (default 3 seconds) :
-
-    cargo run [time_span] [refresh_rate]
+[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer).
