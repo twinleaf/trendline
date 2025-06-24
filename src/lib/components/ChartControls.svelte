@@ -1,23 +1,30 @@
 <script lang="ts">
-    import { Button } from '$lib/components/ui/button';
-	let { 
-        isAutoScrolling = $bindable(), 
-        viewStartTime = $bindable(), 
-        endStartTime = $bindable() 
-        } = $props()
+	import { Button } from '$lib/components/ui/button';
+	import { LoaderCircleIcon } from '@lucide/svelte';
+
+	// Simpler props, no defaults needed.
+	let {
+		onFetchData,
+		isLoading
+	} = $props<{
+		onFetchData: () => void;
+		isLoading: boolean;
+	}>();
 </script>
 
 <div class="controls">
-	<Button onclick={() => (isAutoScrolling = !isAutoScrolling)}>
-		Toggle Auto-Scroll ({isAutoScrolling ? 'On' : 'Off'})
-    </Button>
-	<Button onclick={() => (isAutoScrolling = true)} disabled={isAutoScrolling}>
-		Go to Live View
-    </Button>
+	<Button onclick={onFetchData} disabled={isLoading} class="w-32">
+		{#if isLoading}
+			<LoaderCircleIcon class="mr-2 h-4 w-4 animate-spin" />
+			Fetching...
+		{:else}
+			Fetch Data
+		{/if}
+	</Button>
 </div>
 
 <style>
-    .controls {
+	.controls {
 		padding: 1rem;
 		margin-bottom: 1rem;
 		border: 1px solid oklch(var(--border));

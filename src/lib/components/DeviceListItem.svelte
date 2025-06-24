@@ -11,8 +11,8 @@
     let {
 		device,
 		isSelected,
-		currentSelections, // One-way prop with the selections for this item
-		onSelectionChange // Callback to notify parent of a change
+		currentSelections,
+		onSelectionChange
 	} = $props<{
 		device: FeDeviceMeta;
 		isSelected: boolean;
@@ -32,15 +32,30 @@
 					parseInt(a.route.replace(/^\//, ''), 10) - parseInt(b.route.replace(/^\//, ''), 10)
 			)
 	);
+
+    function handleKeyDown(event: KeyboardEvent) {
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			const form = (event.currentTarget as HTMLElement).closest('form');
+			form?.requestSubmit();
+		}
+	}
 </script>
 
-<Collapsible.Root open={isSelected} class="w-full">
+<Collapsible.Root
+	open={isSelected}
+	class="w-full"
+>
 	<div
 		class="rounded-lg border-2 border-transparent transition-all has-[:checked]:border-zinc-200"
 	>
 		<div class="flex items-center justify-between p-2"> <div class="flex items-center space-x-2">
 				<Label for={device.url} class="flex cursor-pointer items-center space-x-3">
-					<RadioGroupItem value={device.url} id={device.url} />
+					<RadioGroupItem
+						value={device.url}
+						id={device.url}
+						onkeydown={handleKeyDown}
+					/>
 					<span class="font-medium">{device.name}</span>
 				</Label>
 				<DeviceInfoHoverCard {device} />

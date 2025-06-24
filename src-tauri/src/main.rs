@@ -12,7 +12,6 @@ use twinleaf::tio::proto::DeviceRoute;
 use twinleaf::tio::proxy::{self, PortError};
 use std::time::{Duration, Instant};
 use std::collections::{HashMap, HashSet};
-use crossbeam::thread;
 
 
 
@@ -24,17 +23,50 @@ async fn start_streaming(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     println!("Received request to stream from {} ports.", ports.len());
+
+    let mut ports_by_url: HashMap<String, Vec<String>> = HashMap::new();
     for port in ports {
-        println!("- Starting stream for {} at {}", port.id, port.url);
-        device::start_stream_thread(
-            port.url,
-            port.id,
-            state.inner().clone(),
-            app_handle.clone(),
-        );
+        ports_by_url.entry(port.url).or_default().push(port.id);
     }
+    
+    let mut backend = state.backend_state.lock().unwrap();
+
+    for (url, stream_ids) in ports_by_url {
+
+        let proxy = backend.proxies
+            .entry(url.clone())
+            .or_insert_with(|| proxy::Interface::new(&url));
+
+        for stream_id in stream_ids {
+            println!("# Spawning stream worker for route '{}' on {}", &stream_id, &url);
+
+            let route = DeviceRoute::from_str(&stream_id).unwrap();
+            
+            match proxy.device_full(route) {
+                Ok(worker_port) => {
+                    let state_clone = state.inner().clone();
+                    let handle_clone = app_handle.clone();
+                    
+                    device::start_stream_thread(
+                        worker_port,
+                        stream_id.clone(),
+                        state_clone,
+                        handle_clone,
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "! Failed to open logical route '{}' on {}: {:?}. Skipping.",
+                        &stream_id, &url, e
+                    );
+                }
+            }
+        }
+    }
+
     Ok(())
 }
+
 
 
 // A command to retrieve all data currently in the buffer.
@@ -59,7 +91,7 @@ fn get_plot_data_in_range(
                 .map(|(timestamp_bits, value)| SinglePlotPoint {
                     x: f64::from_bits(*timestamp_bits),
                     y: *value,
-                    series_key: key.clone(), // Fix: Add the missing series_key
+                    series_key: key.clone(),
                 })
                 .collect();
             
@@ -98,7 +130,7 @@ async fn discover_devices() -> Result<Vec<FeDeviceMeta>, String> {
 
         // --- Phase 1: Discover active routes for this URL ---
         println!("# Probing {} for active routes...", url);
-        let sniffer_port = match proxy.tree_full() {
+        let sniffer_port = match proxy.tree_probe() {
             Ok(port) => port,
             Err(e) => {
                 let error_message = match e {
@@ -142,7 +174,7 @@ async fn discover_devices() -> Result<Vec<FeDeviceMeta>, String> {
         }
 
         // --- Phase 2: Spawn a worker thread for each discovered route ---
-         thread::scope(|s| {
+         crossbeam::thread::scope(|s| {
             for route in discovered_routes {
                 let route_str = route.to_string();
                 if let Ok(worker_port) = proxy.device_full(route) {

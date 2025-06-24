@@ -1,6 +1,6 @@
 // src-tauri/src/app_state.rs
 use crate::discover::FeDeviceMeta;
-use twinleaf::tio::proxy::Port;
+use twinleaf::tio::proxy;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use ts_rs::TS;
@@ -16,7 +16,7 @@ pub struct SinglePlotPoint {
     pub series_key: String,
 }
 pub struct BackendState {
-    pub proxies: HashMap<String, Port>,
+    pub proxies: HashMap<String, proxy::Interface>, 
     pub device_tree: HashMap<String, FeDeviceMeta>,
 }
 

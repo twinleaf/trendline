@@ -17,8 +17,7 @@
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-opener": "^2",
     "tailwindcss": "^4.1.10",
-    "uplot": "^1.6.32",
-    "uplot-svelte": "^1.2.3"
+    "uplot": "^1.6.32"
   },
   "overrides": {
     "svelte": "^5.0.0"
@@ -32,6 +31,7 @@
     "@tauri-apps/cli": "^2.5.0",
     "bits-ui": "^2.8.8",
     "clsx": "^2.1.1",
+    "paneforge": "^1.0.0",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "tailwind-merge": "^3.3.1",

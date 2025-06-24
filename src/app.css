@@ -4,11 +4,11 @@
 
 :root {
   --radius: 0.5rem;
---font-sans: "Inter", sans-serif; 
+  --font-sans: "Inter", sans-serif; 
 
   /* 1. Base Colors from Twinleaf Palette */
-  --background: oklch(1 0 0); /* White */
-  --foreground: #0c1c0d; /* Dark Green/Black Text */
+  --background: #0c1c0d; /* White */
+  --foreground: #000000; /* Black Text */
 
   /* 2. Primary Interactive Color (The Twinleaf Green) */
   --primary: #318c18; /* Twinleaf Green */
@@ -16,9 +16,9 @@
   
   /* 3. Cards & Popovers (match the background for a flat look) */
   --card: oklch(1 0 0); /* White */
-  --card-foreground: #0c1c0d; /* Dark Green/Black Text */
+  --card-foreground: #000000; /* Black Text */
   --popover: oklch(1 0 0); /* White */
-  --popover-foreground: oklch(0.19 0.02 145); /* Dark Green/Black Text */
+  --popover-foreground: #000000; /* Black Text */
   
   /* 4. Secondary & Muted colors (subtle grays) */
   --secondary: oklch(0.97 0.01 299); /* Very light gray */
