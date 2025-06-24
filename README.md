@@ -1,6 +1,7 @@
-# Tauri + SvelteKit + TypeScript
+# Developer Setup
 
-This template should help get you started developing with Tauri, SvelteKit and TypeScript in Vite.
+`npm run tauri dev` will launch the program on the root directory
+`cargo test export_bindings` will export the Rust bindings to be used in the front end Typescript when in the src-tauri directory 
 
 ## Recommended IDE Setup
 

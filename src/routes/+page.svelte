@@ -1,187 +1,102 @@
 <script lang="ts">
-	import UplotChart from '$lib/components/UplotChart.svelte';
-	import { onMount } from 'svelte';
-	import { listen } from '@tauri-apps/api/event';
 	import { invoke } from '@tauri-apps/api/core';
-	import type uPlot from 'uplot';
+	import { listen } from '@tauri-apps/api/event';
+	
+	import DeviceSelector from '$lib/components/DeviceSelector.svelte';
+	import ChartControls from '$lib/components/ChartControls.svelte';
+	import LiveChart from '$lib/components/LiveChart.svelte';
 
-	// --- Configuration ---
-	const viewDurationSeconds = 60;
+	// --- Import types from generated bindings ---
+	import type { PortInfo } from '$lib/bindings/PortInfo';
+	import type { SinglePlotPoint } from '$lib/bindings/SinglePlotPoint';
+	
+	// --- Frontend-specific types can be defined here ---
+	interface PlotPoint { x: number; y: number; }
+	interface SeriesMetadata {
+		units: string;
+		deviceName: string;
+		streamName: string;
+	}
 
-	// --- State Management (Svelte 5 Runes) ---
-	let chart = $state<uPlot | undefined>(undefined);
-	let data = $state<[number[], number[], number[]]>([[], [], []]);
+	// --- State ---
+	let streamingStarted = $state(false);
 	let isAutoScrolling = $state(true);
+	let viewStartTime = $state(0);
+	let viewEndTime = $state(0);
+	
+	let seriesData = $state(new Map<string, PlotPoint[]>());
+	let seriesMetadata = $state(new Map<string, SeriesMetadata>());
 
-	// --- Data Types from Rust ---
-	interface PlotDataPoint {
-		timestamp: number;
-		values: {
-			'imu.accel.x'?: number;
-			'imu.accel.y'?: number;
-		};
+	async function handleStartStreaming(ports: PortInfo[]) {
+		console.log('Received start instruction with ports:', ports);
+		if (ports.length > 0) {
+			try {
+				await invoke('start_streaming', { ports });
+				streamingStarted = true;
+			} catch (e) {
+				console.error("Failed to start streaming:", e);
+			}
+		}
 	}
 
-	// --- Chart Options ---
-	const options: uPlot.Options = {
-		title: 'Live Sensor Data',
-		width: 800,
-		height: 600,
-		scales: {
-			'x': { time: true },
-		},
-		series: [
-			{},
-			{ label: 'Accel X', stroke: 'red', width: 1 },
-			{ label: 'Accel Y', stroke: 'blue', width: 1 },
-		],
-		hooks: {
-			setSelect: [
-				(self) => {
-					console.log("User zoomed. Disabling auto-scroll.");
-					isAutoScrolling = false;
+	$effect(() => {
+		if (!streamingStarted) return;
+		
+		console.log("Setting up event listener for new-data-available");
+		const unlisten = listen<SinglePlotPoint[]>('new-data-available', (event) => {
+			const newPoints = event.payload;
+			
+			const updatedMap = new Map(seriesData);
+			let dataChanged = false;
+
+			for (const point of newPoints) {
+				if (!updatedMap.has(point.series_key)) {
+					updatedMap.set(point.series_key, []);
 				}
-			]
-		}
-	};
-
-	// --- NEW: Function to invoke the backend command ---
-	async function addData() {
-		try {
-			await invoke('add_dummy_data');
-		} catch (e) {
-			console.error("Failed to add data:", e);
-		}
-	}
-
-	async function refreshPlot() {
-		try {
-			const rawData = await invoke<PlotDataPoint[]>('get_plot_data');
-
-			if (!rawData || rawData.length === 0) {
-				return;
+				updatedMap.get(point.series_key)!.push({ x: point.x, y: point.y });
+				dataChanged = true;
 			}
-
-			const timestamps: number[] = [];
-			const series1: number[] = [];
-			const series2: number[] = [];
-
-			for (const point of rawData) {
-				timestamps.push(point.timestamp);
-				series1.push(point.values['imu.accel.x'] ?? 0);
-				series2.push(point.values['imu.accel.y'] ?? 0);
+			
+			if (dataChanged) {
+				seriesData = updatedMap;
 			}
-
-			data = [timestamps, series1, series2];
-
-			if (isAutoScrolling && chart) {
-				const latestTimestamp = timestamps[timestamps.length - 1];
-				const newMax = latestTimestamp;
-				const newMin = newMax - viewDurationSeconds;
-				chart.setScale('x', { min: newMin, max: newMax });
-			}
-
-		} catch (e) {
-			console.error('Failed to get or process plot data:', e);
-		}
-	}
-
-	function resetView() {
-		isAutoScrolling = true;
-		refreshPlot();
-	}
-
-	onMount(() => {
-		let unlistenFn: (() => void) | undefined = undefined;
-
-		const setupListener = async () => {
-			// Perform an initial fetch to populate the chart
-			await refreshPlot();
-
-			// Listen for the event from the Rust backend
-			unlistenFn = await listen('new-data-available', (event) => {
-				// Use requestAnimationFrame to prevent layout thrashing
-				window.requestAnimationFrame(refreshPlot);
-			});
-		};
-
-		setupListener();
-
+		});
+		
 		return () => {
-			if (unlistenFn) {
-				unlistenFn();
-			}
+			console.log("Cleaning up event listener");
+			unlisten.then(f => f());
 		};
 	});
+
+	// Effect for auto-scrolling the chart view
+	$effect(() => {
+		if (!isAutoScrolling || !streamingStarted) return;
+
+		const updateView = () => {
+			const now = Date.now(); // Timestamps for uPlot are best handled in milliseconds
+			viewEndTime = now;
+			viewStartTime = now - 30_000; // 30-second rolling window
+		};
+		updateView();
+		const interval = setInterval(updateView, 1000);
+		
+		return () => clearInterval(interval);
+	});
+
 </script>
 
-<main>
-	<h1>Welcome to Trendline-NG</h1>
-
-	<div class="controls">
-        <button onclick={addData}>
-            Add Dummy Data Point
-        </button>
-
-		<button onclick={() => isAutoScrolling = !isAutoScrolling}>
-			Toggle Auto-Scroll ({isAutoScrolling ? 'On' : 'Off'})
-		</button>
-		<button onclick={resetView} disabled={isAutoScrolling}>
-			Go to Live View
-		</button>
-		<span class="status">
-			Auto-scroll is <strong>{isAutoScrolling ? 'ACTIVE' : 'PAUSED'}</strong>.
-			{ !isAutoScrolling ? 'You can now zoom and pan freely.' : ''}
-		</span>
-	</div>
-
-	<div class="chart-container">
-		{#if data[0].length > 0}
-			<UplotChart {options} {data} bind:chart={chart} />
-		{:else}
-			<div class="placeholder">
-				<p>Waiting for data from device...</p>
-                <p>(Click "Add Dummy Data Point" to begin)</p>
+<main class="flex flex-col items-center p-4">
+	{#if !streamingStarted}
+		<!-- We now pass handleStartStreaming as a prop named onStart -->
+		<DeviceSelector onStart={handleStartStreaming} />
+	{:else}
+		<div class="w-full max-w-4xl space-y-4">
+			<h1 class="text-2xl font-bold text-center">Live Data Viewer</h1>
+			<ChartControls bind:isAutoScrolling bind:viewStartTime bind:endStartTime={viewEndTime} />
+			<div class="rounded-lg border p-2">
+				<!-- Passing both data and metadata to the chart -->
+				<!-- <LiveChart {seriesData} {seriesMetadata} /> -->
 			</div>
-		{/if}
-	</div>
+		</div>
+	{/if}
 </main>
-
-<style>
-	main {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-	}
-	.controls {
-		padding: 1rem;
-		margin-bottom: 1rem;
-		border: 1px solid #444;
-		border-radius: 8px;
-		display: flex;
-		gap: 1rem;
-		align-items: center;
-        flex-wrap: wrap;
-        justify-content: center;
-	}
-	.status {
-		font-family: monospace;
-		font-size: 0.9em;
-	}
-	.chart-container {
-		border: 1px solid #ccc;
-		border-radius: 5px;
-		padding: 10px;
-	}
-	.placeholder {
-		width: 800px;
-		height: 600px;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-		align-items: center;
-		color: #888;
-		border: 2px dashed #444;
-		border-radius: 5px;
-	}
-</style>
