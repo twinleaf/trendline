@@ -4,26 +4,44 @@
 
 	let {
 		options,
-		data
+		data,
+		onViewChange = (min: number, max: number) => {}
 	} = $props<{
 		options: uPlot.Options;
 		data: uPlot.AlignedData;
+		onViewChange?: (min: number, max: number) => void;
 	}>();
 
 	let chartContainer: HTMLDivElement;
 	let uplot: uPlot | null = null;
+	let isInitialized = false;
 
 	onMount(() => {
 		if (chartContainer) {
-			const initialOptions = { ...options, series: options.series || [] };
-			uplot = new uPlot(initialOptions, data, chartContainer);
+			const extendedOptions: uPlot.Options = {
+				...options,
+				hooks: {
+					setScale: [
+						(self, key) => {
+							if (key === 'x' && isInitialized) {
+								const min = self.scales.x.min ?? 0;
+								const max = self.scales.x.max ?? 1;
+								onViewChange(min, max);
+							}
+						}
+					]
+				}
+			};
+
+			uplot = new uPlot(extendedOptions, data, chartContainer);
+			isInitialized = true;
 		}
 	});
 	
 
 	$effect(() => {
 		if (uplot) {
-			uplot.setData(data, true);
+			uplot.setData(data, false);
 		}
 	});
 
@@ -32,6 +50,7 @@
 			uplot.destroy();
 			uplot = null;
 		}
+		isInitialized = false;
 	});
 </script>
 

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as Resizable from '$lib/components/ui/resizable/index.js';
-    import DeviceControls from '$lib/components/DeviceControls.svelte';
-    import LiveChart from '$lib/components/LiveChart.svelte';
+    import DeviceControls from '$lib/components/chart-area/DeviceControls.svelte';
+    import ChartView from '$lib/components/chart-area/ChartView.svelte';
 </script>
 
 <Resizable.PaneGroup direction="horizontal" class="h-full w-full">
@@ -13,7 +13,7 @@
 	<Resizable.Handle withHandle />
 	<Resizable.Pane defaultSize={75}>
 		<div class="flex h-full items-center justify-center p-2">
-            <LiveChart/>
+            <ChartView/>
 		</div>
 	</Resizable.Pane>
 </Resizable.PaneGroup>

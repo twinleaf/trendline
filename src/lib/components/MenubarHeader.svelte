@@ -1,9 +1,7 @@
 <script lang="ts">
 	import * as Menubar from '$lib/components/ui/menubar/';
-	import { deviceStore } from '$lib/stores/device.store.svelte';
+	import { deviceService } from '$lib/stores/device.store.svelte';
 	import { ioStore } from '$lib/stores/io.store.svelte';
-	import { uiStore } from '$lib/stores/ui.store.svelte';
-	import { chartStore } from '$lib/stores/chart.store.svelte'; // We need this for 'Clear Session'
 
 	// --- MOCK APPLICATION STATE (can stay for now) ---
 	let channelViewMode = $state('overlaid');
@@ -54,8 +52,7 @@
 			</Menubar.Item>
 			<Menubar.Item onSelect={() => handleCopy('data')}>Copy Data (CSV)</Menubar.Item>
 			<Menubar.Separator />
-			<!-- FIX: Use arrow function to call chartStore.clearAllCharts -->
-			<Menubar.Item onSelect={() => chartStore.clearAllCharts()} disabled={deviceStore.isOccupied}>
+			<Menubar.Item onSelect={() => chartStore.clearAllCharts()} disabled={deviceStore.isConnecting}>
 				Clear Session
 			</Menubar.Item>
 		</Menubar.Content>
