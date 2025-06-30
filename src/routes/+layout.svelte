@@ -1,19 +1,18 @@
 <script lang="ts">
 	import 'uplot/dist/uPlot.min.css';
 	import '../app.css';
-	import MenubarHeader from '$lib/components/MenubarHeader.svelte';
 	import StatusFooter from '$lib/components/StatusFooter.svelte';
 
 	import DeviceSelectorDialog from '$lib/components/device-select/DeviceSelectorDialog.svelte';
 
-	import { uiStore } from '$lib/stores/ui.store.svelte';
+	import { uiState } from '$lib/states/uiState.svelte';
 	import { onMount } from 'svelte';
 	import type { Snippet } from 'svelte';
 
 	let { children } = $props<{ children: Snippet }>();
 
 	onMount(() => {
-        uiStore.open('discovery');
+        uiState.open('discovery');
 	});
 </script>
 
@@ -28,9 +27,9 @@
 		</div>
 	</main>
 
-	<!-- <footer>
+	<footer>
 		<StatusFooter />
-	</footer> -->
+	</footer>
 
 	<!-- The layout now just renders the dialog components. That's it. -->
 	<DeviceSelectorDialog />

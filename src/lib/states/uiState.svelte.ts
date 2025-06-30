@@ -2,7 +2,7 @@
 
 export type DialogType = 'none' | 'discovery' | 'rpc_settings' | 'export';
 
-class UIStore {
+class UiState {
 	dialog = $state<DialogType>('none');
 
 	open(type: DialogType)  { this.dialog = type; }
@@ -11,4 +11,4 @@ class UIStore {
 	is(type: DialogType)    { return this.dialog === type; }
 }
 
-export const uiStore = new UIStore();
+export const uiState = new UiState();

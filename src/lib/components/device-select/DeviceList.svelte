@@ -5,47 +5,74 @@
 	import { Label } from '$lib/components/ui/label';
 	import { ChevronsUpDown }   from '@lucide/svelte';
 	import DeviceInfoHoverCard  from '$lib/components/device-select/DeviceInfoHoverCard.svelte';
-	import type { UiDeviceWithKids } from '$lib/stores/device.store.svelte';
+	import type { UiDeviceWithKids } from '$lib/states/deviceState.svelte';
 
-	type Selection = {
-        parent: string;
-        children: Set<string>;
-    };
 
-	let { devices, selection = $bindable() } = $props<{
-		devices: UiDeviceWithKids[],
-		selection: Selection
+	let {
+		devices,
+		selectedParent = $bindable(),
+		childrenSelections = $bindable()
+	} = $props<{
+		devices: UiDeviceWithKids[];
+		selectedParent: string;
+		childrenSelections: Map<string, Set<string>>;
 	}>();
 
 	function toggleChild(childRoute: string, isChecked: boolean, parentRoute: string) {
+		const children = childrenSelections.get(parentRoute);
+		if (!children) return;
+
 		if (isChecked) {
-			selection.parent = parentRoute;
-			selection.children.add(childRoute);
+			children.add(childRoute);
 		} else {
-			selection.children.delete(childRoute);
+			children.delete(childRoute);
 		}
 	}
+
 
 	function handleKeyDown(event: KeyboardEvent) {
+		const form = (event.currentTarget as HTMLElement).closest('form');
+
+		// Handle Enter to submit the form
 		if (event.key === 'Enter') {
 			event.preventDefault();
-			const form = (event.currentTarget as HTMLElement).closest('form');
 			form?.requestSubmit();
+			return; // Stop further processing
+		}
+
+		// Handle Up/Down arrow keys for parent navigation
+		if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+			event.preventDefault();
+			const currentIndex = devices.findIndex((d: { route: any; }) => d.route === selectedParent);
+			const maxIndex = devices.length - 1;
+			let nextIndex = -1;
+
+			if (event.key === 'ArrowDown') {
+				nextIndex = currentIndex >= maxIndex ? 0 : currentIndex + 1;
+			} else {
+				nextIndex = currentIndex <= 0 ? maxIndex : currentIndex - 1;
+			}
+
+			if (nextIndex !== -1 && devices[nextIndex]) {
+				selectedParent = devices[nextIndex].route;
+			}
 		}
 	}
-
 </script>
 
-<RadioGroup.Root bind:value={selection.parent} orientation="vertical">
+<RadioGroup.Root
+	bind:value={selectedParent}
+	orientation="vertical"
+	onkeydown={handleKeyDown}
+	class="relative focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md"
+	tabindex={0}
+>
 	{#each devices as root (root.url)}
 		<Collapsible.Root class="w-full">
 			<div class="flex items-center justify-between px-2 py-1.5">
 				<div class="flex items-center space-x-2">
-					<RadioGroup.Item
-						id={root.url}
-						value={root.route}
-						onkeydown={handleKeyDown}
-					/>
+					<!-- The RadioGroup.Item is now just a visual indicator -->
+					<RadioGroup.Item id={root.url} value={root.route} tabindex={-1} />
 					<Label for={root.url} class="font-medium cursor-pointer">
 						{root.meta.name}
 					</Label>
@@ -66,10 +93,10 @@
 					<div class="flex items-center space-x-2 py-0.5">
 						<Checkbox
 							id={child.route}
-							checked={selection.children.has(child.route)}
+							checked={childrenSelections.get(root.route)?.has(child.route) ?? false}
 							onCheckedChange={(v) => toggleChild(child.route, !!v, root.route)}
 						/>
-						<Label for={child.route} class="flex-1 cursor-pointer text-sm">
+						<Label for={child.route} class="cursor-pointer text-sm">
 							{child.route.slice(1)}: {child.meta.name}
 						</Label>
 						<DeviceInfoHoverCard device={child} />

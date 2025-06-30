@@ -1,10 +1,10 @@
 // TAKES SERIAL/TCP PORT URL and maps it to a PortManager
 
+use crate::proxy::port_manager::PortManager;
 use crate::state::capture::CaptureState;
-use crate::proxy::port_manager::{PortManager};
 use dashmap::DashMap;
-use tauri::{AppHandle, Emitter};
 use std::sync::Arc;
+use tauri::{AppHandle, Emitter};
 
 pub struct ProxyRegister {
     ports: DashMap<String, Arc<PortManager>>,
@@ -14,24 +14,21 @@ pub struct ProxyRegister {
 
 impl ProxyRegister {
     pub fn new(app: AppHandle, capture: CaptureState) -> Self {
-        Self { ports: DashMap::new(),
+        Self {
+            ports: DashMap::new(),
             app,
-            capture,        
+            capture,
         }
     }
-    
+
     pub fn app_handle(&self) -> AppHandle {
         self.app.clone()
     }
 
     pub fn ensure(&self, url: String) {
-        self.ports.entry(url.clone()).or_insert_with(|| {
-            PortManager::new(
-                url,
-                self.app.clone(),
-                self.capture.clone(),
-            )
-        });
+        self.ports
+            .entry(url.clone())
+            .or_insert_with(|| PortManager::new(url, self.app.clone(), self.capture.clone()));
     }
 
     pub fn prune<F>(&self, keep: F)
@@ -52,7 +49,7 @@ impl ProxyRegister {
             }
         });
     }
-    pub fn get(&self, url: &String) -> Option<Arc<PortManager>>{
+    pub fn get(&self, url: &String) -> Option<Arc<PortManager>> {
         self.ports.get(url).map(|r| r.value().clone())
     }
 }

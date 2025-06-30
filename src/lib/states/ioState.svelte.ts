@@ -1,4 +1,4 @@
-class IoStore {
+class IoState {
 	isLogging = $state(false);
 	loggingPath = $state('/Users/nguyen/Projects/GitHub/trendline/session-01.log');
 
@@ -21,4 +21,4 @@ class IoStore {
     }
 }
 
-export const ioStore = new IoStore();
+export const ioState = new IoState();

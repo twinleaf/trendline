@@ -1,12 +1,14 @@
 use crate::state::capture::{CaptureState, DataColumnId, Point};
 use crate::shared::{UiDevice, UiStream, DeviceMeta, StreamMeta, ColumnMeta, PortState};
+use crate::util;
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
     thread,
 };
-use tauri::Emitter;
+use tauri::menu::MenuItemKind;
+use tauri::{Emitter, Manager};
 use twinleaf::{
     data::Sample,
     tio::{
@@ -67,8 +69,7 @@ impl PortManager {
         thread::Builder::new()
             .name(format!("port-{}", self_.url))
             .spawn(move || {
-                // The main lifecycle loop. If the connection fails and we want to retry from scratch,
-                // this loop will restart the entire process.
+
                 'lifecycle: loop {
                     // --- PHASE 1: CONNECTION ---
                     self_.set_state(PortState::Connecting);
@@ -108,7 +109,6 @@ impl PortManager {
                         continue 'lifecycle;
                     }
                     println!("[{}] Discovery finished.", self_.url);
-                    self_.app.emit("device-metadata-collection-finished", &self_.url).unwrap();
 
                     // --- PHASE 3: STREAMING & COMMAND HANDLING ---
                     self_.set_state(PortState::Streaming);
@@ -168,7 +168,6 @@ impl PortManager {
                             }
                         }
                         
-                        // Explicitly drop the lock before sleeping
                         drop(devices);
 
                         // Don't busy-wait. A small sleep is crucial.
@@ -199,6 +198,9 @@ impl PortManager {
         drop(discovery_port);
         println!("[{}] Found routes: {:?}", self.url, discovered_routes);
 
+
+        let mut discovered_ui_devices: Vec<UiDevice> = Vec::new();
+        
         let mut devices = self.devices.lock().unwrap();
         for route in discovered_routes {
             if devices.contains_key(&route) {
@@ -238,10 +240,13 @@ impl PortManager {
                 streams: ui_streams,
             };
 
-            println!("[{}] -> Publishing metadata for '{}': {}", self.url, route, ui_dev.meta.name);
-            self.app.emit("new-device-meta-obtained", ui_dev).unwrap();
-            
+            discovered_ui_devices.push(ui_dev);
             devices.insert(route, device);
+        }
+
+        if !discovered_ui_devices.is_empty() {
+            println!("[{}] -> Publishing batch of {} devices", self.url, discovered_ui_devices.len());
+            self.app.emit("port-devices-discovered", discovered_ui_devices).unwrap();
         }
 
         Ok(())
@@ -254,8 +259,47 @@ impl PortManager {
     
     fn set_state(&self, new_state: PortState) {
         *self.state.lock().unwrap() = new_state.clone();
-        // TODO: Create a serializable struct for the state update event
-        self.app.emit("port-state-changed", (self.url.clone(), new_state)).unwrap();
+        self.app
+            .emit("port-state-changed", (self.url.clone(), new_state.clone()))
+            .unwrap();
+
+
+        if let Some(window) = self.app.get_webview_window("main") {
+            if let Some(menu) = window.menu() {
+                let is_connected = new_state == PortState::Streaming;
+
+                // --- Refactored Menu Item Manipulation ---
+
+                // Update items in the "File" menu
+                if let Some(file_menu) = util::find_submenu_by_text(&menu, "File") {
+                    // Find the specific item by its ID within the submenu
+                    if let Some(MenuItemKind::MenuItem(item)) = file_menu.get("save_recording") {
+                        item.set_enabled(is_connected).unwrap();
+                    }
+                }
+
+                // Update items in the "Edit" menu
+                if let Some(edit_menu) = util::find_submenu_by_text(&menu, "Edit") {
+                    if let Some(MenuItemKind::MenuItem(item)) = edit_menu.get("clear_session") {
+                        item.set_enabled(!is_connected).unwrap();
+                    }
+                }
+
+                // Find the "Device" menu once and update all its items
+                if let Some(device_menu) = util::find_submenu_by_text(&menu, "Device") {
+                    if let Some(MenuItemKind::MenuItem(item)) = device_menu.get("toggle_logging") {
+                        item.set_enabled(is_connected).unwrap();
+                    }
+                if let Some(MenuItemKind::MenuItem(item)) = device_menu.get("rpc_settings") {
+                        item.set_enabled(is_connected).unwrap();
+                    }
+                if let Some(MenuItemKind::MenuItem(item)) = device_menu.get("connect_device") {
+                        let text = if is_connected { "Change Device..." } else { "Connect Device..." };
+                        item.set_text(text).unwrap();
+                    }
+                }
+            }
+        }
     }
     
     fn wait_for_connection(status_rx: &crossbeam::channel::Receiver<Event>) -> Result<(), ()> {

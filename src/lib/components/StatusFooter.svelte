@@ -4,10 +4,10 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
 	import { CircleCheck, CircleX, LoaderCircle } from '@lucide/svelte';
-	import { ioStore } from '$lib/stores/io.store.svelte';
-	import { deviceService } from '$lib/stores/device.store.svelte';
+	import { ioState } from '$lib/states/ioState.svelte';
+	import { deviceState } from '$lib/states/deviceState.svelte';
 
-	const pathSegments = $derived(ioStore.loggingPath.split('/').filter(Boolean));
+	const pathSegments = $derived(ioState.loggingPath.split('/').filter(Boolean));
 </script>
 
 <div
@@ -15,7 +15,7 @@
 >
 	<!-- Left Side: Activity / Logging Path (Unchanged) -->
 	<div class="min-w-0 flex-1 items-center gap-4">
-		{#if ioStore.isLogging}
+		{#if ioState.isLogging}
 			<Breadcrumb.Root class="text-muted-foreground">
 				<Breadcrumb.List>
 					<Breadcrumb.Item>
@@ -46,27 +46,27 @@
 
 	<!-- Right Side: Device Status -->
 	<div class="flex items-center gap-2">
-		{#if deviceService.selectedPortState() === 'Connecting'
-            || deviceService.selectedPortState() === 'Discovery'
-            || deviceService.selectedPortState() === 'Reconnecting'}
+		{#if deviceState.selectedPortState() === 'Connecting'
+            || deviceState.selectedPortState() === 'Discovery'
+            || deviceState.selectedPortState() === 'Reconnecting'}
             <Badge variant="default" class="gap-1.5 bg-yellow-500 text-yellow-950 hover:bg-yellow-500/80">
                 <LoaderCircle class="size-3.5 animate-spin" />
                 Acquiring…
             </Badge>
 
-        {:else if deviceService.selectedPortState() === 'Disconnected'}
+        {:else if deviceState.selectedPortState() === 'Disconnected'}
             <Badge variant="destructive" class="gap-1.5">
                 <CircleX class="size-3.5" />
                 Disconnected
             </Badge>
 
-        {:else if deviceService.selectedPortState() === 'Streaming'}
+        {:else if deviceState.selectedPortState() === 'Streaming'}
             <Badge variant="default" class="gap-1.5 bg-green-500 text-green-950 hover:bg-green-500/80">
                 <LoaderCircle class="size-3.5 animate-spin" />
                 Streaming
             </Badge>
 
-        {:else if deviceService.selectedPortState() === 'Idle'}
+        {:else if deviceState.selectedPortState() === 'Idle'}
             <Badge variant="default" class="gap-1.5 bg-yellow-500 text-yellow-950 hover:bg-yellow-500/80">
                 <CircleCheck class="size-3.5" />
                 Idle

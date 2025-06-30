@@ -1,4 +1,8 @@
 use sysinfo::System;
+use tauri::menu::{Menu, MenuItemKind, Submenu};
+use tauri::Runtime;
+use serde::{self, Deserializer, Serializer, de::Error, Deserialize};
+use twinleaf::tio::proto::DeviceRoute;
 
 pub fn is_process_running(exe_name: &str) -> bool {
     let mut sys = System::new_all();
@@ -25,7 +29,7 @@ pub struct SerialDevice {
     ifc: TwinleafPortInterface,
 }
 #[expect(unused)]
-pub struct LANDevice{
+pub struct LANDevice {
     ip: String,
     mac: String,
 }
@@ -79,4 +83,37 @@ pub fn get_valid_twinleaf_serial_urls() -> Vec<String> {
         }
     }
     valid_urls
+}
+
+pub fn find_submenu_by_text<'a, R: Runtime>(
+    root_menu: &'a Menu<R>,
+    submenu_text: &str,
+) -> Option<Submenu<R>> {
+    if let Ok(items) = root_menu.items() {
+        for item in items {
+            if let MenuItemKind::Submenu(submenu) = item {
+                if submenu.text().ok().as_deref() == Some(submenu_text) {
+                    return Some(submenu);
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn serialize<S>(route: &DeviceRoute, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&route.to_string())
+}
+
+
+pub fn deserialize<'de, D>(deserializer: D) -> Result<DeviceRoute, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+     DeviceRoute::from_str(&s)
+        .map_err(|_err| Error::custom(format!("Invalid DeviceRoute String: '{}'", s)))
 }

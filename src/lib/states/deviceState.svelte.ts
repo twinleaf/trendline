@@ -1,5 +1,3 @@
-// src/lib/services/device.store.svelte.ts
-
 import { listen } from '@tauri-apps/api/event';
 import type { PortState } from '$lib/bindings/PortState';
 import type { UiDevice } from '$lib/bindings/UiDevice';
@@ -14,42 +12,42 @@ interface DeviceDetail {
 	route: string;
 }
 
-class DeviceService {
+class DeviceState {
 	#devicesMap = $state<Map<string, { state: PortState; devices: UiDevice[] }>>(new Map());
 
 	constructor() {
 		listen<[string, PortState]>('port-state-changed', ({ payload: [url, st] }) =>
 			this.#setPortState(url, st)
 		);
-		listen<UiDevice>('new-device-meta-obtained', e => {
-            console.log('[tauri] new-device-meta-obtained', e.payload);   // <—
-            this.#addOrUpdateDevice(e.payload);
-        });
+		listen<UiDevice[]>('port-devices-discovered', ({ payload: new_devices }) => {
+			if (new_devices.length === 0) return;
+
+			const url = new_devices[0].url;
+			console.log(`[DeviceState] Received batch of ${new_devices.length} devices for port ${url}`);
+
+			const newMap = new Map(this.#devicesMap);
+			const entry = newMap.get(url) ?? { state: new_devices[0].state, devices: [] };
+
+			const updatedEntry = { ...entry, devices: new_devices };
+			newMap.set(url, updatedEntry);
+
+			this.#devicesMap = newMap;
+		});
 		listen<string>('device-removed', ({ payload: url }) => this.#removeDevice(url));
 	}
 
 	#setPortState(url: string, state: PortState) {
-		const entry = this.#devicesMap.get(url) ?? { state, devices: [] };
-		entry.state = state;
-		this.#devicesMap.set(url, entry);
-	}
-
-	#addOrUpdateDevice(newDevice: UiDevice) {
-		const url = newDevice.url;
-		const entry = this.#devicesMap.get(url) ?? { state: newDevice.state, devices: [] };
-		const existingDeviceIndex = entry.devices.findIndex((d) => d.route === newDevice.route);
-
-		if (existingDeviceIndex !== -1) {
-			entry.devices[existingDeviceIndex] = newDevice;
-		} else {
-			entry.devices.push(newDevice);
-		}
-		entry.state = newDevice.state;
-		this.#devicesMap.set(url, entry);
+		const newMap = new Map(this.#devicesMap);
+		const entry = newMap.get(url) ?? { state, devices: [] };
+		const updatedEntry = { ...entry, state };
+        newMap.set(url, updatedEntry);
+        this.#devicesMap = newMap;
 	}
 
 	#removeDevice(url: string) {
-		this.#devicesMap.delete(url);
+		const newMap = new Map(this.#devicesMap);
+		newMap.delete(url);
+		this.#devicesMap = newMap;
 	}
 
     devices = $derived(() => Array.from(this.#devicesMap.values()));
@@ -97,9 +95,11 @@ class DeviceService {
         if (!port) return [];
 
         return port.devices
-            .filter(d =>
-                d.route === sel.parent || sel.children.includes(d.route)
-            )
+            .filter(d => {
+				const isParent = d.route === '/' || d.route === '';
+				const isSelectedChild = sel.children.includes(d.route);
+				return isParent || isSelectedChild;
+			})
             .map(d => ({
                 key:  `${d.url}${d.route}`,
                 name: d.meta.name,
@@ -109,4 +109,4 @@ class DeviceService {
 
 }
 
-export const deviceService = new DeviceService();
+export const deviceState = new DeviceState();

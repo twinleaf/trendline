@@ -22,9 +22,8 @@ pub enum PortState {
 //
 
 use twinleaf::tio::proto::meta::{
-    DeviceMetadata as LibDeviceMeta,
+    ColumnMetadata as LibColumnMeta, DeviceMetadata as LibDeviceMeta,
     StreamMetadata as LibStreamMeta,
-    ColumnMetadata as LibColumnMeta,
 };
 
 // Device -----------------------------------------------------------------
@@ -43,9 +42,9 @@ impl From<LibDeviceMeta> for DeviceMeta {
         Self {
             serial_number: d.serial_number,
             firmware_hash: d.firmware_hash,
-            n_streams:     d.n_streams,
-            session_id:    d.session_id,
-            name:          d.name,
+            n_streams: d.n_streams,
+            session_id: d.session_id,
+            name: d.name,
         }
     }
 }
@@ -54,10 +53,10 @@ impl From<LibDeviceMeta> for DeviceMeta {
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct StreamMeta {
-    pub stream_id:   u8,
-    pub name:        String,
-    pub n_columns:   usize,
-    pub n_segments:  usize,
+    pub stream_id: u8,
+    pub name: String,
+    pub n_columns: usize,
+    pub n_segments: usize,
     pub sample_size: usize,
     pub buf_samples: usize,
 }
@@ -65,10 +64,10 @@ pub struct StreamMeta {
 impl From<LibStreamMeta> for StreamMeta {
     fn from(s: LibStreamMeta) -> Self {
         Self {
-            stream_id:   s.stream_id,
-            name:        s.name,
-            n_columns:   s.n_columns,
-            n_segments:  s.n_segments,
+            stream_id: s.stream_id,
+            name: s.name,
+            n_columns: s.n_columns,
+            n_segments: s.n_segments,
             sample_size: s.sample_size,
             buf_samples: s.buf_samples,
         }
@@ -79,23 +78,23 @@ impl From<LibStreamMeta> for StreamMeta {
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct ColumnMeta {
-    pub stream_id:  u8,
-    pub index:      usize,
-    pub data_type:  String,
-    pub name:       String,
-    pub units:      String,
-    pub description:String,
+    pub stream_id: u8,
+    pub index: usize,
+    pub data_type: String,
+    pub name: String,
+    pub units: String,
+    pub description: String,
 }
 
 impl From<LibColumnMeta> for ColumnMeta {
     fn from(c: LibColumnMeta) -> Self {
         Self {
-            stream_id:  c.stream_id,
-            index:      c.index,
-            data_type:  format!("{:?}", c.data_type),
-            name:       c.name,
-            units:      c.units,
-            description:c.description,
+            stream_id: c.stream_id,
+            index: c.index,
+            data_type: format!("{:?}", c.data_type),
+            name: c.name,
+            units: c.units,
+            description: c.description,
         }
     }
 }
@@ -105,17 +104,17 @@ impl From<LibColumnMeta> for ColumnMeta {
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct UiStream {
-    pub meta:    StreamMeta,
+    pub meta: StreamMeta,
     pub columns: Vec<ColumnMeta>,
 }
 
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct UiDevice {
-    pub url:   String,
+    pub url: String,
     pub route: String,
     pub state: PortState,
-    pub meta:  DeviceMeta,
+    pub meta: DeviceMeta,
     pub streams: Vec<UiStream>,
 }
 
@@ -129,8 +128,16 @@ pub struct PlotData {
 }
 
 impl PlotData {
-    pub fn empty() -> Self            { Self { timestamps: vec![], series_data: vec![] } }
-    pub fn with_series_capacity(n:usize)->Self {
-        Self { timestamps: vec![], series_data: vec![Vec::new(); n] }
+    pub fn empty() -> Self {
+        Self {
+            timestamps: vec![],
+            series_data: vec![],
+        }
+    }
+    pub fn with_series_capacity(n: usize) -> Self {
+        Self {
+            timestamps: vec![],
+            series_data: vec![Vec::new(); n],
+        }
     }
 }

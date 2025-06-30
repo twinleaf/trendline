@@ -1,83 +1,96 @@
 <script lang="ts">
-	import { deviceService } from '$lib/stores/device.store.svelte'; // Our rune-based module
-    import { Button } from '$lib/components/ui/button';
+	import { deviceState } from '$lib/states/deviceState.svelte';
     import * as AlertDialog from '$lib/components/ui/alert-dialog';
-	import { uiStore } from '$lib/stores/ui.store.svelte';
+	import { uiState } from '$lib/states/uiState.svelte';
     import { LoaderCircleIcon } from '@lucide/svelte/icons';
     import DeviceList from '$lib/components/device-select/DeviceList.svelte';
 
 	
-	let isSearching = $state(true);
+	let devices = $derived(deviceState.deviceTree());
+
+	let selectedParent = $state('');
+	let childrenSelections = $state(new Map<string, Set<string>>());
 
 	$effect(() => {
-		deviceService.devices()
-		   
-		isSearching = true;
-		const t = setTimeout(() => (isSearching = false), 2000);
-		return () => clearTimeout(t);
+		if (devices.length > 0 && !selectedParent) {
+        	selectedParent = devices[0].url;
+		}
 	});
 
 
-	let selection = $state({
-        parent: '',
-        children: new Set<string>()
-    });
+	$effect(() => {
+		const parentUrl = selectedParent;
+		if (!parentUrl || childrenSelections.has(parentUrl)) {
+			return;
+		}
+		const parentDevice = devices.find((d) => d.route === parentUrl);
+		if (parentDevice) {
+			const allChildrenRoutes = new Set(parentDevice.childrenSorted.map((c) => c.route));
+			const newChildrenSelections = new Map(childrenSelections);
+			newChildrenSelections.set(parentUrl, allChildrenRoutes);
+        	childrenSelections = newChildrenSelections;
+		}
+	});
 
 	function confirm(event: SubmitEvent) {
 		event.preventDefault();
-		deviceService.selection = {
-			parent: selection.parent,
-			children: Array.from(selection.children)
+		if (!selectedParent) {
+			console.warn('No parent device selected.');
+			return;
+		}
+		const selectedChildren = childrenSelections.get(selectedParent) ?? new Set<string>();
+
+		deviceState.selection = {
+			parent: selectedParent,
+			children: Array.from(selectedChildren)
 		};
+		// await invoke('confirm_selection', { selection: deviceState.selection });
+		console.log('Confirmed Selection:', deviceState.selection);
+		uiState.close();
 	}
 	
 </script>
-<AlertDialog.Root open={uiStore.is('discovery')}>
+<AlertDialog.Root open={uiState.is('discovery')} onOpenChange={(open) => !open && uiState.close()}>
 	<AlertDialog.Portal>
 		<AlertDialog.Overlay />
-			<AlertDialog.Content
-				class="fixed left-1/2 top-1/2 z-50 w-[32rem] max-w-[95vw]
-					-translate-x-1/2 -translate-y-1/2 rounded-lg
-					bg-card p-6 shadow-lg"
-			>
-				<AlertDialog.Header class="flex flex-col items-center space-y-2 text-center">
-					<img src="/Twinleaf-Logo-Black.svg" alt="Twinleaf Logo" class="mb-4 h-12" />
+		<AlertDialog.Content
+			class="fixed left-1/2 top-1/2 z-50 w-[32rem] max-w-[95vw] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-card p-6 shadow-lg"
+		>
+			<AlertDialog.Header class="flex flex-col items-center space-y-2 text-center">
+				<img src="/Twinleaf-Logo-Black.svg" alt="Twinleaf Logo" class="mb-4 h-12" />
+				<AlertDialog.Title class="text-lg font-semibold text-zinc-900">
+					Device Status
+				</AlertDialog.Title>
+				<AlertDialog.Description class="text-sm text-zinc-500">
+					Please select a unique serial device to stream from.
+				</AlertDialog.Description>
+			</AlertDialog.Header>
 
-					<AlertDialog.Title class="text-lg font-semibold text-zinc-900">
-						Device Status
-					</AlertDialog.Title>
+			<div class="min-h-48">
+				{#if devices.length === 0}
+					<div class="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
+						<LoaderCircleIcon class="size-6 animate-spin" />
+						<span>Scanning for devices...</span>
+					</div>
+				{:else}
+					<!-- We give the form an ID so the button in the footer can reference it. -->
+					<form id="device-select-form" onsubmit={confirm}>
+						<DeviceList
+							devices={deviceState.deviceTree()}
+							bind:selectedParent={selectedParent}
+							bind:childrenSelections={childrenSelections}
+						/>
+					</form>
+				{/if}
+			</div>
 
-					<AlertDialog.Description class="text-sm text-zinc-500">
-						Please select a unique serial device to stream from.
-					</AlertDialog.Description>
-				</AlertDialog.Header>
-
-				<div class="min-h-48">
-					{#if isSearching}
-						<div class="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
-							<LoaderCircleIcon class="size-6 animate-spin" />
-							<span>Scanning for devices...</span>
-						</div>
-					{:else if deviceService.devices().length === 0}
-						<div class="flex h-full flex-col items-center justify-center text-muted-foreground">
-							<p>No Twinleaf devices detected.</p>
-							<p>The app will continue scanning for changes.</p>
-						</div>
-					{:else}
-						<form onsubmit={confirm}>
-							<DeviceList
-								devices={deviceService.deviceTree()}
-								bind:selection={selection}
-							/>
-						</form>
-					{/if}
-				</div>
-
-				<AlertDialog.Footer>
-					<Button variant="outline" class="w-full" type="submit">
-						Confirm
-					</Button>
-				</AlertDialog.Footer>
-			</AlertDialog.Content>
+				<AlertDialog.Action
+					type="submit"
+					form="device-select-form"
+					disabled={devices.length === 0}
+				>
+					Confirm
+				</AlertDialog.Action>
+		</AlertDialog.Content>
 	</AlertDialog.Portal>
 </AlertDialog.Root>
