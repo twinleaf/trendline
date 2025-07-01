@@ -4,6 +4,7 @@
 	import { uiState } from '$lib/states/uiState.svelte';
     import { LoaderCircleIcon } from '@lucide/svelte/icons';
     import DeviceList from '$lib/components/device-select/DeviceList.svelte';
+    import { invoke } from '@tauri-apps/api/core';
 
 	
 	let devices = $derived(deviceState.deviceTree());
@@ -25,7 +26,7 @@
 		}
 		const parentDevice = devices.find((d) => d.route === parentUrl);
 		if (parentDevice) {
-			const allChildrenRoutes = new Set(parentDevice.childrenSorted.map((c) => c.route));
+        	const allChildrenRoutes = new Set(parentDevice.children.map((c) => c.route));
 			const newChildrenSelections = new Map(childrenSelections);
 			newChildrenSelections.set(parentUrl, allChildrenRoutes);
         	childrenSelections = newChildrenSelections;
@@ -34,18 +35,21 @@
 
 	function confirm(event: SubmitEvent) {
 		event.preventDefault();
-		if (!selectedParent) {
+		if (!selectedParent) { 
 			console.warn('No parent device selected.');
 			return;
 		}
 		const selectedChildren = childrenSelections.get(selectedParent) ?? new Set<string>();
 
-		deviceState.selection = {
-			parent: selectedParent,
-			children: Array.from(selectedChildren)
+		const payload = {
+			portUrl: selectedParent,
+			childrenRoutes: Array.from(selectedChildren)
 		};
-		// await invoke('confirm_selection', { selection: deviceState.selection });
-		console.log('Confirmed Selection:', deviceState.selection);
+
+		deviceState.selection = payload;
+		
+		invoke('confirm_selection', payload );
+
 		uiState.close();
 	}
 	
@@ -80,6 +84,7 @@
 							bind:selectedParent={selectedParent}
 							bind:childrenSelections={childrenSelections}
 						/>
+						<button type="submit" class="hidden" aria-hidden="true" tabindex="-1"></button>
 					</form>
 				{/if}
 			</div>

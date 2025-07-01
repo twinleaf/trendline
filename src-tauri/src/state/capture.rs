@@ -3,6 +3,7 @@ use serde::Deserialize;
 use ts_rs::TS;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use twinleaf::tio::proto::DeviceRoute;
 use crate::util;
 
@@ -55,6 +56,7 @@ impl Buffer {
 struct Inner {
     buffers: DashMap<DataColumnId, Buffer>,
     active: DashMap<DataColumnId, ()>,
+    offsets: DashMap<DataColumnId, f64>,
     default_cap: usize,
 }
 
@@ -69,51 +71,74 @@ impl CaptureState {
             inner: Arc::new(Inner {
                 buffers: DashMap::new(),
                 active: DashMap::new(),
-                default_cap: 1_200_000, // e.g., 1000 samples/sec * 60 sec * 20 min
+                offsets: DashMap::new(),
+                default_cap: 120_000, // e.g., 1000 samples/sec * 120 seconds
             }),
         }
     }
 
-    pub fn get_all_data_for_keys(&self, keys: &[DataColumnId]) -> PlotData {
-        if keys.is_empty() {
+    pub fn get_data_in_range(&self, keys: &[DataColumnId], min_time: f64, max_time: f64) -> PlotData {
+        if keys.is_empty() || min_time >= max_time {
             return PlotData::empty();
         }
 
-        // Create a PlotData object with the correct number of series.
-        let mut plot_data = PlotData::with_series_capacity(keys.len());
+        let stream_key = DataColumnId { column_index: 0, ..keys[0].clone() };
+        let offset = match self.inner.offsets.get(&stream_key) {
+            Some(off) => *off.value(),
+            None => return PlotData::empty(), // If we don't have an offset, we can't query.
+        };
+        let min_key = (min_time - offset).to_bits();
+        let max_key = (max_time - offset).to_bits();
 
-        // We'll build a unified, sorted list of all timestamps from all series.
-        let mut all_timestamps: BTreeMap<u64, ()> = BTreeMap::new();
-        
-        // Collect references to all the relevant buffers first to minimize lock time.
         let buffers: Vec<_> = keys
             .iter()
-            .filter_map(|key| self.inner.buffers.get(key))
+            .filter_map(|key| self.inner.buffers.get(key).map(|guard| guard.data.clone()))
             .collect();
-        
-        for buffer_ref in &buffers {
-            for ts_bits in buffer_ref.data.keys() {
-                all_timestamps.insert(*ts_bits, ());
-            }
+
+        if buffers.is_empty() {
+            return PlotData::empty();
         }
 
-        // Populate the timestamps array in the final PlotData object.
-        plot_data.timestamps = all_timestamps.keys().map(|&bits| f64::from_bits(bits)).collect();
+        let mut series_iters: Vec<_> = buffers
+            .iter()
+            .map(|buffer| buffer.range(min_key..=max_key).peekable())
+            .collect();
 
+        let num_series = series_iters.len();
+        let mut plot_data = PlotData::with_series_capacity(num_series);
 
-        for (i, buffer_ref) in buffers.iter().enumerate() {
-            let series_y_values = &mut plot_data.series_data[i];
-            series_y_values.reserve(all_timestamps.len());
+        loop {
+            // 2. Find the smallest timestamp among the current heads of all iterators.
+            let next_ts_bits = series_iters
+                .iter_mut()
+                .filter_map(|it| it.peek().map(|(&ts, _y)| ts))
+                .min();
 
-            for ts_bits in all_timestamps.keys() {
-                if let Some(y_value) = buffer_ref.data.get(ts_bits) {
-                    series_y_values.push(*y_value);
-                } else {
-                    series_y_values.push(f64::NAN);
+            if let Some(ts_bits) = next_ts_bits {
+                plot_data.timestamps.push(f64::from_bits(ts_bits));
+
+                // 3. For each series, if its head matches the smallest timestamp,
+                //    consume the point and push the value. Otherwise, push NaN.
+                for (i, iter) in series_iters.iter_mut().enumerate() {
+                    let y_val = if let Some((&ts, &y)) = iter.peek() {
+                        if ts == ts_bits {
+                            iter.next(); // Consume the point
+                            y
+                        } else {
+                            f64::NAN
+                        }
+                    } else {
+                        f64::NAN
+                    };
+                    // This assumes your PlotData is pre-initialized with empty Vecs
+                    plot_data.series_data[i].push(y_val);
                 }
+            } else {
+                // All iterators are exhausted.
+                break;
             }
         }
-        
+
         plot_data
     }
 
@@ -122,13 +147,36 @@ impl CaptureState {
         if !self.inner.active.contains_key(key) {
             return;
         }
+        let stream_key = DataColumnId {
+            column_index: 0, // Use a constant to ignore the column part
+            ..key.clone()
+        };
+        let offset = self.inner.offsets.entry(stream_key).or_insert_with(|| {
+            let now_unix_secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_secs_f64();
+            
+            let calculated_offset = now_unix_secs - p.t;
+            println!(
+                "[Capture] New stream detected (Port: {}, Device: {}, Stream: {}). Calculated time offset: {:.3}s",
+                key.port_url, key.device_route, key.stream_id, calculated_offset
+            );
+            calculated_offset
+        });
+
+        let corrected_point = Point {
+            t: p.t + *offset,
+            y: p.y,
+        };
+
         let mut buffer = self
             .inner
             .buffers
             .entry(key.clone())
             .or_insert_with(|| Buffer::new(self.inner.default_cap));
 
-        buffer.push(p);
+        buffer.push(corrected_point);
     }
 
     pub fn start_capture(&self, key: &DataColumnId) {
@@ -137,5 +185,16 @@ impl CaptureState {
 
     pub fn stop_capture(&self, key: &DataColumnId) {
         self.inner.active.remove(key);
+        self.inner.offsets.remove(key);
+    }
+
+    pub fn set_active_columns_for_port(&self, port_url: &str, keys_for_port: Vec<DataColumnId>) {
+        self.inner.active.retain(|key, _value| key.port_url != port_url);
+
+        for key in keys_for_port {
+            if key.port_url == port_url {
+                self.start_capture(&key);
+            }
+        }
     }
 }

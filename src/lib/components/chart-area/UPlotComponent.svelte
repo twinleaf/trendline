@@ -20,7 +20,6 @@
 	let uplot: uPlot | undefined;
 
 	let animationFrameId: number;
-	let dataIntervalId: number;
 
 	let plotData: uPlot.AlignedData = [[]];
 
@@ -29,17 +28,20 @@
 		uplot = new uPlot(options, plotData, chartContainer);
 
 		async function fetchData() {
-			if (seriesDataKeys.length === 0) {
-				plotData = [[]]; // Clear data if no keys
-				return;
-			}
+			if (seriesDataKeys.length === 0 || !uplot) return;
+			const scale = uplot.scales.x;
+            if (!scale || !scale.min || !scale.max) return;
 			try {
-				const result = await invoke<PlotData>('get_buffered_plot_data', {
-					keys: seriesDataKeys
+				const result = await invoke<PlotData>('get_plot_data', {
+                    keys: seriesDataKeys,
+                    minTime: scale.min,
+                    maxTime: scale.max,
 				});
-				// Combine timestamps and series into the final uPlot format
-				const finalData: uPlot.AlignedData = [result.timestamps, ...result.series_data];
-				plotData = finalData;
+                
+				if (result.timestamps.length > 0) {
+				    const finalData: uPlot.AlignedData = [result.timestamps, ...result.series_data];
+				    uplot.setData(finalData);
+                }
 			} catch (e) {
 				console.error('Failed to fetch plot data:', e);
 			}
@@ -47,32 +49,25 @@
 
 		function update() {
 			if (!uplot) return;
-
-			const now = Date.now();
-			// uPlot expects timestamps in seconds, not milliseconds
-			const scale = {
-				min: (now - windowSizeMs) / 1000,
-				max: now / 1000
-			};
-			
-			// On every animation frame:
-			// 1. Give uPlot the latest data we have (from the last fetchData interval)
-			// 2. Tell it what time window to display
-			uplot.setData(plotData, false);
-			uplot.setScale('x', scale);
-
-			animationFrameId = requestAnimationFrame(update);
+			const now = Date.now() / 1000;
+			uplot.setScale('x', {
+                min: now - windowSizeMs / 1000,
+                max: now
+            });
 		}
 
+		function mainLoop() {
+            update();
+            fetchData();
+            animationFrameId = requestAnimationFrame(mainLoop);
+        }
+
 		// --- Start the loops ---
-		fetchData(); // Initial data fetch
-		dataIntervalId = setInterval(fetchData, 200); // Poll for new data 5x per second
-		animationFrameId = requestAnimationFrame(update); // Start the smooth render loop
+		animationFrameId = requestAnimationFrame(mainLoop);
 
 		// --- Cleanup ---
 		return () => {
 			cancelAnimationFrame(animationFrameId);
-			clearInterval(dataIntervalId);
 			uplot?.destroy();
 		};
 	});

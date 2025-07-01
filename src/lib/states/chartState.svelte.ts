@@ -1,5 +1,7 @@
-import { deviceState, type UiDeviceWithKids } from '$lib/states/deviceState.svelte';
+import { deviceState } from '$lib/states/deviceState.svelte';
 import type { DataColumnId } from '$lib/bindings/DataColumnId';
+import type { UiDevice } from '$lib/bindings/UiDevice';
+
 
 export type ChartLayout = 'carousel' | 'vertical' | 'horizontal';
 
@@ -19,7 +21,7 @@ export interface PlotConfig {
 
 
 export interface DevicePlots {
-	device: UiDeviceWithKids;
+	device: UiDevice;
 	plots: PlotConfig[];
 }
 
@@ -34,18 +36,14 @@ class ChartState {
 
 
 	#calculateRenderPlan(): DevicePlots[] {
-		const selectedDevices = deviceState.selectedDeviceDetails();
+		const selectedDevices = deviceState.selectedDevices;
 		if (selectedDevices.length === 0) {
 			return [];
 		}
 
-
 		const plan: DevicePlots[] = [];
 
-		for (const device of deviceState.deviceTree()) {
-			const isSelected = selectedDevices.some(sel => sel.key.startsWith(device.url + device.route));
-			if (!isSelected) continue;
-
+		for (const device of selectedDevices) {
 			const devicePlots: DevicePlots = {
 				device: device,
 				plots: this.#generatePlotsForDevice(device)
@@ -60,7 +58,7 @@ class ChartState {
 		return plan;
 	}
 
-	#generatePlotsForDevice(device: UiDeviceWithKids): PlotConfig[] {
+	#generatePlotsForDevice(device: UiDevice): PlotConfig[] {
 		switch (this.streamLayout) {
 			case 'grouped':
 				return this.#generateGroupedPlots(device);
@@ -75,7 +73,7 @@ class ChartState {
 		}
 	}
 
-	#generateGroupedPlots(device: UiDeviceWithKids): PlotConfig[] {
+	#generateGroupedPlots(device: UiDevice): PlotConfig[] {
 		const plotsByUnit = new Map<string, PlotSeries[]>();
 
 		for (const stream of device.streams) {
@@ -86,13 +84,14 @@ class ChartState {
 
 					dataKey: {
 						port_url: device.url,
-						device_route: device.route, // Assuming device.route is already a string here
+						device_route: device.route,
 						stream_id: stream.meta.stream_id,
 						column_index: col.index,
 					},
 					uPlotSeries: {
 						label: `${stream.meta.name} - ${col.name}`, 
 						stroke: this.#getColorForSeries(),
+                        pxAlign: 0,
 					}
 				};
 
@@ -126,11 +125,13 @@ class ChartState {
             width: 800, // This will be overridden by the component's width
             height: 400, // This will be overridden by the component's height
             series: uplotSeriesConfig,
+            pxAlign: 0,
             axes: [
                 {}, // Default X-axis
                 {   // Default Y-axis
                     scale: primaryUnit,
                     label: primaryUnit,
+                    values: (u, vals) => vals.map(v => v.toFixed(2)),
                 }
             ],
             scales: {

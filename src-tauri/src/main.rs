@@ -61,9 +61,9 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // trendline_lib::commands::capture::start_capture,
-            // trendline_lib::commands::capture::stop_capture,
-            trendline_lib::commands::capture::get_buffered_plot_data
+            trendline_lib::commands::capture::confirm_selection,
+            trendline_lib::commands::capture::get_plot_data,
+            trendline_lib::commands::capture::get_all_devices
             // trendline_lib::commands::settings::execute_rpc,
         ])
         .run(tauri::generate_context!())

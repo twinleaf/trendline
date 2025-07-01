@@ -46,30 +46,35 @@
 
 	<!-- Right Side: Device Status -->
 	<div class="flex items-center gap-2">
-		{#if deviceState.selectedPortState() === 'Connecting'
-            || deviceState.selectedPortState() === 'Discovery'
-            || deviceState.selectedPortState() === 'Reconnecting'}
+		{#if deviceState.selectedPortState === 'Connecting'
+            || deviceState.selectedPortState === 'Discovery'
+            || deviceState.selectedPortState === 'Reconnecting'}
             <Badge variant="default" class="gap-1.5 bg-yellow-500 text-yellow-950 hover:bg-yellow-500/80">
                 <LoaderCircle class="size-3.5 animate-spin" />
                 Acquiring…
             </Badge>
 
-        {:else if deviceState.selectedPortState() === 'Disconnected'}
+        {:else if deviceState.selectedPortState === 'Disconnected'}
             <Badge variant="destructive" class="gap-1.5">
                 <CircleX class="size-3.5" />
                 Disconnected
             </Badge>
 
-        {:else if deviceState.selectedPortState() === 'Streaming'}
+        {:else if deviceState.selectedPortState === 'Streaming'}
             <Badge variant="default" class="gap-1.5 bg-green-500 text-green-950 hover:bg-green-500/80">
                 <LoaderCircle class="size-3.5 animate-spin" />
                 Streaming
             </Badge>
 
-        {:else if deviceState.selectedPortState() === 'Idle'}
+        {:else if deviceState.selectedPortState === 'Idle'}
             <Badge variant="default" class="gap-1.5 bg-yellow-500 text-yellow-950 hover:bg-yellow-500/80">
                 <CircleCheck class="size-3.5" />
                 Idle
+            </Badge>
+		{:else}
+			<Badge variant="destructive" class="gap-1.5">
+                <CircleX class="size-3.5" />
+                Error
             </Badge>
         {/if}
 	</div>

@@ -5,27 +5,46 @@
 	import { Label } from '$lib/components/ui/label';
 	import { ChevronsUpDown }   from '@lucide/svelte';
 	import DeviceInfoHoverCard  from '$lib/components/device-select/DeviceInfoHoverCard.svelte';
-	import type { UiDeviceWithKids } from '$lib/states/deviceState.svelte';
+	import type { UiDevice } from '$lib/bindings/UiDevice';
 
+	type DeviceWithChildren = UiDevice & { children: UiDevice[] };
 
 	let {
 		devices,
 		selectedParent = $bindable(),
 		childrenSelections = $bindable()
 	} = $props<{
-		devices: UiDeviceWithKids[];
+		devices: DeviceWithChildren[];
 		selectedParent: string;
 		childrenSelections: Map<string, Set<string>>;
 	}>();
 
-	function toggleChild(childRoute: string, isChecked: boolean, parentRoute: string) {
-		const children = childrenSelections.get(parentRoute);
-		if (!children) return;
+	$effect(() => {
+		const parentUrl = selectedParent;
+		if (!parentUrl) return;
 
-		if (isChecked) {
-			children.add(childRoute);
-		} else {
-			children.delete(childRoute);
+
+		if (!childrenSelections.has(parentUrl)) {
+			const parentDevice = devices.find((d: { url: any; }) => d.url === parentUrl);
+			if (parentDevice) {
+				const allChildrenRoutes = new Set(parentDevice.children.map((c: { route: any; }) => c.route));
+
+				const newSelections = new Map(childrenSelections);
+				newSelections.set(parentUrl, allChildrenRoutes);
+				childrenSelections = newSelections;
+			}
+		}
+	});
+
+	function toggleChild(childRoute: string, isChecked: boolean, parentUrl: string) {
+		const existingChildren = childrenSelections.get(parentUrl);
+
+		if (existingChildren) {
+			if (isChecked) {
+				existingChildren.add(childRoute);
+			} else {
+				existingChildren.delete(childRoute);
+			}
 		}
 	}
 
@@ -43,7 +62,7 @@
 		// Handle Up/Down arrow keys for parent navigation
 		if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
 			event.preventDefault();
-			const currentIndex = devices.findIndex((d: { route: any; }) => d.route === selectedParent);
+			const currentIndex = devices.findIndex((d: { url: any; }) => d.url === selectedParent);
 			const maxIndex = devices.length - 1;
 			let nextIndex = -1;
 
@@ -72,13 +91,13 @@
 			<div class="flex items-center justify-between px-2 py-1.5">
 				<div class="flex items-center space-x-2">
 					<!-- The RadioGroup.Item is now just a visual indicator -->
-					<RadioGroup.Item id={root.url} value={root.route} tabindex={-1} />
+					<RadioGroup.Item id={root.url} value={root.url} tabindex={-1} />
 					<Label for={root.url} class="font-medium cursor-pointer">
 						{root.meta.name}
 					</Label>
 					<DeviceInfoHoverCard device={root} />
 				</div>
-				{#if root.childrenSorted.length}
+				{#if root.children.length}
 					<Collapsible.Trigger
 						class="w-8 h-8 flex items-center justify-center rounded-md"
 						aria-label="Toggle children"
@@ -89,14 +108,14 @@
 			</div>
 
 			<Collapsible.Content class="pl-6 space-y-1">
-				{#each root.childrenSorted as child (child.route)}
+				{#each root.children as child (child.url + child.route)}
 					<div class="flex items-center space-x-2 py-0.5">
 						<Checkbox
-							id={child.route}
-							checked={childrenSelections.get(root.route)?.has(child.route) ?? false}
-							onCheckedChange={(v) => toggleChild(child.route, !!v, root.route)}
+							id={child.url + child.route}
+							checked={childrenSelections.get(root.url)?.has(child.route) ?? false}
+							onCheckedChange={(v) => toggleChild(child.route, !!v, root.url)}
 						/>
-						<Label for={child.route} class="cursor-pointer text-sm">
+						<Label for={child.url + child.route} class="cursor-pointer text-sm">
 							{child.route.slice(1)}: {child.meta.name}
 						</Label>
 						<DeviceInfoHoverCard device={child} />

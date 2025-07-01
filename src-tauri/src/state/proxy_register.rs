@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
 pub struct ProxyRegister {
-    ports: DashMap<String, Arc<PortManager>>,
+    pub ports: DashMap<String, Arc<PortManager>>,
     capture: CaptureState,
     app: AppHandle,
 }

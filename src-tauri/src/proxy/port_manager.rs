@@ -37,7 +37,7 @@ pub struct PortManager {
     url: String,
     state: Mutex<PortState>,
     proxy: Mutex<Option<Arc<proxy::Interface>>>,
-    devices: Mutex<HashMap<DeviceRoute, Device>>,
+    pub devices: Mutex<HashMap<DeviceRoute, (Device, UiDevice)>>,
     command_tx: crossbeam::channel::Sender<PortCommand>,
     app: tauri::AppHandle,
     capture: CaptureState,
@@ -143,7 +143,7 @@ impl PortManager {
                                 },
                                 PortCommand::Rpc { route, name, args } => {
                                     println!("[{}] Received RPC for route '{}': {}", self_.url, route, name);
-                                    if let Some(device) = devices.get_mut(&route) {
+                                    if let Some((device, _ui_device)) = devices.get_mut(&route) {
                                         // The raw_rpc method is blocking, which is expected here.
                                         match device.raw_rpc(&name, &args) {
                                             Ok(reply) => {
@@ -162,7 +162,7 @@ impl PortManager {
                         }
 
                         // Poll each device for new samples
-                        for (route, device) in devices.iter_mut() {
+                        for (route, (device, _ui_device)) in devices.iter_mut() {
                             while let Some(sample) = device.try_next() {
                                 self_.process_incoming_sample(&sample, route);
                             }
@@ -240,8 +240,8 @@ impl PortManager {
                 streams: ui_streams,
             };
 
-            discovered_ui_devices.push(ui_dev);
-            devices.insert(route, device);
+            discovered_ui_devices.push(ui_dev.clone());
+            devices.insert(route, (device, ui_dev));
         }
 
         if !discovered_ui_devices.is_empty() {
