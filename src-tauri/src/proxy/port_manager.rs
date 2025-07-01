@@ -1,5 +1,5 @@
 use crate::state::capture::{CaptureState, DataColumnId, Point};
-use crate::shared::{UiDevice, UiStream, DeviceMeta, StreamMeta, ColumnMeta, PortState};
+use crate::shared::{ColumnMeta, DeviceMeta, PortState, UiDevice, UiStream};
 use crate::util;
 use std::{
     collections::{HashMap, HashSet},
@@ -219,6 +219,7 @@ impl PortManager {
             
             let ui_streams: Vec<UiStream> = sorted_streams_meta.into_iter().map(|device_stream_meta| {
                     let lib_stream_meta = &*device_stream_meta.stream;
+                    let lib_segment_meta = &*device_stream_meta.segment;
                     
                     let mut ui_columns: Vec<ColumnMeta> = device_stream_meta.columns.iter().map(|lib_column_arc| {
                         ColumnMeta::from((**lib_column_arc).clone())
@@ -227,7 +228,8 @@ impl PortManager {
                     ui_columns.sort_by_key(|c| c.index);
 
                     UiStream {
-                        meta: StreamMeta::from(lib_stream_meta.clone()),
+                        meta: (*lib_stream_meta).clone().into(),
+                        segment: Some((*lib_segment_meta).clone().into()), 
                         columns: ui_columns,
                     }
             }).collect();

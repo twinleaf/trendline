@@ -1,5 +1,3 @@
-// src/lib/stores/ui.store.ts  (note: *not* .svelte.ts)
-
 export type DialogType = 'none' | 'discovery' | 'rpc_settings' | 'export';
 
 class UiState {

@@ -62,7 +62,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             trendline_lib::commands::capture::confirm_selection,
-            trendline_lib::commands::capture::get_plot_data,
+            trendline_lib::commands::capture::get_plot_data_in_range,
+            trendline_lib::commands::capture::get_latest_plot_data,
             trendline_lib::commands::capture::get_all_devices
             // trendline_lib::commands::settings::execute_rpc,
         ])

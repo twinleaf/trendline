@@ -54,7 +54,7 @@
 	}
 	
 </script>
-<AlertDialog.Root open={uiState.is('discovery')} onOpenChange={(open) => !open && uiState.close()}>
+<AlertDialog.Root open={uiState.is('discovery')}>
 	<AlertDialog.Portal>
 		<AlertDialog.Overlay />
 		<AlertDialog.Content

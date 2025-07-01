@@ -1,10 +1,10 @@
 import { deviceState } from '$lib/states/deviceState.svelte';
 import type { DataColumnId } from '$lib/bindings/DataColumnId';
 import type { UiDevice } from '$lib/bindings/UiDevice';
+import { SvelteMap } from 'svelte/reactivity';
 
 
 export type ChartLayout = 'carousel' | 'vertical' | 'horizontal';
-
 export type StreamLayout = 'grouped' | 'vertical' | 'horizontal';
 
 export interface PlotSeries {
@@ -12,11 +12,17 @@ export interface PlotSeries {
 	uPlotSeries: uPlot.Series;
 }
 
-export interface PlotConfig {
-	title: string;
-	series: PlotSeries[];
+export class PlotConfig {
+    title = $state('New Plot');
+    series = $state<PlotSeries[]>([]);
+    uPlotOptions: uPlot.Options;
+    
+    hasData = $state(false);
 
-	uPlotOptions: uPlot.Options;
+    constructor(title: string, series: PlotSeries[]) {
+        this.title = title;
+        this.series = series;
+    }
 }
 
 
@@ -30,50 +36,89 @@ class ChartState {
 	// --- User-configurable settings ---
 	chartLayout = $state<ChartLayout>('vertical');
 	streamLayout = $state<StreamLayout>('grouped');
+    #plotConfigs = new SvelteMap<string, PlotConfig>();
 
-	// This is the primary output of our state. The UI will just `{#each}` over this.
-	renderPlan = $derived(this.#calculateRenderPlan());
+	renderPlan = $derived.by(() => this.#assembleRenderPlan());
 
-
-	#calculateRenderPlan(): DevicePlots[] {
-		const selectedDevices = deviceState.selectedDevices;
-		if (selectedDevices.length === 0) {
-			return [];
-		}
-
-		const plan: DevicePlots[] = [];
-
-		for (const device of selectedDevices) {
-			const devicePlots: DevicePlots = {
-				device: device,
-				plots: this.#generatePlotsForDevice(device)
-			};
-			plan.push(devicePlots);
-		}
-        
-        plan.sort((a, b) => {
-            return a.device.route.localeCompare(b.device.route, undefined, { numeric: true });
+    constructor() {
+        $effect(() => {
+            this.#updatePlotConfigs();
         });
+    }
 
-		return plan;
-	}
+     #updatePlotConfigs(): void {
+        const selectedDevices = deviceState.selectedDevices;
+        if (selectedDevices.length === 0) {
+            this.#plotConfigs.clear();
+            return;
+        }
 
-	#generatePlotsForDevice(device: UiDevice): PlotConfig[] {
-		switch (this.streamLayout) {
-			case 'grouped':
-				return this.#generateGroupedPlots(device);
-			case 'vertical':
-				// TODO: Implement vertical stream layout
-				return [];
-			case 'horizontal':
-				// TODO: Implement horizontal stream layout
-				return [];
-			default:
-				return [];
-		}
-	}
+        const requiredKeys = new Set<string>();
 
-	#generateGroupedPlots(device: UiDevice): PlotConfig[] {
+        for (const device of selectedDevices) {
+            const plots = this.#generatePlotsForDevice(device, (plotConfig, unit) => {
+                const key = `${device.route}:${unit}`;
+                requiredKeys.add(key);
+
+                if (!this.#plotConfigs.has(key)) {
+                    this.#plotConfigs.set(key, plotConfig);
+                }
+            });
+        }
+        
+        for (const key of this.#plotConfigs.keys()) {
+            if (!requiredKeys.has(key)) {
+                this.#plotConfigs.delete(key);
+            }
+        }
+    }
+
+
+	#assembleRenderPlan(): DevicePlots[] {
+        const selectedDevices = deviceState.selectedDevices;
+        if (selectedDevices.length === 0) {
+            return [];
+        }
+        const planByDevice = new Map<UiDevice, PlotConfig[]>();
+
+        for (const [key, plotConfig] of this.#plotConfigs.entries()) {
+            const deviceRoute = key.split(':')[0];
+            const device = deviceState.selectedDevices.find(d => d.route === deviceRoute);
+            
+            if (device) {
+                const plots = planByDevice.get(device) ?? [];
+                plots.push(plotConfig);
+                planByDevice.set(device, plots);
+            }
+        }
+        
+        const finalPlan: DevicePlots[] = Array.from(planByDevice.entries()).map(([device, plots]) => ({
+            device,
+            plots
+        }));
+
+        finalPlan.sort((a, b) => a.device.route.localeCompare(b.device.route, undefined, { numeric: true }));
+
+        return finalPlan;
+    }
+
+    #generatePlotsForDevice(device: UiDevice, onPlotCreated: (plot: PlotConfig, unit: string) => void): void {
+        switch (this.streamLayout) {
+            case 'grouped':
+                this.#generateGroupedPlots(device, onPlotCreated);
+                return; 
+            case 'vertical':
+                // TODO: Implement vertical stream layout
+                return; 
+            case 'horizontal':
+                // TODO: Implement horizontal stream layout
+                return; 
+            default:
+                return;
+        }
+    }
+
+    #generateGroupedPlots(device: UiDevice, onPlotCreated: (plot: PlotConfig, unit: string) => void): void {
 		const plotsByUnit = new Map<string, PlotSeries[]>();
 
 		for (const stream of device.streams) {
@@ -89,8 +134,9 @@ class ChartState {
 						column_index: col.index,
 					},
 					uPlotSeries: {
-						label: `${stream.meta.name} - ${col.name}`, 
+						label: `${col.name}`, 
 						stroke: this.#getColorForSeries(),
+                        scale: `${col.units}`,
                         pxAlign: 0,
 					}
 				};
@@ -101,20 +147,20 @@ class ChartState {
 			}
 		}
 
-		const finalPlots: PlotConfig[] = [];
 		for (const [unit, series] of plotsByUnit.entries()) {
-			const plotConfig: PlotConfig = {
-				title: `Measurements in ${unit}`,
-				series: series,
-				uPlotOptions: this.#createUplotOptions(series, unit)
-			};
-			finalPlots.push(plotConfig);
+            const plotTitle = `${unit}`;
+
+			const plotConfig = new PlotConfig(
+                plotTitle,
+                series,
+                this.#createUplotOptions(plotTitle, series, unit)
+            );
+			onPlotCreated(plotConfig, unit);
 		}
 
-		return finalPlots;
 	}
     
-    #createUplotOptions(series: PlotSeries[], primaryUnit: string): uPlot.Options {
+    #createUplotOptions(title: string, series: PlotSeries[], primaryUnit: string): uPlot.Options {
 
         const uplotSeriesConfig: uPlot.Series[] = [
             {},
@@ -126,24 +172,54 @@ class ChartState {
             height: 400, // This will be overridden by the component's height
             series: uplotSeriesConfig,
             pxAlign: 0,
+            legend: {
+                show: true,
+            },
             axes: [
                 {}, // Default X-axis
                 {   // Default Y-axis
                     scale: primaryUnit,
                     label: primaryUnit,
-                    values: (u, vals) => vals.map(v => v.toFixed(2)),
+                    labelGap: 20,
+                    labelSize: 40,
+                    values: (u, vals) => {
+                        const scale = u.scales[primaryUnit];
+
+                        if (!scale || scale.min == null || scale.max == null) {
+                            return vals.map(v => v.toFixed(2) + " ");
+                        }
+
+                        const range = scale.max - scale.min;
+
+                        let decimals;
+                        if (range <= 0) {
+                            decimals = 2; // Default for flat data
+                        } else if (range < 1) {
+                            decimals = 3; // High precision for small ranges (e.g., 1.503)
+                        } else if (range < 100) {
+                            decimals = 2; // Standard precision
+                        } else {
+                            decimals = 0; // No decimals for large ranges (e.g., 26800)
+                        }
+
+                        return vals.map(v => v.toFixed(decimals) + " ");
+                    },
                 }
             ],
-            scales: {
-                [primaryUnit]: {
-                    auto: true, // Automatically scale the Y-axis
+            cursor: {
+            drag: {
+                setScale: false,
+                x: false,
+                y: false,
                 }
             },
-            cursor: {
-                drag: {
-                    x: true,
-                    y: true,
-                }
+            select: {
+                show: false
+                ,
+                left: 0,
+                top: 0,
+                width: 0,
+                height: 0
             }
         };
     }

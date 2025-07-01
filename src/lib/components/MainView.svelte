@@ -12,7 +12,7 @@
 	</Resizable.Pane>
 	<Resizable.Handle withHandle />
 	<Resizable.Pane defaultSize={75}>
-		<div class="flex h-full items-center justify-center p-2">
+		<div class="flex h-full items-start p-2 overflow-y-scroll">
             <ChartView/>
 		</div>
 	</Resizable.Pane>

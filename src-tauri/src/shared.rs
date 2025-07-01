@@ -23,7 +23,8 @@ pub enum PortState {
 
 use twinleaf::tio::proto::meta::{
     ColumnMetadata as LibColumnMeta, DeviceMetadata as LibDeviceMeta,
-    StreamMetadata as LibStreamMeta,
+    StreamMetadata as LibStreamMeta, SegmentMetadata as LibSegmentMeta,
+    MetadataEpoch as LibMetadataEpoch, MetadataFilter as LibMetadataFilter
 };
 
 // Device -----------------------------------------------------------------
@@ -99,12 +100,86 @@ impl From<LibColumnMeta> for ColumnMeta {
     }
 }
 
+// Segment ----------------------------------------------------------------
+#[derive(Serialize, Clone, Debug, TS, PartialEq)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct SegmentMeta {
+    pub stream_id: u8,
+    pub segment_id: u8,
+    pub flags: u8,
+    pub time_ref_epoch: MetadataEpoch,
+    pub time_ref_serial: String,
+    pub time_ref_session_id: u32,
+    pub start_time: u32,
+    pub sampling_rate: u32,
+    pub decimation: u32,
+    pub filter_cutoff: f32,
+    pub filter_type: MetadataFilter,
+}
+
+impl From<LibSegmentMeta> for SegmentMeta {
+    fn from(s: LibSegmentMeta) -> Self {
+        Self {
+            stream_id: s.stream_id,
+            segment_id: s.segment_id,
+            flags: s.flags,
+            time_ref_epoch: s.time_ref_epoch.into(),
+            time_ref_serial: s.time_ref_serial,
+            time_ref_session_id: s.time_ref_session_id,
+            start_time: s.start_time,
+            sampling_rate: s.sampling_rate,
+            decimation: s.decimation,
+            filter_cutoff: s.filter_cutoff,
+            filter_type: s.filter_type.into(),
+        }
+    }
+}
+
+// --- Enums ---
+#[derive(Serialize, Clone, Debug, TS, PartialEq)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum MetadataEpoch {
+    Invalid, Zero, Systime, Unix, Unknown(u8),
+}
+
+impl From<LibMetadataEpoch> for MetadataEpoch {
+    fn from(e: LibMetadataEpoch) -> Self {
+        match e {
+            LibMetadataEpoch::Invalid => Self::Invalid,
+            LibMetadataEpoch::Zero => Self::Zero,
+            LibMetadataEpoch::Systime => Self::Systime,
+            LibMetadataEpoch::Unix => Self::Unix,
+            LibMetadataEpoch::Unknown(v) => Self::Unknown(v),
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Debug, TS, PartialEq)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum MetadataFilter {
+    Unfiltered, FirstOrderCascade1, FirstOrderCascade2, Unknown(u8),
+}
+
+impl From<LibMetadataFilter> for MetadataFilter {
+    fn from(f: LibMetadataFilter) -> Self {
+        match f {
+            LibMetadataFilter::Unfiltered => Self::Unfiltered,
+            LibMetadataFilter::FirstOrderCascade1 => Self::FirstOrderCascade1,
+            LibMetadataFilter::FirstOrderCascade2 => Self::FirstOrderCascade2,
+            LibMetadataFilter::Unknown(v) => Self::Unknown(v),
+        }
+    }
+}
+
+
+
 // ───────────────────── 3.  UI view-model structs ────────────────────────
 
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct UiStream {
     pub meta: StreamMeta,
+    pub segment: Option<SegmentMeta>,
     pub columns: Vec<ColumnMeta>,
 }
 

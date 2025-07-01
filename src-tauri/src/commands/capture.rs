@@ -8,12 +8,31 @@ use crate::state::proxy_register::ProxyRegister;
 
 
 #[tauri::command]
-pub fn get_plot_data(
+pub fn get_plot_data_in_range(
     keys: Vec<DataColumnId>,
     min_time: f64,
     max_time: f64,
     capture: State<CaptureState>,
 ) -> PlotData {
+    capture.get_data_in_range(&keys, min_time, max_time)
+}
+
+#[tauri::command]
+pub fn get_latest_plot_data(
+    keys: Vec<DataColumnId>,
+    window_seconds: f64,
+    capture: State<CaptureState>,
+) -> PlotData {
+
+    let latest_time = capture.get_latest_timestamp_for_keys(&keys);
+
+    if latest_time.is_none() {
+        return PlotData::empty();
+    }
+
+    let max_time = latest_time.unwrap();
+    let min_time = max_time - window_seconds;
+
     capture.get_data_in_range(&keys, min_time, max_time)
 }
 

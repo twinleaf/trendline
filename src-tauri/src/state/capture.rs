@@ -3,7 +3,6 @@ use serde::Deserialize;
 use ts_rs::TS;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use twinleaf::tio::proto::DeviceRoute;
 use crate::util;
 
@@ -85,7 +84,7 @@ impl CaptureState {
         let stream_key = DataColumnId { column_index: 0, ..keys[0].clone() };
         let offset = match self.inner.offsets.get(&stream_key) {
             Some(off) => *off.value(),
-            None => return PlotData::empty(), // If we don't have an offset, we can't query.
+            None => return PlotData::empty(),
         };
         let min_key = (min_time - offset).to_bits();
         let max_key = (max_time - offset).to_bits();
@@ -115,7 +114,8 @@ impl CaptureState {
                 .min();
 
             if let Some(ts_bits) = next_ts_bits {
-                plot_data.timestamps.push(f64::from_bits(ts_bits));
+                let relative_timestamp = f64::from_bits(ts_bits) + offset;
+                plot_data.timestamps.push(relative_timestamp);
 
                 // 3. For each series, if its head matches the smallest timestamp,
                 //    consume the point and push the value. Otherwise, push NaN.
@@ -142,41 +142,53 @@ impl CaptureState {
         plot_data
     }
 
+    pub fn get_latest_timestamp_for_keys(&self, keys: &[DataColumnId]) -> Option<f64> {
+        let mut max_ts_bits = 0u64;
+        let mut found_any = false;
+
+        for key in keys {
+            if let Some(buffer) = self.inner.buffers.get(key) {
+                if let Some((&ts_bits, _)) = buffer.data.iter().next_back() {
+                    if ts_bits > max_ts_bits {
+                        max_ts_bits = ts_bits;
+                        found_any = true;
+                    }
+                }
+            }
+        }
+
+        if !found_any {
+            return None;
+        }
+
+        let stream_key = DataColumnId { column_index: 0, ..keys[0].clone() };
+        let offset = self.inner.offsets.get(&stream_key).map_or(0.0, |o| *o.value());
+
+        Some(f64::from_bits(max_ts_bits) + offset)
+    }
+
     /// Inserts a data point for a given column, but only if that column is active.
     pub fn insert(&self, key: &DataColumnId, p: Point) {
         if !self.inner.active.contains_key(key) {
             return;
         }
-        let stream_key = DataColumnId {
-            column_index: 0, // Use a constant to ignore the column part
-            ..key.clone()
-        };
-        let offset = self.inner.offsets.entry(stream_key).or_insert_with(|| {
-            let now_unix_secs = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Time went backwards")
-                .as_secs_f64();
-            
-            let calculated_offset = now_unix_secs - p.t;
+        let stream_key = DataColumnId { column_index: 0, ..key.clone() };
+        self.inner.offsets.entry(stream_key).or_insert_with(|| {
             println!(
-                "[Capture] New stream detected (Port: {}, Device: {}, Stream: {}). Calculated time offset: {:.3}s",
-                key.port_url, key.device_route, key.stream_id, calculated_offset
+                "[Capture] New stream activated (Port: {}, Device: {}, Stream: {}). Setting t=0 baseline from first timestamp {}.",
+                key.port_url, key.device_route, key.stream_id, p.t
             );
-            calculated_offset
+            -p.t // The offset is the negative of the first point's timestamp.
         });
 
-        let corrected_point = Point {
-            t: p.t + *offset,
-            y: p.y,
-        };
-
+        // Store the point with its ORIGINAL, UNMODIFIED timestamp.
         let mut buffer = self
             .inner
             .buffers
             .entry(key.clone())
             .or_insert_with(|| Buffer::new(self.inner.default_cap));
-
-        buffer.push(corrected_point);
+        
+        buffer.push(p);
     }
 
     pub fn start_capture(&self, key: &DataColumnId) {
