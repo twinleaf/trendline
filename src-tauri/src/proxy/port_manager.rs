@@ -326,7 +326,7 @@ impl PortManager {
             };
 
             if let Some(value) = column.value.try_as_f64() {
-                let point = Point { t: timestamp, y: value };
+                let point = Point { x: timestamp, y: value };
                 self.capture.insert(&key, point);
             }
         }

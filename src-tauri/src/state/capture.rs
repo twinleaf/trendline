@@ -4,9 +4,10 @@ use ts_rs::TS;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use twinleaf::tio::proto::DeviceRoute;
+use crate::state::decimation::{fpcs};
 use crate::util;
 
-use crate::shared::PlotData; // Assuming you have this use statement
+use crate::shared::PlotData;
 
 // The unique identifier for a single column of data from a specific device.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, TS)]
@@ -20,10 +21,16 @@ pub struct DataColumnId {
     pub column_index: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Point {
-    pub t: f64,
+    pub x: f64,
     pub y: f64,
+}
+
+impl Point {
+    pub fn new(x: f64, y: f64) -> Self {
+        Point { x, y }
+    }
 }
 
 // A circular buffer for a single time series.
@@ -41,7 +48,7 @@ impl Buffer {
     }
 
     fn push(&mut self, p: Point) {
-        self.data.insert(p.t.to_bits(), p.y);
+        self.data.insert(p.x.to_bits(), p.y);
 
         if self.data.len() > self.cap {
             if let Some(oldest_key) = self.data.keys().next().copied() {
@@ -76,7 +83,13 @@ impl CaptureState {
         }
     }
 
-    pub fn get_data_in_range(&self, keys: &[DataColumnId], min_time: f64, max_time: f64) -> PlotData {
+    pub fn get_data_in_range(
+        &self,
+        keys: &[DataColumnId],
+        min_time: f64,
+        max_time: f64,
+        num_points: Option<usize>,
+    ) -> PlotData {
         if keys.is_empty() || min_time >= max_time {
             return PlotData::empty();
         }
@@ -89,40 +102,63 @@ impl CaptureState {
         let min_key = (min_time - offset).to_bits();
         let max_key = (max_time - offset).to_bits();
 
-        let buffers: Vec<_> = keys
+        // 1. Extract raw data for each series within the time range.
+        let mut raw_series: Vec<Vec<Point>> = keys
             .iter()
-            .filter_map(|key| self.inner.buffers.get(key).map(|guard| guard.data.clone()))
+            .map(|key| {
+                self.inner.buffers.get(key)
+                    .map(|buffer| {
+                        buffer.data
+                            .range(min_key..=max_key)
+                            .map(|(&t_bits, &y)| Point::new(f64::from_bits(t_bits), y))
+                            .collect()
+                    })
+                    .unwrap_or_else(Vec::new)
+            })
             .collect();
-
-        if buffers.is_empty() {
-            return PlotData::empty();
+            
+        if let Some(n_points) = num_points {
+            for series in &mut raw_series {
+                if series.iter().any(|p| p.y == 0.0) {
+                    println!("FOUND A ZERO in raw data before downsampling.");
+                }
+                if !series.is_empty() && n_points > 0 && series.len() > n_points {
+                    let ratio = series.len() / n_points;
+                    *series = fpcs(series, ratio);
+                }
+            }
         }
 
-        let mut series_iters: Vec<_> = buffers
+        // 3. Perform a k-way merge on the (potentially downsampled) series.
+        let mut series_iters: Vec<_> = raw_series
             .iter()
-            .map(|buffer| buffer.range(min_key..=max_key).peekable())
+            .map(|series| series.iter().peekable())
             .collect();
+
+        if series_iters.is_empty() {
+            return PlotData::empty();
+        }
 
         let num_series = series_iters.len();
         let mut plot_data = PlotData::with_series_capacity(num_series);
 
         loop {
-            // 2. Find the smallest timestamp among the current heads of all iterators.
-            let next_ts_bits = series_iters
+            // Find the smallest timestamp among the current heads of all iterators.
+            let next_ts = series_iters
                 .iter_mut()
-                .filter_map(|it| it.peek().map(|(&ts, _y)| ts))
-                .min();
+                .filter_map(|it| it.peek().map(|p| p.x))
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-            if let Some(ts_bits) = next_ts_bits {
-                let relative_timestamp = f64::from_bits(ts_bits) + offset;
+            if let Some(ts) = next_ts {
+                let relative_timestamp = ts + offset;
                 plot_data.timestamps.push(relative_timestamp);
 
-                // 3. For each series, if its head matches the smallest timestamp,
-                //    consume the point and push the value. Otherwise, push NaN.
+                // For each series, if its head matches the smallest timestamp,
                 for (i, iter) in series_iters.iter_mut().enumerate() {
-                    let y_val = if let Some((&ts, &y)) = iter.peek() {
-                        if ts == ts_bits {
-                            iter.next(); // Consume the point
+                    let y_val = if let Some(p) = iter.peek() {
+                        if p.x == ts {
+                            let y = p.y;
+                            iter.next();
                             y
                         } else {
                             f64::NAN
@@ -130,11 +166,9 @@ impl CaptureState {
                     } else {
                         f64::NAN
                     };
-                    // This assumes your PlotData is pre-initialized with empty Vecs
                     plot_data.series_data[i].push(y_val);
                 }
             } else {
-                // All iterators are exhausted.
                 break;
             }
         }
@@ -176,9 +210,9 @@ impl CaptureState {
         self.inner.offsets.entry(stream_key).or_insert_with(|| {
             println!(
                 "[Capture] New stream activated (Port: {}, Device: {}, Stream: {}). Setting t=0 baseline from first timestamp {}.",
-                key.port_url, key.device_route, key.stream_id, p.t
+                key.port_url, key.device_route, key.stream_id, p.x
             );
-            -p.t // The offset is the negative of the first point's timestamp.
+            -p.x // The offset is the negative of the first point's timestamp.
         });
 
         // Store the point with its ORIGINAL, UNMODIFIED timestamp.
@@ -208,5 +242,72 @@ impl CaptureState {
                 self.start_capture(&key);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::PlotData;
+
+    fn test_merge(series_data: Vec<Vec<Point>>) -> PlotData {
+        let mut series_iters: Vec<_> = series_data
+            .iter()
+            .map(|series| series.iter().peekable())
+            .collect();
+        
+        let mut plot_data = PlotData::with_series_capacity(series_data.len());
+
+        loop {
+            let next_ts = series_iters
+                .iter_mut()
+                .filter_map(|it| it.peek().map(|p| p.x))
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+            if let Some(ts) = next_ts {
+                plot_data.timestamps.push(ts);
+                for i in 0..series_iters.len() {
+                    let y_val = if let Some(p) = series_iters[i].peek() {
+                        if p.x == ts {
+                            let y = p.y;
+                            series_iters[i].next();
+                            y
+                        } else {
+                            f64::NAN
+                        }
+                    } else {
+                        f64::NAN
+                    };
+                    plot_data.series_data[i].push(y_val);
+                }
+            } else {
+                break;
+            }
+        }
+        plot_data
+    }
+
+    #[test]
+    fn test_k_way_merge_inserts_nan() {
+        // Two series, downsampled independently. They have different timestamps.
+        let series1 = vec![Point { x: 1.0, y: 10.0 }, Point { x: 3.0, y: 12.0 }];
+        let series2 = vec![Point { x: 2.0, y: 100.0 }, Point { x: 4.0, y: 120.0 }];
+
+        let result = test_merge(vec![series1, series2]);
+
+        // Expected unified timestamps: [1.0, 2.0, 3.0, 4.0]
+        assert_eq!(result.timestamps, vec![1.0, 2.0, 3.0, 4.0]);
+
+        // Expected data for series 1: [10.0, NaN, 12.0, NaN]
+        assert_eq!(result.series_data[0][0], 10.0);
+        assert!(result.series_data[0][1].is_nan());
+        assert_eq!(result.series_data[0][2], 12.0);
+        assert!(result.series_data[0][3].is_nan());
+
+        // Expected data for series 2: [NaN, 100.0, NaN, 120.0]
+        assert!(result.series_data[1][0].is_nan());
+        assert_eq!(result.series_data[1][1], 100.0);
+        assert!(result.series_data[1][2].is_nan());
+        assert_eq!(result.series_data[1][3], 120.0);
     }
 }

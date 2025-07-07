@@ -6,3 +6,5 @@ This hosts what is essentially the AppState that allows any component to access 
 ## I/O States
 
 ## UI States
+
+## Chart States

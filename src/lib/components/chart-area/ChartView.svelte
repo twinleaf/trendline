@@ -1,57 +1,139 @@
 <script lang="ts">
-	import { chartState } from '$lib/states/chartState.svelte';
-	import UPlotComponent from '$lib/components/chart-area/UPlotComponent.svelte';
-	import * as Resizable from '$lib/components/ui/resizable';
+    import { chartState } from '$lib/states/chartState.svelte';
+    import { deviceState } from '$lib/states/deviceState.svelte';
+    import DataTable from '$lib/components/chart-area/data-table/DataTable.svelte';
+    import { columns, type TreeRow } from '$lib/components/chart-area/data-table/column';
+    import UPlotComponent from '$lib/components/chart-area/UPlotComponent.svelte';
+    import * as Resizable from '$lib/components/ui/resizable';
+    import * as Popover from "$lib/components/ui/popover/index.js";
+    import { Button } from '$lib/components/ui/button/';
+    import { Settings, Trash2, Plus} from '@lucide/svelte';
+    import type { ExpandedState } from '@tanstack/table-core';
 
-	let renderPlan = $derived(chartState.renderPlan);
 
-    function calculateDeviceHeight(plotCount: number): number {
-		const BASE_VH = 15;   // Base height for the header, padding, etc.
-		const PER_PLOT_VH = 18; // Allocate 18vh for each plot.
-		const MAX_VH = 90;      // Cap the total height at 90% of the viewport.
+    let plots = $derived(chartState.plots);
+    let openPopoverId = $state<string | null>(null);
 
-		const calculatedHeight = BASE_VH + plotCount * PER_PLOT_VH;
-		return Math.min(calculatedHeight, MAX_VH);
-	}
+    function handleRemoveClick(plotId: string) {
+        chartState.removePlot(plotId);
+        if (openPopoverId === plotId) {
+            openPopoverId = null;
+        }
+    }
+
+	let treeData = $derived.by((): TreeRow[] => {
+        const topLevelNodes: TreeRow[] = [];
+
+        for (const portData of deviceState.devices) {
+            for (const device of portData.devices) {
+                const streamNodes: TreeRow[] = [];
+                for (const stream of device.streams) {
+                    const columnNodes: TreeRow[] = [];
+                    for (const column of stream.columns) {
+                        const dataKey = {
+                            port_url: device.url,
+                            device_route: device.route,
+                            stream_id: stream.meta.stream_id,
+                            column_index: column.index,
+                        };
+                        columnNodes.push({
+                            id: JSON.stringify(dataKey),
+                            type: 'column',
+                            name: column.name,
+                            units: column.units ?? '',
+                            description: column.description ?? '',
+                            dataKey: dataKey, 
+                        });
+                    }
+                    streamNodes.push({
+                        id: `${device.url}:${device.route}:${stream.meta.stream_id}`,
+                        type: 'stream',
+                        name: stream.meta.name,
+                        subRows: columnNodes,
+                    });
+                }
+
+                topLevelNodes.push({
+                    id: `${device.url}:${device.route}`,
+                    type: 'device',
+                    name: device.meta.name,
+                    device: device,
+                    subRows: streamNodes,
+                });
+            }
+        }
+        return topLevelNodes;
+    });
+
+
+    let initialExpandedState = $derived.by((): ExpandedState => {
+        const expanded: Record<string, boolean> = {};
+        for (const deviceNode of treeData) {
+            if (deviceNode.type === 'device') {
+                expanded[deviceNode.id] = true;
+            }
+        }
+        return expanded;
+    });
 </script>
-{#if renderPlan.length > 0}
-	<div class="w-full">
-		{#each renderPlan as devicePlots (devicePlots.device.url + devicePlots.device.route)}
-			<div
-				class="mb-4 flex flex-col"
-				style:height={`${calculateDeviceHeight(devicePlots.plots.length)}vh`}
-			>
-				<section class="flex min-h-0 flex-1 flex-col gap-2 rounded-lg border p-4">
-					<h2 class="mb-2 text-lg font-semibold tracking-tight">
-						{devicePlots.device.meta.name}
-						<span class="text-sm font-mono text-muted-foreground"
-							>({devicePlots.device.route})</span
-						>
-					</h2>
-					<Resizable.PaneGroup direction="vertical" class="flex-1">
-						{#each devicePlots.plots as plotConfig (plotConfig.title)}
-							<Resizable.Pane defaultSize={100 / devicePlots.plots.length} minSize={3}>
-								<div class="flex h-full flex-col p-2">
-									<UPlotComponent
-                                        options={plotConfig.uPlotOptions}
-                                        seriesDataKeys={plotConfig.series.map((s) => s.dataKey)}
-                                        bind:hasData={plotConfig.hasData}
-                                        plotTitle={plotConfig.title}
-                                    />
-								</div>
-							</Resizable.Pane>
+<div class="relative flex h-full w-full flex-col p-4 gap-4">
+    {#if plots.length > 0}
+        <div class="flex justify-end">
+            <Button onclick={() => chartState.addPlot()}>
+                <Plus class="mr-2 h-4 w-4" /> Add Plot
+            </Button>
+        </div>
+        <Resizable.PaneGroup direction="vertical" class="w-full p-4 gap-4">
+            {#each plots as plot, i (plot.id)}
+                <Resizable.Pane defaultSize={50} minSize={20}>
+                    <section class="flex h-full flex-col gap-2 rounded-lg border p-4">
+                        <div class="flex justify-between items-center">
+                            <input type="text" bind:value={plot.title} class="text-lg font-semibold ..."/>
+                            <div class="flex items-center gap-2">
+                                <Popover.Root>
+                                    <Popover.Trigger aria-label="Plot settings">
+                                        <Settings class="size-5 text-muted-foreground" />
+                                    </Popover.Trigger>
+                                    <Popover.Content class="w-[600px]">
+                                        <div class="max-h-[50vh] overflow-y-auto p-2">
+                                            <DataTable 
+                                                {columns} 
+                                                data={treeData} 
+                                                getSubRows={(row: TreeRow) => row.subRows}
+                                                initialExpanded={initialExpandedState}
+                                                bind:rowSelection={plot.rowSelection}
+                                            />
+                                        </div>
+                                    </Popover.Content>
+                                </Popover.Root>
 
-							{#if devicePlots.plots[devicePlots.plots.length - 1] !== plotConfig}
-								<Resizable.Handle withHandle />
-							{/if}
-						{/each}
-					</Resizable.PaneGroup>
-				</section>
-			</div>
-		{/each}
-	</div>
-{:else}
-	<div class="flex h-full items-center justify-center text-muted-foreground">
-		<p>Select one or more devices to begin plotting.</p>
-	</div>
-{/if}
+                                <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        onclick={() => handleRemoveClick(plot.id)}
+                                        aria-label="Remove Plot"
+                                    >
+                                        <Trash2 class="size-5 text-destructive/80 hover:text-destructive" />
+                                </Button>
+                            </div>
+                        </div>
+                        <div class="flex-1 min-h-0">
+                            <UPlotComponent {plot} />
+                        </div>
+                    </section>
+                </Resizable.Pane>
+                {#if i < plots.length - 1}
+                    <Resizable.Handle withHandle/>
+                {/if}
+                {/each}
+        </Resizable.PaneGroup>
+    {:else}
+    <div class="flex h-full w-full flex-col items-center justify-center text-muted-foreground">
+            <h3 class="text-2xl font-semibold">No Plots to Display</h3>
+            <p class="mb-4 mt-2 text-sm">Get started by adding a new plot.</p>
+            <Button onclick={() => chartState.addPlot()}>
+                <Plus class="mr-2 h-4 w-4" /> Add New Plot
+            </Button>
+        </div>
+    {/if}
+</div>

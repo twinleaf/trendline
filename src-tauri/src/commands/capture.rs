@@ -13,14 +13,16 @@ pub fn get_plot_data_in_range(
     min_time: f64,
     max_time: f64,
     capture: State<CaptureState>,
+    num_points: Option<usize>,
 ) -> PlotData {
-    capture.get_data_in_range(&keys, min_time, max_time)
+    capture.get_data_in_range(&keys, min_time, max_time, num_points)
 }
 
 #[tauri::command]
 pub fn get_latest_plot_data(
     keys: Vec<DataColumnId>,
     window_seconds: f64,
+    num_points: usize,
     capture: State<CaptureState>,
 ) -> PlotData {
 
@@ -33,7 +35,7 @@ pub fn get_latest_plot_data(
     let max_time = latest_time.unwrap();
     let min_time = max_time - window_seconds;
 
-    capture.get_data_in_range(&keys, min_time, max_time)
+    capture.get_data_in_range(&keys, min_time, max_time, Some(num_points))
 }
 
 #[tauri::command]

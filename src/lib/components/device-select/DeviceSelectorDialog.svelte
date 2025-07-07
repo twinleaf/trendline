@@ -7,7 +7,7 @@
     import { invoke } from '@tauri-apps/api/core';
 
 	
-	let devices = $derived(deviceState.deviceTree());
+	let devices = $derived(deviceState.deviceTree);
 
 	let selectedParent = $state('');
 	let childrenSelections = $state(new Map<string, Set<string>>());
@@ -80,7 +80,7 @@
 					<!-- We give the form an ID so the button in the footer can reference it. -->
 					<form id="device-select-form" onsubmit={confirm}>
 						<DeviceList
-							devices={deviceState.deviceTree()}
+							devices={deviceState.deviceTree}
 							bind:selectedParent={selectedParent}
 							bind:childrenSelections={childrenSelections}
 						/>

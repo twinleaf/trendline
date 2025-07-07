@@ -75,7 +75,7 @@ class DeviceState {
 
     devices = $derived.by(() => Array.from(this.#devicesMap.values()));
 
-	deviceTree = $derived(() => {
+	deviceTree = $derived.by(() => {
 		const out: (UiDevice & { children: UiDevice[] })[] = [];
 		for (const [url, { devices }] of this.#devicesMap.entries()) {
 			const parent = devices.find((d) => d.route === '/' || d.route === '');
@@ -94,6 +94,13 @@ class DeviceState {
 	getPort(url: string) {
 		return this.#devicesMap.get(url);
 	}
+
+	getDevice(portUrl: string, route: string): UiDevice | undefined {
+        const portData = this.#devicesMap.get(portUrl);
+        if (!portData) return undefined;
+
+        return portData.devices.find(d => d.route === route);
+    }
 
     selectedDevices = $derived.by(() => {
 		const sel = this.selection;
@@ -119,7 +126,6 @@ class DeviceState {
 
 		return portData ? portData.state : null;
 	});
-
 }
 
 export const deviceState = new DeviceState();

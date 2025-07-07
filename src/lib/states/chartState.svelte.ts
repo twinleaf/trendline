@@ -1,7 +1,6 @@
 import { deviceState } from '$lib/states/deviceState.svelte';
 import type { DataColumnId } from '$lib/bindings/DataColumnId';
-import type { UiDevice } from '$lib/bindings/UiDevice';
-import { SvelteMap } from 'svelte/reactivity';
+import type { RowSelectionState } from '@tanstack/table-core';
 
 
 export type ChartLayout = 'carousel' | 'vertical' | 'horizontal';
@@ -12,225 +11,158 @@ export interface PlotSeries {
 	uPlotSeries: uPlot.Series;
 }
 
-export class PlotConfig {
-    title = $state('New Plot');
-    series = $state<PlotSeries[]>([]);
-    uPlotOptions: uPlot.Options;
-    
-    hasData = $state(false);
+class DataColumnStyler {
+	#styles = new Map<string, { color: string }>();
+	#colors = [
+		'#3498db', '#e74c3c', '#2ecc71', '#f1c40f',
+		'#9b59b6', '#1abc9c', '#d35400', '#34495e',
+		'#e67e22', '#16a085', '#c0392b', '#8e44ad'
+	];
+	#colorIndex = 0;
 
-    constructor(title: string, series: PlotSeries[]) {
-        this.title = title;
-        this.series = series;
-    }
-}
-
-
-export interface DevicePlots {
-	device: UiDevice;
-	plots: PlotConfig[];
-}
-
-
-class ChartState {
-	// --- User-configurable settings ---
-	chartLayout = $state<ChartLayout>('vertical');
-	streamLayout = $state<StreamLayout>('grouped');
-    #plotConfigs = new SvelteMap<string, PlotConfig>();
-
-	renderPlan = $derived.by(() => this.#assembleRenderPlan());
-
-    constructor() {
-        $effect(() => {
-            this.#updatePlotConfigs();
-        });
-    }
-
-     #updatePlotConfigs(): void {
-        const selectedDevices = deviceState.selectedDevices;
-        if (selectedDevices.length === 0) {
-            this.#plotConfigs.clear();
-            return;
-        }
-
-        const requiredKeys = new Set<string>();
-
-        for (const device of selectedDevices) {
-            const plots = this.#generatePlotsForDevice(device, (plotConfig, unit) => {
-                const key = `${device.route}:${unit}`;
-                requiredKeys.add(key);
-
-                if (!this.#plotConfigs.has(key)) {
-                    this.#plotConfigs.set(key, plotConfig);
-                }
-            });
-        }
-        
-        for (const key of this.#plotConfigs.keys()) {
-            if (!requiredKeys.has(key)) {
-                this.#plotConfigs.delete(key);
-            }
-        }
-    }
-
-
-	#assembleRenderPlan(): DevicePlots[] {
-        const selectedDevices = deviceState.selectedDevices;
-        if (selectedDevices.length === 0) {
-            return [];
-        }
-        const planByDevice = new Map<UiDevice, PlotConfig[]>();
-
-        for (const [key, plotConfig] of this.#plotConfigs.entries()) {
-            const deviceRoute = key.split(':')[0];
-            const device = deviceState.selectedDevices.find(d => d.route === deviceRoute);
-            
-            if (device) {
-                const plots = planByDevice.get(device) ?? [];
-                plots.push(plotConfig);
-                planByDevice.set(device, plots);
-            }
-        }
-        
-        const finalPlan: DevicePlots[] = Array.from(planByDevice.entries()).map(([device, plots]) => ({
-            device,
-            plots
-        }));
-
-        finalPlan.sort((a, b) => a.device.route.localeCompare(b.device.route, undefined, { numeric: true }));
-
-        return finalPlan;
-    }
-
-    #generatePlotsForDevice(device: UiDevice, onPlotCreated: (plot: PlotConfig, unit: string) => void): void {
-        switch (this.streamLayout) {
-            case 'grouped':
-                this.#generateGroupedPlots(device, onPlotCreated);
-                return; 
-            case 'vertical':
-                // TODO: Implement vertical stream layout
-                return; 
-            case 'horizontal':
-                // TODO: Implement horizontal stream layout
-                return; 
-            default:
-                return;
-        }
-    }
-
-    #generateGroupedPlots(device: UiDevice, onPlotCreated: (plot: PlotConfig, unit: string) => void): void {
-		const plotsByUnit = new Map<string, PlotSeries[]>();
-
-		for (const stream of device.streams) {
-			for (const col of stream.columns) {
-				const unit = col.units || 'unknown';
-				
-				const plotSeries: PlotSeries = {
-
-					dataKey: {
-						port_url: device.url,
-						device_route: device.route,
-						stream_id: stream.meta.stream_id,
-						column_index: col.index,
-					},
-					uPlotSeries: {
-						label: `${col.name}`, 
-						stroke: this.#getColorForSeries(),
-                        scale: `${col.units}`,
-                        pxAlign: 0,
-					}
-				};
-
-				const seriesForUnit = plotsByUnit.get(unit) ?? [];
-				seriesForUnit.push(plotSeries);
-				plotsByUnit.set(unit, seriesForUnit);
-			}
-		}
-
-		for (const [unit, series] of plotsByUnit.entries()) {
-            const plotTitle = `${unit}`;
-
-			const plotConfig = new PlotConfig(
-                plotTitle,
-                series,
-                this.#createUplotOptions(plotTitle, series, unit)
-            );
-			onPlotCreated(plotConfig, unit);
-		}
-
+	#getNextColor(): string {
+		const color = this.#colors[this.#colorIndex % this.#colors.length];
+		this.#colorIndex++;
+		return color;
 	}
-    
-    #createUplotOptions(title: string, series: PlotSeries[], primaryUnit: string): uPlot.Options {
+	getStyle(dataKey: DataColumnId): { color: string } {
+		const key = JSON.stringify(dataKey);
+		if (!this.#styles.has(key)) {
+			this.#styles.set(key, { color: this.#getNextColor() });
+		}
+		return this.#styles.get(key)!;
+	}
+}
 
-        const uplotSeriesConfig: uPlot.Series[] = [
-            {},
-            ...series.map(s => s.uPlotSeries)
-        ];
+export const dataColumnStyler = new DataColumnStyler();
 
-        return {
-            width: 800, // This will be overridden by the component's width
-            height: 400, // This will be overridden by the component's height
-            series: uplotSeriesConfig,
-            pxAlign: 0,
-            legend: {
-                show: true,
-            },
-            axes: [
-                {}, // Default X-axis
-                {   // Default Y-axis
-                    scale: primaryUnit,
-                    label: primaryUnit,
-                    labelGap: 20,
-                    labelSize: 40,
+export class PlotConfig {
+    id = crypto.randomUUID();
+    title = $state('New Plot');
+    rowSelection = $state<RowSelectionState>({});
+    series = $derived.by((): PlotSeries[] => {
+        const newSeries: PlotSeries[] = [];
+        const selectedKeys = Object.keys(this.rowSelection);
+        for (const keyString of selectedKeys) {
+            if (keyString.startsWith('{') && keyString.endsWith('}')) {
+                try {
+                    const dataKey: DataColumnId = JSON.parse(keyString);
+                    
+                    const device = deviceState.getDevice(dataKey.port_url, dataKey.device_route);
+                    const stream = device?.streams.find(s => s.meta.stream_id === dataKey.stream_id);
+                    const column = stream?.columns.find(c => c.index === dataKey.column_index);
+
+                    if (device && stream && column) {
+                        const style = dataColumnStyler.getStyle(dataKey);
+                        newSeries.push({
+                            dataKey: dataKey,
+                            uPlotSeries: {
+                                label: column.name,
+                                stroke: style.color,
+                                scale: column.units,
+                            }
+                        });
+                    }
+                } catch (e) {
+                    console.error("This should not happen. Failed to parse a key that looked like JSON:", keyString, e);
+                }
+            }
+        }
+        return newSeries;
+    });
+    hasData = $state(false);
+    viewType = $state<'timeseries' | 'fft'>('timeseries');
+
+    uPlotOptions = $derived.by((): uPlot.Options => {
+        if (this.series.length === 0) {
+            return {
+                width: 800,
+                height: 400,
+                series: [{}],
+                axes: [{}, { show: false }],
+            };
+        }
+
+        const uniqueUnits = new Set(this.series.map(s => s.uPlotSeries.scale));
+
+        const scalesConfig: Record<string, uPlot.Scale> = {};
+        for (const unit of uniqueUnits) {
+            if(unit) {
+                scalesConfig[unit] = { auto: true };
+            }
+        }
+
+        const axesConfig: uPlot.Axis[] = [{}]; 
+        
+        for (const unit of uniqueUnits) {
+            if(unit) { // Safety check
+                axesConfig.push({
+                    scale: unit,      // Tie this axis to its scale
+                    label: unit,      // Label the axis with the unit name
+                    labelGap: 5,
+                    stroke: this.series.find(s => s.uPlotSeries.scale === unit)?.uPlotSeries.stroke,
                     values: (u, vals) => {
-                        const scale = u.scales[primaryUnit];
+                        const scale = u.scales[unit];
 
                         if (!scale || scale.min == null || scale.max == null) {
                             return vals.map(v => v.toFixed(2) + " ");
                         }
 
                         const range = scale.max - scale.min;
-
+                        
                         let decimals;
-                        if (range <= 0) {
-                            decimals = 2; // Default for flat data
-                        } else if (range < 1) {
-                            decimals = 3; // High precision for small ranges (e.g., 1.503)
-                        } else if (range < 100) {
-                            decimals = 2; // Standard precision
-                        } else {
-                            decimals = 0; // No decimals for large ranges (e.g., 26800)
-                        }
-
+                        if (range <= 0) decimals = 2;
+                        else if (range < 1) decimals = 3;
+                        else if (range < 100) decimals = 2;
+                        else decimals = 0;
+                        
                         return vals.map(v => v.toFixed(decimals) + " ");
                     },
-                }
-            ],
-            cursor: {
-            drag: {
-                setScale: false,
-                x: false,
-                y: false,
-                }
-            },
-            select: {
-                show: false
-                ,
-                left: 0,
-                top: 0,
-                width: 0,
-                height: 0
+                });
             }
-        };
-    }
+        }
 
-	#colorIdx = 0;
-	#colors = ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#00FFFF', '#FF00FF'];
-	#getColorForSeries(): string {
-		const color = this.#colors[this.#colorIdx % this.#colors.length];
-		this.#colorIdx++;
-		return color;
-	}
+        const uplotSeriesConfig: uPlot.Series[] = [
+            {}, // x-axis placeholder
+            ...this.series.map(s => s.uPlotSeries)
+        ];
+
+        return {
+            width: 800,
+            height: 400,
+            series: uplotSeriesConfig,
+            scales: scalesConfig,
+            axes: axesConfig,
+            pxAlign: 0,
+            legend: { show: true },
+            cursor: {
+                drag: { setScale: false },
+                show: true
+            },
+        };
+    });
+
+    constructor(title: string, initialSelection: RowSelectionState = {}) {
+        this.title = title;
+        this.rowSelection = initialSelection;
+    }
+}
+
+
+class ChartState {
+    plots = $state<PlotConfig[]>([]);
+    chartLayout = $state<ChartLayout>('vertical');
+
+    addPlot() {
+        this.plots.push(new PlotConfig('New Plot', {}));
+    }
+    
+    removePlot(plotId: string) {
+        const index = this.plots.findIndex(p => p.id === plotId);
+        if (index > -1) {
+            this.plots.splice(index, 1);
+        }
+    }
 }
 
 export const chartState = new ChartState();
