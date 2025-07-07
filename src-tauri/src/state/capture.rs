@@ -93,35 +93,31 @@ impl CaptureState {
         if keys.is_empty() || min_time >= max_time {
             return PlotData::empty();
         }
+        let mut aligned_series: Vec<Vec<Point>> = keys
+        .iter()
+        .map(|key| {
+            let stream_key = DataColumnId { column_index: 0, ..key.clone() };
+            let offset = self.inner.offsets.get(&stream_key).map_or(0.0, |off| *off.value());
 
-        let stream_key = DataColumnId { column_index: 0, ..keys[0].clone() };
-        let offset = match self.inner.offsets.get(&stream_key) {
-            Some(off) => *off.value(),
-            None => return PlotData::empty(),
-        };
-        let min_key = (min_time - offset).to_bits();
-        let max_key = (max_time - offset).to_bits();
+            let min_key = (min_time - offset).to_bits();
+            let max_key = (max_time - offset).to_bits();
 
-        // 1. Extract raw data for each series within the time range.
-        let mut raw_series: Vec<Vec<Point>> = keys
-            .iter()
-            .map(|key| {
-                self.inner.buffers.get(key)
-                    .map(|buffer| {
-                        buffer.data
-                            .range(min_key..=max_key)
-                            .map(|(&t_bits, &y)| Point::new(f64::from_bits(t_bits), y))
-                            .collect()
-                    })
-                    .unwrap_or_else(Vec::new)
-            })
-            .collect();
+            self.inner.buffers.get(key)
+                .map(|buffer| {
+                    buffer.data
+                        .range(min_key..=max_key)
+                        .map(|(&t_bits, &y)| {
+                            let original_timestamp = f64::from_bits(t_bits);
+                            Point::new(original_timestamp + offset, y)
+                        })
+                        .collect()
+                })
+                .unwrap_or_else(Vec::new)
+        })
+        .collect();
             
         if let Some(n_points) = num_points {
-            for series in &mut raw_series {
-                if series.iter().any(|p| p.y == 0.0) {
-                    println!("FOUND A ZERO in raw data before downsampling.");
-                }
+            for series in &mut aligned_series {
                 if !series.is_empty() && n_points > 0 && series.len() > n_points {
                     let ratio = series.len() / n_points;
                     *series = fpcs(series, ratio);
@@ -129,8 +125,7 @@ impl CaptureState {
             }
         }
 
-        // 3. Perform a k-way merge on the (potentially downsampled) series.
-        let mut series_iters: Vec<_> = raw_series
+        let mut series_iters: Vec<_> = aligned_series
             .iter()
             .map(|series| series.iter().peekable())
             .collect();
@@ -143,17 +138,15 @@ impl CaptureState {
         let mut plot_data = PlotData::with_series_capacity(num_series);
 
         loop {
-            // Find the smallest timestamp among the current heads of all iterators.
+
             let next_ts = series_iters
                 .iter_mut()
                 .filter_map(|it| it.peek().map(|p| p.x))
                 .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
             if let Some(ts) = next_ts {
-                let relative_timestamp = ts + offset;
-                plot_data.timestamps.push(relative_timestamp);
+                plot_data.timestamps.push(ts);
 
-                // For each series, if its head matches the smallest timestamp,
                 for (i, iter) in series_iters.iter_mut().enumerate() {
                     let y_val = if let Some(p) = iter.peek() {
                         if p.x == ts {

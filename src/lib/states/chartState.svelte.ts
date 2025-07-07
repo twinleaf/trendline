@@ -93,10 +93,12 @@ export class PlotConfig {
         }
 
         const axesConfig: uPlot.Axis[] = [{}]; 
-        
+
+        let yAxisCount = 0;
+            
         for (const unit of uniqueUnits) {
-            if(unit) { // Safety check
-                axesConfig.push({
+            if (!unit) continue;
+            const axisOptions: uPlot.Axis = {
                     scale: unit,      // Tie this axis to its scale
                     label: unit,      // Label the axis with the unit name
                     labelGap: 5,
@@ -118,8 +120,14 @@ export class PlotConfig {
                         
                         return vals.map(v => v.toFixed(decimals) + " ");
                     },
-                });
+                };
+            if (yAxisCount > 0) {
+                axisOptions.side = 1;
+                axisOptions.grid = { show: false }; 
             }
+
+            axesConfig.push(axisOptions);
+            yAxisCount++;
         }
 
         const uplotSeriesConfig: uPlot.Series[] = [
@@ -137,6 +145,44 @@ export class PlotConfig {
             legend: { show: true },
             cursor: {
                 drag: { setScale: false },
+                dataIdx: (self, seriesIdx, hoveredIdx, cursorXVal) => {
+                    if (seriesIdx === 0) {
+                        return hoveredIdx;
+                    }
+
+                    const yValues = self.data[seriesIdx];
+                    const xValues = self.data[0];
+
+                    if (yValues[hoveredIdx] == null) {
+							let nonNullLft = null,
+								nonNullRgt = null,
+								i;
+
+							i = hoveredIdx;
+							while (nonNullLft == null && i-- > 0) {
+								if (yValues[i] != null)
+									nonNullLft = i;
+							}
+
+							i = hoveredIdx;
+							while (nonNullRgt == null && i++ < yValues.length) {
+								if (yValues[i] != null)
+									nonNullRgt = i;
+							}
+
+							let rgtVal = nonNullRgt == null ?  Infinity : xValues[nonNullRgt];
+							let lftVal = nonNullLft == null ? -Infinity : xValues[nonNullLft];
+
+							let lftDelta = cursorXVal - lftVal;
+							let rgtDelta = rgtVal - cursorXVal;
+
+							const newIndex = lftDelta <= rgtDelta ? nonNullLft : nonNullRgt;
+
+                            return newIndex ?? hoveredIdx;
+                        }
+
+						return hoveredIdx;
+                },
                 show: true
             },
         };
@@ -148,19 +194,26 @@ export class PlotConfig {
     }
 }
 
+const DEFAULT_PLOT_HEIGHT = 400; 
 
 class ChartState {
     plots = $state<PlotConfig[]>([]);
+    layout = $state<Record<string, number>>({}); 
     chartLayout = $state<ChartLayout>('vertical');
 
-    addPlot() {
-        this.plots.push(new PlotConfig('New Plot', {}));
+     addPlot() {
+        const newPlot = new PlotConfig('New Plot', {});
+        
+        this.plots.push(newPlot);
+        this.layout[newPlot.id] = DEFAULT_PLOT_HEIGHT;
     }
     
     removePlot(plotId: string) {
         const index = this.plots.findIndex(p => p.id === plotId);
+
         if (index > -1) {
             this.plots.splice(index, 1);
+            delete this.layout[plotId];
         }
     }
 }

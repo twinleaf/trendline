@@ -12,6 +12,11 @@
 
 
     let plots = $derived(chartState.plots);
+    let layout = $derived(chartState.layout);
+
+    const MIN_PANE_HEIGHT_PX = 200;
+    let totalResizableHeight = $derived(Object.values(layout).reduce((sum, size) => sum + size, 0));
+
     let openPopoverId = $state<string | null>(null);
 
     function handleRemoveClick(plotId: string) {
@@ -83,50 +88,72 @@
                 <Plus class="mr-2 h-4 w-4" /> Add Plot
             </Button>
         </div>
-        <Resizable.PaneGroup direction="vertical" class="w-full p-4 gap-4">
-            {#each plots as plot, i (plot.id)}
-                <Resizable.Pane defaultSize={50} minSize={20}>
-                    <section class="flex h-full flex-col gap-2 rounded-lg border p-4">
-                        <div class="flex justify-between items-center">
-                            <input type="text" bind:value={plot.title} class="text-lg font-semibold ..."/>
-                            <div class="flex items-center gap-2">
-                                <Popover.Root>
-                                    <Popover.Trigger aria-label="Plot settings">
-                                        <Settings class="size-5 text-muted-foreground" />
-                                    </Popover.Trigger>
-                                    <Popover.Content class="w-[600px]">
-                                        <div class="max-h-[50vh] overflow-y-auto p-2">
-                                            <DataTable 
-                                                {columns} 
-                                                data={treeData} 
-                                                getSubRows={(row: TreeRow) => row.subRows}
-                                                initialExpanded={initialExpandedState}
-                                                bind:rowSelection={plot.rowSelection}
-                                            />
-                                        </div>
-                                    </Popover.Content>
-                                </Popover.Root>
+        <div class="flex-1 min-h-0 overflow-y-auto">
+            <div style={`height: ${totalResizableHeight}px;`}>
+                <Resizable.PaneGroup
+                    direction="vertical"
+                    class="w-full h-full gap-4"
+                    onLayoutChange={(sizes: number[]) => {
+                        const newLayout: Record<string, number> = {};
+                        sizes.forEach((percent, i) => {
+                            const plotId = plots[i]?.id;
+                            if (plotId) {
+                                newLayout[plotId] = (percent / 100) * totalResizableHeight;
+                            }
+                        });
+                        chartState.layout = newLayout;
+                    }}
+                >
+                    {#each plots as plot, i (plot.id)}
+                        {@const plotHeight = layout[plot.id] || 0}
+                        <Resizable.Pane
+                            minSize={totalResizableHeight > 0 ? (MIN_PANE_HEIGHT_PX / totalResizableHeight) * 100 : 0}
+                            defaultSize={totalResizableHeight > 0 ? (plotHeight / totalResizableHeight) * 100 : 0}
+                            order={i}
+                        >
+                            <section class="flex h-full flex-col gap-2 rounded-lg border p-4">
+                                <div class="flex justify-between items-center">
+                                    <input type="text" bind:value={plot.title} class="text-lg font-semibold ..."/>
+                                    <div class="flex items-center gap-2">
+                                        <Popover.Root>
+                                            <Popover.Trigger aria-label="Plot settings">
+                                                <Settings class="size-5 text-muted-foreground" />
+                                            </Popover.Trigger>
+                                            <Popover.Content class="w-[600px]">
+                                                <div class="max-h-[50vh] overflow-y-auto p-2">
+                                                    <DataTable 
+                                                        {columns} 
+                                                        data={treeData} 
+                                                        getSubRows={(row: TreeRow) => row.subRows}
+                                                        initialExpanded={initialExpandedState}
+                                                        bind:rowSelection={plot.rowSelection}
+                                                    />
+                                                </div>
+                                            </Popover.Content>
+                                        </Popover.Root>
 
-                                <Button 
-                                        variant="ghost" 
-                                        size="icon" 
-                                        onclick={() => handleRemoveClick(plot.id)}
-                                        aria-label="Remove Plot"
-                                    >
-                                        <Trash2 class="size-5 text-destructive/80 hover:text-destructive" />
-                                </Button>
-                            </div>
-                        </div>
-                        <div class="flex-1 min-h-0">
-                            <UPlotComponent {plot} />
-                        </div>
-                    </section>
-                </Resizable.Pane>
-                {#if i < plots.length - 1}
-                    <Resizable.Handle withHandle/>
-                {/if}
-                {/each}
-        </Resizable.PaneGroup>
+                                        <Button 
+                                                variant="ghost" 
+                                                size="icon" 
+                                                onclick={() => handleRemoveClick(plot.id)}
+                                                aria-label="Remove Plot"
+                                            >
+                                                <Trash2 class="size-5 text-destructive/80 hover:text-destructive" />
+                                        </Button>
+                                    </div>
+                                </div>
+                                <div class="flex-1 min-h-0">
+                                    <UPlotComponent {plot} />
+                                </div>
+                            </section>
+                        </Resizable.Pane>
+                        {#if i < plots.length - 1}
+                            <Resizable.Handle withHandle/>
+                        {/if}
+                        {/each}
+                </Resizable.PaneGroup>
+            </div>
+        </div>
     {:else}
     <div class="flex h-full w-full flex-col items-center justify-center text-muted-foreground">
             <h3 class="text-2xl font-semibold">No Plots to Display</h3>
