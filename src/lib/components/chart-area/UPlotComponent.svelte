@@ -30,28 +30,43 @@
 			}
             const numPoints = Math.round(uplot.width * 2);
 			try {
-				const result = await invoke<PlotData>('get_latest_plot_data', {
-					keys: seriesDataKeys,
-					windowSeconds: 30.0,
-                    numPoints: numPoints,
-				});
+                const isFFT = plot.viewType === 'fft';
+                const command = isFFT ? 'get_latest_fft_data' : 'get_latest_plot_data';
+				const args = isFFT ? {
+                    keys: seriesDataKeys,
+                    windowSeconds: 20.0, // A shorter window is often better for FFT
+                } : {
+                    keys: seriesDataKeys,
+                    windowSeconds: 30.0,
+                    numPoints: Math.round(uplot.width * 2),
+                };
+
+                const result = await invoke<PlotData>(command, args);
+                plot.hasData = result.timestamps.length > 0;
 
 				if (result.timestamps.length > 0) {
-					if (startTimeSeconds === null) {
-						startTimeSeconds = Date.now() / 1000 - result.timestamps[0];
-					}
-					const absoluteTimestamps = result.timestamps.map((t) => startTimeSeconds! + t);
-					const finalData: uPlot.AlignedData = [
-                        new Float64Array(absoluteTimestamps),
+                    
+                    let finalXValues = result.timestamps;
+
+                    if (!isFFT) {
+                         if (startTimeSeconds === null) {
+                            startTimeSeconds = Date.now() / 1000 - result.timestamps[0];
+                        }
+                        finalXValues = result.timestamps.map((t) => startTimeSeconds! + t);
+                    }
+
+                    const finalData: uPlot.AlignedData = [
+                        new Float64Array(finalXValues),
                         ...result.series_data.map(s => 
                             new Float64Array(s.map(value => value === null ? NaN : value))
                         )
                     ];
-					uplot.setData(finalData, true);
-				}
-			} catch (e) {
-				console.error('Failed to fetch plot data:', e);
-			}
+                    uplot.setData(finalData, true);
+                }
+            } catch (e) {
+                console.error(`Failed to fetch plot data for ${plot.viewType} view:`, e);
+                plot.hasData = false;
+            }
 		}
 
 		function mainLoop() {

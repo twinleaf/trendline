@@ -1,11 +1,15 @@
-use crate::state::capture::{CaptureState, DataColumnId};
+use crate::state::capture::{CaptureState, DataColumnId, Point};
 use crate::shared::{PlotData, UiDevice};
+use welch_sde::{Build, SpectralDensity};
 use tauri::State;
 use twinleaf::tio::proto::DeviceRoute;
 use std::sync::Arc;
 use crate::state::proxy_register::ProxyRegister;
 
-
+struct FftStreamInfo {
+    sampling_rate: u32,
+    points: Vec<Point>,
+}
 
 #[tauri::command]
 pub fn get_plot_data_in_range(
@@ -38,6 +42,108 @@ pub fn get_latest_plot_data(
     capture.get_data_in_range(&keys, min_time, max_time, Some(num_points))
 }
 
+#[tauri::command]
+pub fn get_latest_fft_data(
+    keys: Vec<DataColumnId>,
+    window_seconds: f64, // For Welch's, a longer window (e.g., 10.0s) gives better results
+    capture: State<CaptureState>,
+    registry: State<Arc<ProxyRegister>>,
+) -> Result<PlotData, String> {
+    if keys.is_empty() {
+        return Ok(PlotData::empty());
+    }
+
+    let latest_time = match capture.get_latest_timestamp_for_keys(&keys) {
+        Some(t) => t,
+        None => return Ok(PlotData::empty()),
+    };
+    let min_time = latest_time - window_seconds;
+
+    let mut stream_infos: Vec<FftStreamInfo> = Vec::new();
+    let mut first_sampling_rate: Option<u32> = None;
+
+    for key in &keys {
+        let port_manager = registry.get(&key.port_url).ok_or("Port not found")?;
+        let devices = port_manager.devices.lock().unwrap();
+        let (_device, ui_device) = devices.get(&key.device_route).ok_or("Device not found")?;
+
+        let stream = ui_device
+            .streams
+            .iter()
+            .find(|s| s.meta.stream_id == key.stream_id)
+            .ok_or("Stream not found")?;
+
+        let sampling_rate = stream
+            .segment
+            .as_ref()
+            .ok_or("Stream segment metadata not available")?
+            .sampling_rate;
+
+        if let Some(first_rate) = first_sampling_rate {
+            if sampling_rate != first_rate {
+                return Err("All streams must have the same sampling rate.".to_string());
+            }
+        } else {
+            first_sampling_rate = Some(sampling_rate);
+        }
+
+        let points = capture.inner.buffers.get(key).map_or(vec![], |buffer_ref| {
+            let offset = capture.inner.offsets.get(key).map_or(0.0, |off| *off.value());
+            let min_key = (min_time - offset).to_bits();
+            let max_key = (latest_time - offset).to_bits();
+            buffer_ref
+                .data
+                .range(min_key..=max_key)
+                .map(|(&t_bits, &y)| Point::new(f64::from_bits(t_bits) + offset, y))
+                .collect()
+        });
+
+        if !points.is_empty() {
+            stream_infos.push(FftStreamInfo {
+                sampling_rate,
+                points,
+            });
+        }
+    }
+
+    if stream_infos.is_empty() {
+        return Ok(PlotData::empty());
+    }
+
+    let sampling_rate = first_sampling_rate.unwrap() as f64;
+    let mut all_asds: Vec<Vec<f64>> = Vec::new();
+    let mut frequencies: Option<Vec<f64>> = None;
+
+    for info in stream_infos {
+        let y_values: Vec<f64> = info.points.iter().map(|p| p.y).collect();
+
+        if y_values.len() < 16 { 
+            all_asds.push(vec![]); 
+            continue;
+        }
+
+        let mean = y_values.iter().sum::<f64>() / y_values.len() as f64;
+        let mean_adjusted_signal: Vec<f64> = y_values.iter().map(|&y| y - mean).collect();
+
+
+        let welch: SpectralDensity<f64> =
+            SpectralDensity::builder(&mean_adjusted_signal, sampling_rate).build();
+
+        let psd = welch.periodogram();
+
+        let asd: Vec<f64> = psd.to_vec().iter().map(|&p| p.sqrt()).collect();
+        all_asds.push(asd);
+
+        if frequencies.is_none() {
+            frequencies = Some(psd.frequency().to_vec());
+        }
+    }
+
+    Ok(PlotData {
+        timestamps: frequencies.unwrap_or_default(),
+        series_data: all_asds,
+    })
+}
 #[tauri::command]
 pub fn confirm_selection(
     port_url: String,

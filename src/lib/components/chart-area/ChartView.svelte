@@ -7,7 +7,8 @@
     import * as Resizable from '$lib/components/ui/resizable';
     import * as Popover from "$lib/components/ui/popover/index.js";
     import { Button } from '$lib/components/ui/button/';
-    import { Settings, Trash2, Plus} from '@lucide/svelte';
+    import { Toggle } from '$lib/components/ui/toggle/';
+    import { Settings, Trash2, Plus, ChartLine, ChartColumn} from '@lucide/svelte';
     import type { ExpandedState } from '@tanstack/table-core';
 
 
@@ -115,6 +116,19 @@
                                 <div class="flex justify-between items-center">
                                     <input type="text" bind:value={plot.title} class="text-lg font-semibold ..."/>
                                     <div class="flex items-center gap-2">
+                                        <Toggle
+                                            aria-label="Toggle plot view type"
+                                            pressed={plot.viewType === 'fft'}
+                                            onclick={() => {
+                                                plot.viewType = plot.viewType === 'timeseries' ? 'fft' : 'timeseries';
+                                            }}
+                                        >
+                                            {#if plot.viewType === 'timeseries'}
+                                                <ChartLine class="size-5" />
+                                            {:else}
+                                                <ChartColumn class="size-5" />
+                                            {/if}
+                                        </Toggle>
                                         <Popover.Root>
                                             <Popover.Trigger aria-label="Plot settings">
                                                 <Settings class="size-5 text-muted-foreground" />

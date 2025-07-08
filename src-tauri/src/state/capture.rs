@@ -34,9 +34,9 @@ impl Point {
 }
 
 // A circular buffer for a single time series.
-struct Buffer {
-    data: BTreeMap<u64, f64>,
-    cap: usize,
+pub struct Buffer {
+    pub data: BTreeMap<u64, f64>,
+    pub cap: usize,
 }
 
 impl Buffer {
@@ -59,16 +59,16 @@ impl Buffer {
 }
 
 // The shared data that needs to be accessed by multiple threads.
-struct Inner {
-    buffers: DashMap<DataColumnId, Buffer>,
-    active: DashMap<DataColumnId, ()>,
-    offsets: DashMap<DataColumnId, f64>,
-    default_cap: usize,
+pub struct Inner {
+    pub buffers: DashMap<DataColumnId, Buffer>,
+    pub active: DashMap<DataColumnId, ()>,
+    pub offsets: DashMap<DataColumnId, f64>,
+    pub default_cap: usize,
 }
 
 #[derive(Clone)]
 pub struct CaptureState {
-    inner: Arc<Inner>,
+    pub inner: Arc<Inner>,
 }
 
 impl CaptureState {

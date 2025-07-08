@@ -135,6 +135,22 @@ export class PlotConfig {
             ...this.series.map(s => s.uPlotSeries)
         ];
 
+        if (this.viewType === 'fft') {
+            scalesConfig['x'] = { time: false };
+
+            axesConfig[0] = { 
+                scale: 'x',
+                label: "Frequency (Hz)",
+                values: (u, vals) => vals.map(v => v.toFixed(1)) 
+            };
+
+            axesConfig.forEach(axis => {
+                if (axis.scale && axis.label && axis.scale !== 'x') {
+                    axis.label += "/√Hz";
+                }
+            });
+        }
+
         return {
             width: 800,
             height: 400,

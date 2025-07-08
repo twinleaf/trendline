@@ -31,6 +31,8 @@ twinleaf-tools = { path = "../../twinleaf-rust/twinleaf-tools" }
 twinleaf = { version = "1.3.1", path = "../../twinleaf-rust/twinleaf" }
 dashmap = "6.1.0"
 tauri-plugin-dialog = "2"
+rustfft = "6.4.0"
+welch-sde = "0.1.0"
 
 [profile.release]
 debug = true
