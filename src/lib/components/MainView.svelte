@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as Resizable from '$lib/components/ui/resizable/index.js';
-    import DeviceControls from '$lib/components/chart-area/DeviceControls.svelte';
+    import DeviceControls from '$lib/components/device-controls/DeviceControls.svelte';
     import ChartView from '$lib/components/chart-area/ChartView.svelte';
 </script>
 

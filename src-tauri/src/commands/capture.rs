@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::state::proxy_register::ProxyRegister;
 
 struct FftStreamInfo {
-    sampling_rate: u32,
+    sampling_rate: f64,
     points: Vec<Point>,
 }
 
@@ -60,7 +60,7 @@ pub fn get_latest_fft_data(
     let min_time = latest_time - window_seconds;
 
     let mut stream_infos: Vec<FftStreamInfo> = Vec::new();
-    let mut first_sampling_rate: Option<u32> = None;
+    let mut first_sampling_rate: Option<f64> = None;
 
     for key in &keys {
         let port_manager = registry.get(&key.port_url).ok_or("Port not found")?;
@@ -73,18 +73,27 @@ pub fn get_latest_fft_data(
             .find(|s| s.meta.stream_id == key.stream_id)
             .ok_or("Stream not found")?;
 
-        let sampling_rate = stream
+        let segment = stream
             .segment
             .as_ref()
-            .ok_or("Stream segment metadata not available")?
-            .sampling_rate;
+            .ok_or("Stream segment metadata not available")?;
+
+        let sampling_rate = segment.sampling_rate as f64; 
+        let decimation = segment.decimation as f64;
+
+        let effective_sampling_rate = if decimation > 1.0 { 
+            sampling_rate / decimation
+        } else {
+            sampling_rate
+        };
+
 
         if let Some(first_rate) = first_sampling_rate {
-            if sampling_rate != first_rate {
+            if effective_sampling_rate != first_rate {
                 return Err("All streams must have the same sampling rate.".to_string());
             }
         } else {
-            first_sampling_rate = Some(sampling_rate);
+            first_sampling_rate = Some(effective_sampling_rate);
         }
 
         let points = capture.inner.buffers.get(key).map_or(vec![], |buffer_ref| {
@@ -110,13 +119,12 @@ pub fn get_latest_fft_data(
         return Ok(PlotData::empty());
     }
 
-    let sampling_rate = first_sampling_rate.unwrap() as f64;
+    let sampling_rate = first_sampling_rate.unwrap();
     let mut all_asds: Vec<Vec<f64>> = Vec::new();
     let mut frequencies: Option<Vec<f64>> = None;
-
+    
     for info in stream_infos {
         let y_values: Vec<f64> = info.points.iter().map(|p| p.y).collect();
-
         if y_values.len() < 16 { 
             all_asds.push(vec![]); 
             continue;
@@ -144,6 +152,7 @@ pub fn get_latest_fft_data(
         series_data: all_asds,
     })
 }
+
 #[tauri::command]
 pub fn confirm_selection(
     port_url: String,

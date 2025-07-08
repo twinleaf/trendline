@@ -88,7 +88,15 @@ export class PlotConfig {
         const scalesConfig: Record<string, uPlot.Scale> = {};
         for (const unit of uniqueUnits) {
             if(unit) {
-                scalesConfig[unit] = { auto: true };
+                if (this.viewType === 'fft') {
+                    scalesConfig[unit] = { 
+                        auto: true,
+                        range: (u, dataMin, dataMax) => [0.001, dataMax * 11]
+                    };
+                }
+                else {
+                    scalesConfig[unit] = { auto: true };
+                }
             }
         }
 
@@ -99,28 +107,32 @@ export class PlotConfig {
         for (const unit of uniqueUnits) {
             if (!unit) continue;
             const axisOptions: uPlot.Axis = {
-                    scale: unit,      // Tie this axis to its scale
-                    label: unit,      // Label the axis with the unit name
+                    scale: unit,
+                    label: unit,
                     labelGap: 5,
                     stroke: this.series.find(s => s.uPlotSeries.scale === unit)?.uPlotSeries.stroke,
-                    values: (u, vals) => {
-                        const scale = u.scales[unit];
-
-                        if (!scale || scale.min == null || scale.max == null) {
-                            return vals.map(v => v.toFixed(2) + " ");
-                        }
-
-                        const range = scale.max - scale.min;
-                        
-                        let decimals;
-                        if (range <= 0) decimals = 2;
-                        else if (range < 1) decimals = 3;
-                        else if (range < 100) decimals = 2;
-                        else decimals = 0;
-                        
-                        return vals.map(v => v.toFixed(decimals) + " ");
-                    },
                 };
+
+            if (this.viewType === 'timeseries') {
+                axisOptions.values = (u, vals) => {
+                    const scale = u.scales[unit!];
+
+                    if (!scale || scale.min == null || scale.max == null) {
+                        return vals.map(v => v == null ? "" : v.toFixed(2) + " ");
+                    }
+
+                    const range = scale.max - scale.min;
+                    
+                    let decimals;
+                    if (range <= 0) decimals = 2;
+                    else if (range < 1) decimals = 3;
+                    else if (range < 100) decimals = 2;
+                    else decimals = 0;
+                    
+                    return vals.map(v => v == null ? "" : v.toFixed(decimals) + " ");
+                };
+            }
+
             if (yAxisCount > 0) {
                 axisOptions.side = 1;
                 axisOptions.grid = { show: false }; 
@@ -136,12 +148,16 @@ export class PlotConfig {
         ];
 
         if (this.viewType === 'fft') {
-            scalesConfig['x'] = { time: false };
-
+            scalesConfig['x'] = { time: false, distr: 3, log: 10 };
+            for (const unit of uniqueUnits) {
+                if (unit && scalesConfig[unit]) {
+                    scalesConfig[unit].distr = 3;
+                    scalesConfig[unit].log = 10;
+                }
+            }
             axesConfig[0] = { 
                 scale: 'x',
                 label: "Frequency (Hz)",
-                values: (u, vals) => vals.map(v => v.toFixed(1)) 
             };
 
             axesConfig.forEach(axis => {

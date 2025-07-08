@@ -34,7 +34,7 @@
                 const command = isFFT ? 'get_latest_fft_data' : 'get_latest_plot_data';
 				const args = isFFT ? {
                     keys: seriesDataKeys,
-                    windowSeconds: 20.0, // A shorter window is often better for FFT
+                    windowSeconds: 10.0, // A shorter window is often better for FFT
                 } : {
                     keys: seriesDataKeys,
                     windowSeconds: 30.0,
@@ -47,17 +47,23 @@
 				if (result.timestamps.length > 0) {
                     
                     let finalXValues = result.timestamps;
+ 					let finalSeriesData = result.series_data;
 
-                    if (!isFFT) {
-                         if (startTimeSeconds === null) {
-                            startTimeSeconds = Date.now() / 1000 - result.timestamps[0];
+                    if (isFFT) {
+                        if (finalXValues[0] === 0) {
+                            finalXValues = finalXValues.slice(1);
+                            finalSeriesData = finalSeriesData.map(s => s.slice(1));
                         }
-                        finalXValues = result.timestamps.map((t) => startTimeSeconds! + t);
+                    } else {
+                        if (startTimeSeconds === null) {
+                            startTimeSeconds = Date.now() / 1000 - finalXValues[0];
+                        }
+                        finalXValues = finalXValues.map((t) => startTimeSeconds! + t);
                     }
 
                     const finalData: uPlot.AlignedData = [
                         new Float64Array(finalXValues),
-                        ...result.series_data.map(s => 
+                        ...finalSeriesData.map(s => 
                             new Float64Array(s.map(value => value === null ? NaN : value))
                         )
                     ];
