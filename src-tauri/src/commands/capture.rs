@@ -1,15 +1,10 @@
 use crate::state::capture::{CaptureState, DataColumnId, Point};
-use crate::shared::{PlotData, UiDevice};
+use crate::shared::{PlotData};
 use welch_sde::{Build, SpectralDensity};
 use tauri::State;
 use twinleaf::tio::proto::DeviceRoute;
 use std::sync::Arc;
 use crate::state::proxy_register::ProxyRegister;
-
-struct FftStreamInfo {
-    sampling_rate: f64,
-    points: Vec<Point>,
-}
 
 #[tauri::command]
 pub fn get_plot_data_in_range(
@@ -45,7 +40,7 @@ pub fn get_latest_plot_data(
 #[tauri::command]
 pub fn get_latest_fft_data(
     keys: Vec<DataColumnId>,
-    window_seconds: f64, // For Welch's, a longer window (e.g., 10.0s) gives better results
+    window_seconds: f64,
     capture: State<CaptureState>,
     registry: State<Arc<ProxyRegister>>,
 ) -> Result<PlotData, String> {
@@ -59,7 +54,7 @@ pub fn get_latest_fft_data(
     };
     let min_time = latest_time - window_seconds;
 
-    let mut stream_infos: Vec<FftStreamInfo> = Vec::new();
+    let mut all_series_points: Vec<Vec<Point>> = Vec::new();
     let mut first_sampling_rate: Option<f64> = None;
 
     for key in &keys {
@@ -78,19 +73,18 @@ pub fn get_latest_fft_data(
             .as_ref()
             .ok_or("Stream segment metadata not available")?;
 
-        let sampling_rate = segment.sampling_rate as f64; 
+        let sampling_rate = segment.sampling_rate as f64;
         let decimation = segment.decimation as f64;
 
-        let effective_sampling_rate = if decimation > 1.0 { 
+        let effective_sampling_rate = if decimation > 1.0 {
             sampling_rate / decimation
         } else {
             sampling_rate
         };
 
-
         if let Some(first_rate) = first_sampling_rate {
-            if effective_sampling_rate != first_rate {
-                return Err("All streams must have the same sampling rate.".to_string());
+            if (effective_sampling_rate - first_rate).abs() > 1e-6 { // Floating point comparison
+                return Err("All streams must have the same effective sampling rate.".to_string());
             }
         } else {
             first_sampling_rate = Some(effective_sampling_rate);
@@ -108,37 +102,32 @@ pub fn get_latest_fft_data(
         });
 
         if !points.is_empty() {
-            stream_infos.push(FftStreamInfo {
-                sampling_rate,
-                points,
-            });
+            all_series_points.push(points);
         }
     }
 
-    if stream_infos.is_empty() {
+    if all_series_points.is_empty() {
         return Ok(PlotData::empty());
     }
 
     let sampling_rate = first_sampling_rate.unwrap();
     let mut all_asds: Vec<Vec<f64>> = Vec::new();
     let mut frequencies: Option<Vec<f64>> = None;
-    
-    for info in stream_infos {
-        let y_values: Vec<f64> = info.points.iter().map(|p| p.y).collect();
-        if y_values.len() < 16 { 
-            all_asds.push(vec![]); 
+
+    for points in all_series_points {
+        let y_values: Vec<f64> = points.iter().map(|p| p.y).collect();
+        if y_values.len() < 16 { // Welch's method needs a minimum number of points
+            all_asds.push(vec![]);
             continue;
         }
 
         let mean = y_values.iter().sum::<f64>() / y_values.len() as f64;
         let mean_adjusted_signal: Vec<f64> = y_values.iter().map(|&y| y - mean).collect();
 
-
         let welch: SpectralDensity<f64> =
             SpectralDensity::builder(&mean_adjusted_signal, sampling_rate).build();
 
         let psd = welch.periodogram();
-
         let asd: Vec<f64> = psd.to_vec().iter().map(|&p| p.sqrt()).collect();
         all_asds.push(asd);
 
@@ -205,20 +194,3 @@ pub fn confirm_selection(
     Ok(())
 }
 
-#[tauri::command]
-pub fn get_all_devices(registry: State<Arc<ProxyRegister>>) -> Vec<UiDevice> {
-    let mut all_devices = Vec::new();
-
-    for entry in registry.ports.iter() {
-        let port_manager = entry.value();
-        
-        let devices_lock = port_manager.devices.lock().unwrap();
-        
-        for (_route, (_device, ui_device)) in devices_lock.iter() {
-            all_devices.push(ui_device.clone());
-        }
-    }
-    
-    println!("[Command] get_all_devices returning {} devices.", all_devices.len());
-    all_devices
-}

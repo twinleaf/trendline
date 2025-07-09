@@ -3,6 +3,7 @@
 
 use serde::Serialize;
 use ts_rs::TS;
+use num_enum::{FromPrimitive, IntoPrimitive};
 
 // ─────────────────────────── 1. Port state ──────────────────────────────
 
@@ -24,7 +25,11 @@ pub enum PortState {
 use twinleaf::tio::proto::meta::{
     ColumnMetadata as LibColumnMeta, DeviceMetadata as LibDeviceMeta,
     StreamMetadata as LibStreamMeta, SegmentMetadata as LibSegmentMeta,
-    MetadataEpoch as LibMetadataEpoch, MetadataFilter as LibMetadataFilter
+    MetadataEpoch as LibMetadataEpoch, MetadataFilter as LibMetadataFilter,
+};
+
+use twinleaf::tio::proto::rpc::{
+    RpcErrorCode as LibRpcErrorCode, RpcErrorPayload as LibRpcErrorPayload
 };
 
 // Device -----------------------------------------------------------------
@@ -131,6 +136,91 @@ impl From<LibSegmentMeta> for SegmentMeta {
             decimation: s.decimation,
             filter_cutoff: s.filter_cutoff,
             filter_type: s.filter_type.into(),
+        }
+    }
+}
+
+// RPC -----------------------------------------------------------------
+// TODO: ASK GB TO MOVE IT INTO TWINLEAF LIBRARY
+#[derive(Serialize, Clone, Debug, TS, PartialEq)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct RpcMeta {
+    pub name: String,
+    pub size: usize,
+    pub permissions: String, // e.g., "RW-", "R-P"
+    pub arg_type: String,    // e.g., "u32", "string<64>"
+    pub readable: bool,
+    pub writable: bool,
+    pub persistent: bool,
+    pub unknown: bool,
+}
+#[derive(Serialize, Clone, Debug, TS, PartialEq)]
+#[repr(u16)]
+#[derive(FromPrimitive, IntoPrimitive)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum RpcError {
+    NoError = 0,
+    Undefined = 1,
+    NotFound = 2,
+    MalformedRequest = 3,
+    WrongSizeArgs = 4,
+    InvalidArgs = 5,
+    ReadOnly = 6,
+    WriteOnly = 7,
+    Timeout = 8,
+    Busy = 9,
+    WrongDeviceState = 10,
+    LoadFailed = 11,
+    LoadRpcFailed = 12,
+    SaveFailed = 13,
+    SaveWriteFailed = 14,
+    Internal = 15,
+    OutOfMemory = 16,
+    OutOfRange = 17,
+    #[num_enum(catch_all)]
+    Unknown(u16),
+}
+
+impl From<LibRpcErrorCode> for RpcError {
+    fn from(lib_error: LibRpcErrorCode) -> Self {
+        match lib_error {
+            LibRpcErrorCode::NoError => RpcError::NoError,
+            LibRpcErrorCode::Undefined => RpcError::Undefined,
+            LibRpcErrorCode::NotFound => RpcError::NotFound,
+            LibRpcErrorCode::MalformedRequest => RpcError::MalformedRequest,
+            LibRpcErrorCode::WrongSizeArgs => RpcError::WrongSizeArgs,
+            LibRpcErrorCode::InvalidArgs => RpcError::InvalidArgs,
+            LibRpcErrorCode::ReadOnly => RpcError::ReadOnly,
+            LibRpcErrorCode::WriteOnly => RpcError::WriteOnly,
+            LibRpcErrorCode::Timeout => RpcError::Timeout,
+            LibRpcErrorCode::Busy => RpcError::Busy,
+            LibRpcErrorCode::WrongDeviceState => RpcError::WrongDeviceState,
+            LibRpcErrorCode::LoadFailed => RpcError::LoadFailed,
+            LibRpcErrorCode::LoadRpcFailed => RpcError::LoadRpcFailed,
+            LibRpcErrorCode::SaveFailed => RpcError::SaveFailed,
+            LibRpcErrorCode::SaveWriteFailed => RpcError::SaveWriteFailed,
+            LibRpcErrorCode::Internal => RpcError::Internal,
+            LibRpcErrorCode::OutOfMemory => RpcError::OutOfMemory,
+            LibRpcErrorCode::OutOfRange => RpcError::OutOfRange,
+            LibRpcErrorCode::Unknown(v) => RpcError::Unknown(v),
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Debug, TS, PartialEq)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct RpcErrorPayload {
+    pub id: u16,
+    pub error: RpcError,
+    pub extra: Vec<u8>,
+}
+
+impl From<LibRpcErrorPayload> for RpcErrorPayload {
+    fn from(s: LibRpcErrorPayload ) -> Self {
+        Self {
+            id: s.id,
+            error: s.error.into(),
+            extra: s.extra,
         }
     }
 }

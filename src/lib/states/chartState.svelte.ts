@@ -233,7 +233,7 @@ class ChartState {
     layout = $state<Record<string, number>>({}); 
     chartLayout = $state<ChartLayout>('vertical');
 
-     addPlot() {
+    addPlot() {
         const newPlot = new PlotConfig('New Plot', {});
         
         this.plots.push(newPlot);

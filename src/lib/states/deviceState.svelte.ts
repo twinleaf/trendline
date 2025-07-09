@@ -35,32 +35,40 @@ class DeviceState {
 		listen<string>('device-removed', ({ payload: url }) => this.#removeDevice(url));
 	}
 
-	async #initializeState() {
-		try {
-			const allCurrentDevices = await invoke<UiDevice[]>('get_all_devices');
+	 async #initializeState() {
+        try {
+            const allCurrentDevices = await invoke<UiDevice[]>('get_all_devices');
+            if (allCurrentDevices.length === 0) {
+                console.log(`[DeviceState] Initial fetch found no connected devices.`);
+                return;
+            }
+            console.log(`[DeviceState] Initializing with ${allCurrentDevices.length} total devices.`);
 
-			if (allCurrentDevices.length > 0) {
-				console.log(`[DeviceState] Initial FETCH found ${allCurrentDevices.length} devices.`);
+            const groupedByPort = new Map<string, UiDevice[]>();
+            for (const device of allCurrentDevices) {
+                if (!groupedByPort.has(device.url)) {
+                    groupedByPort.set(device.url, []);
+                }
+                groupedByPort.get(device.url)!.push(device);
+            }
 
-				const groupedByPort = new Map<string, UiDevice[]>();
-				for (const device of allCurrentDevices) {
-					if (!groupedByPort.has(device.url)) {
-						groupedByPort.set(device.url, []);
-					}
-					groupedByPort.get(device.url)!.push(device);
-				}
+            for (const [url, devicesForPort] of groupedByPort.entries()) {
+                try {
+                    const currentState = await invoke<PortState>('get_port_state', { portUrl: url });
 
-				for (const [url, devicesForPort] of groupedByPort.entries()) {
-					const portState = devicesForPort[0]?.state;
-					this.#devicesMap.set(url, { state: portState, devices: devicesForPort });
-				}
-			} else {
-				console.log(`[DeviceState] Initial fetch found no connected devices.`);
-			}
-		} catch (e) {
-			console.error('Failed to get initial device state from backend:', e);
-		}
-	}
+                    this.#devicesMap.set(url, { state: currentState, devices: devicesForPort });
+                    console.log(`[DeviceState] Hydrated port ${url} with state: ${JSON.stringify(currentState)}`);
+
+                } catch (e) {
+                    console.error(`[DeviceState] Failed to get real-time state for port ${url}. Using fallback.`, e);
+                    const fallbackState = devicesForPort[0]?.state ?? 'Disconnected';
+                    this.#devicesMap.set(url, { state: fallbackState, devices: devicesForPort });
+                }
+            }
+        } catch (e) {
+            console.error('Failed to get initial device list from backend:', e);
+        }
+    }
 
 
 	#setPortState(url: string, state: PortState) {

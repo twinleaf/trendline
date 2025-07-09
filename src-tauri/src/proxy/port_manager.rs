@@ -30,15 +30,25 @@ pub enum PortCommand {
         // For a real implementation, you'd add a `responder: oneshot::Sender<Result<Vec<u8>, RpcError>>`
         // to send the result back to the caller.
     },
+    // GetRpcs {
+    //     route: DeviceRoute,
+    //     responder: Sender<Result<Vec<RpcParameter>, String>>, // Changed
+    // },
+    // SetRpc {
+    //     route: DeviceRoute,
+    //     name: String,
+    //     value: RpcValue,
+    //     responder: Sender<Result<(), String>>, // Changed
+    // },
     Shutdown,
 }
 
 pub struct PortManager {
-    url: String,
-    state: Mutex<PortState>,
-    proxy: Mutex<Option<Arc<proxy::Interface>>>,
+    pub url: String,
+    pub state: Mutex<PortState>,
+    pub proxy: Mutex<Option<Arc<proxy::Interface>>>,
     pub devices: Mutex<HashMap<DeviceRoute, (Device, UiDevice)>>,
-    command_tx: crossbeam::channel::Sender<PortCommand>,
+    pub command_tx: crossbeam::channel::Sender<PortCommand>,
     app: tauri::AppHandle,
     capture: CaptureState,
 }
