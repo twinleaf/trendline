@@ -2,6 +2,7 @@
 //! Front-end facing data shapes
 
 use serde::Serialize;
+use serde_json::Value;
 use ts_rs::TS;
 use num_enum::{FromPrimitive, IntoPrimitive};
 
@@ -31,6 +32,9 @@ use twinleaf::tio::proto::meta::{
 use twinleaf::tio::proto::rpc::{
     RpcErrorCode as LibRpcErrorCode, RpcErrorPayload as LibRpcErrorPayload
 };
+
+use twinleaf::tio::proxy::RpcError as LibProxyError;
+
 
 // Device -----------------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
@@ -153,12 +157,16 @@ pub struct RpcMeta {
     pub writable: bool,
     pub persistent: bool,
     pub unknown: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(type = "any")]
+    pub value: Option<Value>,
 }
+
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[repr(u16)]
 #[derive(FromPrimitive, IntoPrimitive)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
-pub enum RpcError {
+pub enum RpcErrorCode {
     NoError = 0,
     Undefined = 1,
     NotFound = 2,
@@ -181,28 +189,28 @@ pub enum RpcError {
     Unknown(u16),
 }
 
-impl From<LibRpcErrorCode> for RpcError {
+impl From<LibRpcErrorCode> for RpcErrorCode {
     fn from(lib_error: LibRpcErrorCode) -> Self {
         match lib_error {
-            LibRpcErrorCode::NoError => RpcError::NoError,
-            LibRpcErrorCode::Undefined => RpcError::Undefined,
-            LibRpcErrorCode::NotFound => RpcError::NotFound,
-            LibRpcErrorCode::MalformedRequest => RpcError::MalformedRequest,
-            LibRpcErrorCode::WrongSizeArgs => RpcError::WrongSizeArgs,
-            LibRpcErrorCode::InvalidArgs => RpcError::InvalidArgs,
-            LibRpcErrorCode::ReadOnly => RpcError::ReadOnly,
-            LibRpcErrorCode::WriteOnly => RpcError::WriteOnly,
-            LibRpcErrorCode::Timeout => RpcError::Timeout,
-            LibRpcErrorCode::Busy => RpcError::Busy,
-            LibRpcErrorCode::WrongDeviceState => RpcError::WrongDeviceState,
-            LibRpcErrorCode::LoadFailed => RpcError::LoadFailed,
-            LibRpcErrorCode::LoadRpcFailed => RpcError::LoadRpcFailed,
-            LibRpcErrorCode::SaveFailed => RpcError::SaveFailed,
-            LibRpcErrorCode::SaveWriteFailed => RpcError::SaveWriteFailed,
-            LibRpcErrorCode::Internal => RpcError::Internal,
-            LibRpcErrorCode::OutOfMemory => RpcError::OutOfMemory,
-            LibRpcErrorCode::OutOfRange => RpcError::OutOfRange,
-            LibRpcErrorCode::Unknown(v) => RpcError::Unknown(v),
+            LibRpcErrorCode::NoError => RpcErrorCode::NoError,
+            LibRpcErrorCode::Undefined => RpcErrorCode::Undefined,
+            LibRpcErrorCode::NotFound => RpcErrorCode::NotFound,
+            LibRpcErrorCode::MalformedRequest => RpcErrorCode::MalformedRequest,
+            LibRpcErrorCode::WrongSizeArgs => RpcErrorCode::WrongSizeArgs,
+            LibRpcErrorCode::InvalidArgs => RpcErrorCode::InvalidArgs,
+            LibRpcErrorCode::ReadOnly => RpcErrorCode::ReadOnly,
+            LibRpcErrorCode::WriteOnly => RpcErrorCode::WriteOnly,
+            LibRpcErrorCode::Timeout => RpcErrorCode::Timeout,
+            LibRpcErrorCode::Busy => RpcErrorCode::Busy,
+            LibRpcErrorCode::WrongDeviceState => RpcErrorCode::WrongDeviceState,
+            LibRpcErrorCode::LoadFailed => RpcErrorCode::LoadFailed,
+            LibRpcErrorCode::LoadRpcFailed => RpcErrorCode::LoadRpcFailed,
+            LibRpcErrorCode::SaveFailed => RpcErrorCode::SaveFailed,
+            LibRpcErrorCode::SaveWriteFailed => RpcErrorCode::SaveWriteFailed,
+            LibRpcErrorCode::Internal => RpcErrorCode::Internal,
+            LibRpcErrorCode::OutOfMemory => RpcErrorCode::OutOfMemory,
+            LibRpcErrorCode::OutOfRange => RpcErrorCode::OutOfRange,
+            LibRpcErrorCode::Unknown(v) => RpcErrorCode::Unknown(v),
         }
     }
 }
@@ -211,7 +219,7 @@ impl From<LibRpcErrorCode> for RpcError {
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct RpcErrorPayload {
     pub id: u16,
-    pub error: RpcError,
+    pub error: RpcErrorCode,
     pub extra: Vec<u8>,
 }
 
@@ -221,6 +229,43 @@ impl From<LibRpcErrorPayload> for RpcErrorPayload {
             id: s.id,
             error: s.error.into(),
             extra: s.extra,
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Debug, TS, PartialEq)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+#[serde(tag = "type", content = "payload")]
+pub enum RpcError {
+    ExecError(RpcErrorPayload), 
+    SendFailed(String),
+    RecvFailed(String),
+    TypeError,
+    AppLogic(String),
+}
+
+impl From<LibProxyError> for RpcError {
+    fn from(lib_err: LibProxyError) -> Self {
+        match lib_err {
+            LibProxyError::ExecError(payload) => RpcError::ExecError(payload.into()),
+            
+            LibProxyError::SendFailed(send_error) => {
+                let msg = match send_error {
+                    twinleaf::tio::proxy::SendError::WouldBlock(_) => "Send would block.".to_string(),
+                    twinleaf::tio::proxy::SendError::ProxyDisconnected(_) => "Proxy disconnected during send.".to_string(),
+                    twinleaf::tio::proxy::SendError::InvalidRoute(_) => "Invalid device route for send.".to_string(),
+                };
+                RpcError::SendFailed(msg)
+            },
+            
+            LibProxyError::RecvFailed(recv_error) => {
+                let msg = match recv_error {
+                    twinleaf::tio::proxy::RecvError::WouldBlock => "Receive would block.".to_string(),
+                    twinleaf::tio::proxy::RecvError::ProxyDisconnected => "Proxy disconnected during receive.".to_string(),
+                };
+                RpcError::RecvFailed(msg)
+            },
+            LibProxyError::TypeError => RpcError::TypeError,
         }
     }
 }
@@ -281,6 +326,7 @@ pub struct UiDevice {
     pub state: PortState,
     pub meta: DeviceMeta,
     pub streams: Vec<UiStream>,
+    pub rpcs: Vec<RpcMeta>,
 }
 
 // ───────────────────────── 4.  PlotData slice ───────────────────────────

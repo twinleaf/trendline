@@ -47,3 +47,9 @@ Goal: Clean up component-level TypeScript logic by moving it into the centralize
 
 Implementation Idea: Break down the monolithic chartState into smaller, modular uPlot configuration managers. This will simplify state management and make it easier to integrate with the new plot settings panels.
 
+❓ Things to refactor
+
+[ ] Move serialize `match rpc_type` into helper inside `twinleaf` crate
+[ ] Move `RpcMeta` into... somewhere (maybe `twinleaf::meta` but it's not relevant to `proto`)
+[ ] Move `device_enumerate()` into a `twinleaf` `util.rs` or something
+

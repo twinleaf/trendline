@@ -1,14 +1,16 @@
 use crate::state::capture::{CaptureState, DataColumnId, Point};
-use crate::shared::{ColumnMeta, DeviceMeta, PortState, UiDevice, UiStream};
-use crate::util;
+use crate::shared::{ColumnMeta, DeviceMeta, PortState, RpcError, RpcMeta, UiDevice, UiStream};
+use crate::util::{self, parse_arg_type_and_size, parse_permissions_string};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
     thread,
 };
+use serde_json::Value;
 use tauri::menu::MenuItemKind;
 use tauri::{Emitter, Manager};
+use tokio::sync::oneshot;
 use twinleaf::{
     data::Sample,
     tio::{
@@ -22,24 +24,12 @@ use twinleaf::{
 // Commands that can be sent from other parts of the application into the PortManager's thread.
 #[derive(Debug)]
 pub enum PortCommand {
-    /// Execute a raw RPC on a specific device.
-    Rpc {
+    ExecuteRpc {
         route: DeviceRoute,
         name: String,
-        args: Vec<u8>,
-        // For a real implementation, you'd add a `responder: oneshot::Sender<Result<Vec<u8>, RpcError>>`
-        // to send the result back to the caller.
+        args: Option<Value>, 
+        responder: oneshot::Sender<Result<Value, RpcError>>,
     },
-    // GetRpcs {
-    //     route: DeviceRoute,
-    //     responder: Sender<Result<Vec<RpcParameter>, String>>, // Changed
-    // },
-    // SetRpc {
-    //     route: DeviceRoute,
-    //     name: String,
-    //     value: RpcValue,
-    //     responder: Sender<Result<(), String>>, // Changed
-    // },
     Shutdown,
 }
 
@@ -49,8 +39,8 @@ pub struct PortManager {
     pub proxy: Mutex<Option<Arc<proxy::Interface>>>,
     pub devices: Mutex<HashMap<DeviceRoute, (Device, UiDevice)>>,
     pub command_tx: crossbeam::channel::Sender<PortCommand>,
-    app: tauri::AppHandle,
-    capture: CaptureState,
+    pub app: tauri::AppHandle,
+    pub capture: CaptureState,
 }
 
 impl PortManager {
@@ -151,22 +141,36 @@ impl PortManager {
                                     println!("[{}] Shutdown command received.", self_.url);
                                     break 'lifecycle;
                                 },
-                                PortCommand::Rpc { route, name, args } => {
-                                    println!("[{}] Received RPC for route '{}': {}", self_.url, route, name);
-                                    if let Some((device, _ui_device)) = devices.get_mut(&route) {
-                                        // The raw_rpc method is blocking, which is expected here.
-                                        match device.raw_rpc(&name, &args) {
-                                            Ok(reply) => {
-                                                // TODO: Send reply back to the caller via a oneshot channel.
-                                                println!("[{}]   -> RPC success: reply has {} bytes", self_.url, reply.len());
-                                            }
-                                            Err(e) => {
-                                                eprintln!("[{}]   -> RPC error: {:?}", self_.url, e);
+                                PortCommand::ExecuteRpc { route, name, args, responder } => {
+                                    let result: Result<Value, RpcError> = (|| {
+                                        
+                                        let ui_dev = devices.get(&route)
+                                            .map(|(_device, ui_device)| ui_device.clone())
+                                            .ok_or_else(|| RpcError::AppLogic(format!("Device with route '{}' not found.", route)))?;
+                                        
+                                        let rpc_meta = ui_dev.rpcs.iter().find(|r| r.name == name)
+                                            .ok_or_else(|| RpcError::AppLogic(format!("RPC '{}' not found in metadata.", name)))?;
+
+                                        let device = &mut devices.get_mut(&route).unwrap().0;
+
+                                        let arg_bytes = util::json_to_bytes(args, &rpc_meta.arg_type)
+                                            .map_err(|msg| RpcError::AppLogic(msg))?;
+
+                                        let reply_bytes = device.raw_rpc(&name, &arg_bytes)
+                                            .map_err(RpcError::from)?;
+                                        
+                                        let reply_value = util::bytes_to_json_value(&reply_bytes, &rpc_meta.arg_type)
+                                                            .unwrap_or(Value::Null);
+
+                                        if let Some((_d, ui_d)) = devices.get_mut(&route) {
+                                            if let Some(rpc) = ui_d.rpcs.iter_mut().find(|r| r.name == name) {
+                                                rpc.value = Some(reply_value.clone());
                                             }
                                         }
-                                    } else {
-                                        eprintln!("[{}]   -> RPC error: device not found for route '{}'", self_.url, route);
-                                    }
+
+                                        Ok(reply_value)
+                                    })();
+                                    let _ = responder.send(result);
                                 }
                             }
                         }
@@ -223,6 +227,17 @@ impl PortManager {
             let mut device = Device::new(dev_port);
             let metadata = device.get_metadata(); 
             println!("[{}]   -> Metadata for '{}': {:?}", self.url, route, metadata.device.name);
+
+            let mut rpc_list = Self::list_rpcs_for_device(&mut device);
+            for rpc_meta in &mut rpc_list {
+                if rpc_meta.readable {
+                    if let Ok(reply_bytes) = device.raw_rpc(&rpc_meta.name, &[]) {
+                        // Update the value in place
+                        rpc_meta.value = util::bytes_to_json_value(&reply_bytes, &rpc_meta.arg_type);
+                    }
+                }
+            }
+            println!("[{}]   -> Fetched {} RPCs for '{}'", self.url, rpc_list.len(), route);
             
             let mut sorted_streams_meta: Vec<_> = metadata.streams.values().collect();
             sorted_streams_meta.sort_by_key(|s| s.stream.stream_id);
@@ -250,6 +265,7 @@ impl PortManager {
                 state: self.state.lock().unwrap().clone(),
                 meta: DeviceMeta::from((*metadata.device).clone()),
                 streams: ui_streams,
+                rpcs: rpc_list,
             };
 
             discovered_ui_devices.push(ui_dev.clone());
@@ -340,5 +356,42 @@ impl PortManager {
                 self.capture.insert(&key, point);
             }
         }
+    }
+
+    pub fn list_rpcs_for_device(device: &mut Device) -> Vec<RpcMeta> {
+        let mut rpc_metas = Vec::new();
+        
+        let rpc_count: u16 = match device.get("rpc.listinfo") {
+            Ok(count) => count,
+            Err(_) => return rpc_metas, // Return empty list if device doesn't support this.
+        };
+        
+        for rpc_id in 0..rpc_count {
+            if let Ok((meta_bits, name)) = device.rpc::<u16, (u16, String)>("rpc.listinfo", rpc_id) {
+                
+                // Parse the meta_bits directly
+                let (arg_type, size) = parse_arg_type_and_size(meta_bits);
+                let permissions = parse_permissions_string(meta_bits);
+                let readable = (meta_bits & 0x0100) != 0;
+                let writable = (meta_bits & 0x0200) != 0;
+                let persistent = (meta_bits & 0x0400) != 0;
+                let unknown = meta_bits == 0;
+
+                // Create the RpcMeta struct directly
+                let meta = RpcMeta {
+                    name,
+                    size,
+                    permissions,
+                    arg_type,
+                    readable,
+                    writable,
+                    persistent,
+                    unknown,
+                    value: None, // This will be populated in the next step
+                };
+                rpc_metas.push(meta);
+            }
+        }
+        rpc_metas
     }
 }

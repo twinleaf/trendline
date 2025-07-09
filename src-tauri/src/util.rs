@@ -3,6 +3,8 @@ use tauri::menu::{Menu, MenuItemKind, Submenu};
 use tauri::Runtime;
 use serde::{self, Deserializer, Serializer, de::Error, Deserialize};
 use twinleaf::tio::proto::DeviceRoute;
+use twinleaf::tio::util::TioRpcReplyable;
+use serde_json::{json, Value};
 
 pub fn is_process_running(exe_name: &str) -> bool {
     let mut sys = System::new_all();
@@ -116,4 +118,89 @@ where
     let s = String::deserialize(deserializer)?;
      DeviceRoute::from_str(&s)
         .map_err(|_err| Error::custom(format!("Invalid DeviceRoute String: '{}'", s)))
+}
+
+pub fn bytes_to_json_value(reply_bytes: &[u8], rpc_type: &str) -> Option<Value> {
+    match rpc_type {
+        "u8"   => u8::from_reply(reply_bytes).ok().map(|v| json!(v)),
+        "u16"  => u16::from_reply(reply_bytes).ok().map(|v| json!(v)),
+        "u32"  => u32::from_reply(reply_bytes).ok().map(|v| json!(v)),
+        "u64"  => u64::from_reply(reply_bytes).ok().map(|v| json!(v)),
+        "i8"   => i8::from_reply(reply_bytes).ok().map(|v| json!(v)),
+        "i16"  => i16::from_reply(reply_bytes).ok().map(|v| json!(v)),
+        "i32"  => i32::from_reply(reply_bytes).ok().map(|v| json!(v)),
+        "i64"  => i64::from_reply(reply_bytes).ok().map(|v| json!(v)),
+        "f32"  => f32::from_reply(reply_bytes).ok().map(|v| json!(v)),
+        "f64"  => f64::from_reply(reply_bytes).ok().map(|v| json!(v)),
+        "string" => Some(json!(String::from_utf8_lossy(reply_bytes))),
+        _ => if rpc_type.starts_with("string<") {
+            Some(json!(String::from_utf8_lossy(reply_bytes)))
+        } else {
+            None
+        }
+    }
+}
+
+pub fn json_to_bytes(args: Option<Value>, rpc_type: &str) -> Result<Vec<u8>, String> {
+    let args = match args {
+        None => return Ok(vec![]),
+        Some(val) => val,
+    };
+
+    match rpc_type.split('<').next().unwrap_or(rpc_type) {
+        "string" => {
+            if let Some(s) = args.as_str() {
+                Ok(s.as_bytes().to_vec())
+            } else {
+                Err(format!("Expected a string for RPC, but got: {:?}", args))
+            }
+        },
+        "u8" => args.as_u64().map(|v| (v as u8).to_le_bytes().to_vec()).ok_or_else(|| "Expected a u8".into()),
+        "u16" => args.as_u64().map(|v| (v as u16).to_le_bytes().to_vec()).ok_or_else(|| "Expected a u16".into()),
+        "u32" => args.as_u64().map(|v| (v as u32).to_le_bytes().to_vec()).ok_or_else(|| "Expected a u32".into()),
+        "u64" => args.as_u64().map(|v| v.to_le_bytes().to_vec()).ok_or_else(|| "Expected a u64".into()),
+        
+        "i8" => args.as_i64().map(|v| (v as i8).to_le_bytes().to_vec()).ok_or_else(|| "Expected an i8".into()),
+        "i16" => args.as_i64().map(|v| (v as i16).to_le_bytes().to_vec()).ok_or_else(|| "Expected an i16".into()),
+        "i32" => args.as_i64().map(|v| (v as i32).to_le_bytes().to_vec()).ok_or_else(|| "Expected an i32".into()),
+        "i64" => args.as_i64().map(|v| v.to_le_bytes().to_vec()).ok_or_else(|| "Expected an i64".into()),
+
+        "f32" => args.as_f64().map(|v| (v as f32).to_le_bytes().to_vec()).ok_or_else(|| "Expected an f32".into()),
+        "f64" => args.as_f64().map(|v| v.to_le_bytes().to_vec()).ok_or_else(|| "Expected an f64".into()),
+
+        _ => Err(format!("Unsupported RPC argument type: {}", rpc_type)),
+    }
+}
+
+pub fn parse_arg_type_and_size(meta_bits: u16) -> (String, usize) {
+    let size_code = ((meta_bits >> 4) & 0xF) as usize;
+    let type_code = meta_bits & 0xF;
+
+    let type_str = match type_code {
+        0 => match size_code { 1 => "u8", 2 => "u16", 4 => "u32", 8 => "u64", _ => "" },
+        1 => match size_code { 1 => "i8", 2 => "i16", 4 => "i32", 8 => "i64", _ => "" },
+        2 => match size_code { 4 => "f32", 8 => "f64", _ => "" },
+        3 => "string",
+        _ => "",
+    }.to_string();
+    
+    let final_type_str = if type_str == "string" && size_code != 0 {
+        format!("string<{}>", size_code)
+    } else {
+        type_str
+    };
+
+    (final_type_str, size_code)
+}
+
+pub fn parse_permissions_string(meta_bits: u16) -> String {
+    if meta_bits == 0 { // is_unknown
+        return "???".to_string();
+    }
+    format!(
+        "{}{}{}",
+        if (meta_bits & 0x0100) != 0 { "R" } else { "-" }, // readable
+        if (meta_bits & 0x0200) != 0 { "W" } else { "-" }, // writable
+        if (meta_bits & 0x0400) != 0 { "P" } else { "-" }  // persistent
+    )
 }

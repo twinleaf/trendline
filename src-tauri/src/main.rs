@@ -66,8 +66,8 @@ fn main() {
             trendline_lib::commands::capture::get_latest_plot_data,
             trendline_lib::commands::capture::get_latest_fft_data,
             trendline_lib::commands::settings::get_all_devices,
-            trendline_lib::commands::settings::get_port_state
-            // trendline_lib::commands::settings::execute_rpc,
+            trendline_lib::commands::settings::get_port_state,
+            trendline_lib::commands::settings::execute_rpc,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
