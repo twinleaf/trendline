@@ -36,6 +36,10 @@ impl ProxyRegister {
         F: Fn(&String) -> bool,
     {
         self.ports.retain(|url, pm| {
+            if !url.starts_with("serial://") {
+                return true;
+            }
+            
             if keep(url) {
                 true
             } else {

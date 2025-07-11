@@ -56,7 +56,7 @@
                         }
                     } else {
                         if (startTimeSeconds === null) {
-                            startTimeSeconds = Date.now() / 1000 - finalXValues[0];
+                            startTimeSeconds = Date.now() / 1000 - finalXValues[finalXValues.length-1];
                         }
                         finalXValues = finalXValues.map((t) => startTimeSeconds! + t);
                     }
@@ -90,7 +90,6 @@
 	$effect(() => {
 		if (!chartContainer) return;
 
-
 		const newUplotInstance = new uPlot(options, [[]], chartContainer);
 		uplot = newUplotInstance;
 
@@ -123,6 +122,11 @@
 			}
 		};
 	});
+
+	$effect(() => {
+        const _ = plot.viewType; 
+        startTimeSeconds = null;
+    });
 </script>
 
 <div bind:this={chartContainer} class="h-full w-full min-h-0"></div>

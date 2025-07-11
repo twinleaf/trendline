@@ -4,50 +4,20 @@
 	import * as Collapsible from '$lib/components/ui/collapsible';
 	import { Label } from '$lib/components/ui/label';
 	import { ChevronsUpDown }   from '@lucide/svelte';
+	import { LoaderCircleIcon } from '@lucide/svelte/icons';
 	import DeviceInfoHoverCard  from '$lib/components/device-select/DeviceInfoHoverCard.svelte';
 	import type { UiDevice } from '$lib/bindings/UiDevice';
+	import { deviceState } from '$lib/states/deviceState.svelte';
 
 	type DeviceWithChildren = UiDevice & { children: UiDevice[] };
 
 	let {
 		devices,
 		selectedParent = $bindable(),
-		childrenSelections = $bindable()
 	} = $props<{
 		devices: DeviceWithChildren[];
 		selectedParent: string;
-		childrenSelections: Map<string, Set<string>>;
 	}>();
-
-	$effect(() => {
-		const parentUrl = selectedParent;
-		if (!parentUrl) return;
-
-
-		if (!childrenSelections.has(parentUrl)) {
-			const parentDevice = devices.find((d: { url: any; }) => d.url === parentUrl);
-			if (parentDevice) {
-				const allChildrenRoutes = new Set(parentDevice.children.map((c: { route: any; }) => c.route));
-
-				const newSelections = new Map(childrenSelections);
-				newSelections.set(parentUrl, allChildrenRoutes);
-				childrenSelections = newSelections;
-			}
-		}
-	});
-
-	function toggleChild(childRoute: string, isChecked: boolean, parentUrl: string) {
-		const existingChildren = childrenSelections.get(parentUrl);
-
-		if (existingChildren) {
-			if (isChecked) {
-				existingChildren.add(childRoute);
-			} else {
-				existingChildren.delete(childRoute);
-			}
-		}
-	}
-
 
 	function handleKeyDown(event: KeyboardEvent) {
 		const form = (event.currentTarget as HTMLElement).closest('form');
@@ -87,6 +57,7 @@
 	tabindex={0}
 >
 	{#each devices as root (root.url)}
+	{@const state = deviceState.getPort(root.url)?.state}
 		<Collapsible.Root class="w-full">
 			<div class="flex items-center justify-between px-2 py-1.5">
 				<div class="flex items-center space-x-2">
@@ -95,6 +66,11 @@
 					<Label for={root.url} class="font-medium cursor-pointer">
 						{root.meta.name}
 					</Label>
+					{#if state === 'Discovery'}
+						<LoaderCircleIcon
+							class="size-4 animate-spin text-zinc-400"
+						/>
+					{/if}
 					<DeviceInfoHoverCard device={root} />
 				</div>
 				{#if root.children.length}
@@ -104,6 +80,8 @@
 					>
 						<ChevronsUpDown class="h-4 w-4" />
 					</Collapsible.Trigger>
+				{:else}
+					<div class="w-8 h-8"></div>
 				{/if}
 			</div>
 
@@ -112,8 +90,8 @@
 					<div class="flex items-center space-x-2 py-0.5">
 						<Checkbox
 							id={child.url + child.route}
-							checked={childrenSelections.get(root.url)?.has(child.route) ?? false}
-							onCheckedChange={(v) => toggleChild(child.route, !!v, root.url)}
+							checked={deviceState.childrenSelections.get(root.url)?.has(child.route) ?? false}
+							onCheckedChange={(v) => deviceState.toggleChildSelection(root.url, child.route, !!v)}
 						/>
 						<Label for={child.url + child.route} class="cursor-pointer text-sm">
 							{child.route.slice(1)}: {child.meta.name}

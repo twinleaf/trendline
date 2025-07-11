@@ -21,6 +21,12 @@ pub struct DataColumnId {
     pub column_index: usize,
 }
 
+impl DataColumnId {
+    pub fn stream_key(&self) -> Self {
+        Self { column_index: 0, ..self.clone() }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Point {
     pub x: f64,
@@ -63,6 +69,7 @@ pub struct Inner {
     pub buffers: DashMap<DataColumnId, Buffer>,
     pub active: DashMap<DataColumnId, ()>,
     pub offsets: DashMap<DataColumnId, f64>,
+    pub effective_sampling_rates: DashMap<DataColumnId, f64>,
     pub default_cap: usize,
 }
 
@@ -78,6 +85,7 @@ impl CaptureState {
                 buffers: DashMap::new(),
                 active: DashMap::new(),
                 offsets: DashMap::new(),
+                effective_sampling_rates: DashMap::new(),
                 default_cap: 120_000, // e.g., 1000 samples/sec * 120 seconds
             }),
         }
@@ -236,6 +244,15 @@ impl CaptureState {
             }
         }
     }
+    pub fn update_effective_sampling_rate(&self, key: &DataColumnId, rate: f64) {
+        self.inner.effective_sampling_rates.insert(key.stream_key(), rate);
+    }
+
+    pub fn get_effective_sampling_rate(&self, key: &DataColumnId) -> Option<f64> {
+        self.inner.effective_sampling_rates.get(&key.stream_key()).map(|r| *r.value())
+    }
+
+
 }
 
 #[cfg(test)]

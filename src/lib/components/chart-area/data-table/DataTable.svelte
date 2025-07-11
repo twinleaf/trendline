@@ -51,13 +51,16 @@
     });
 </script>
 
-<div class="rounded-md border">
-    <Table.Root>
-        <Table.Header>
+<div class="h-full rounded-md border">
+	<Table.Root class="block h-full w-full table-fixed">
+		<Table.Header class="h-[40px]">
             {#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
                 <Table.Row>
                     {#each headerGroup.headers as header (header.id)}
-                        <Table.Head colspan={header.colSpan}>
+                        <Table.Head
+                            colspan={header.colSpan}
+                            style="width: {header.getSize()}px;"
+                        >
                             {#if !header.isPlaceholder}
                                 <FlexRender
                                 content={header.column.columnDef.header}
@@ -69,11 +72,14 @@
                 </Table.Row>
             {/each}
         </Table.Header>
-        <Table.Body>
+        <Table.Body class="block h-[calc(100%-40px)] overflow-y-auto">
             {#each table.getRowModel().rows as row (row.id)}
                 <Table.Row data-state={row.getIsSelected() && "selected"}>
                     {#each row.getVisibleCells() as cell (cell.id)}
-                        <Table.Cell>
+                        <Table.Cell
+							class={cell.column.id === 'name' ? 'truncate' : ''}
+							style="width: {cell.column.getSize()}px;"
+						>
                             <FlexRender
                                 content={cell.column.columnDef.cell}
                                 context={cell.getContext()}

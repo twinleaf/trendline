@@ -13,6 +13,7 @@ use num_enum::{FromPrimitive, IntoPrimitive};
 pub enum PortState {
     Idle,
     Connecting,
+    Connected,
     Discovery,
     Streaming,
     Reconnecting,
@@ -33,11 +34,10 @@ use twinleaf::tio::proto::rpc::{
     RpcErrorCode as LibRpcErrorCode, RpcErrorPayload as LibRpcErrorPayload
 };
 
-use twinleaf::tio::proxy::RpcError as LibProxyError;
-
+use twinleaf::tio::proxy::{PortError, RpcError as LibProxyError};
 
 // Device -----------------------------------------------------------------
-#[derive(Serialize, Clone, Debug, TS, PartialEq)]
+#[derive(Serialize, Clone, Debug, TS, PartialEq, Default)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct DeviceMeta {
     pub serial_number: String,
@@ -242,6 +242,17 @@ pub enum RpcError {
     RecvFailed(String),
     TypeError,
     AppLogic(String),
+}
+impl From<String> for RpcError {
+    fn from(err: String) -> Self {
+        RpcError::AppLogic(err)
+    }
+}
+
+impl From<PortError> for RpcError {
+    fn from(err: PortError) -> Self {
+        RpcError::AppLogic(format!("Port Error: {:?}", err))
+    }
 }
 
 impl From<LibProxyError> for RpcError {

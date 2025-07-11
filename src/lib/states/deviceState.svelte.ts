@@ -4,6 +4,7 @@ import type { UiDevice } from '$lib/bindings/UiDevice';
 import { SvelteMap } from 'svelte/reactivity';
 import { invoke } from '@tauri-apps/api/core';
 
+type DeviceTreeItem = UiDevice & { children: UiDevice[] };
 
 export interface Selection {
 	portUrl: string;
@@ -13,13 +14,21 @@ export interface Selection {
 class DeviceState {
 	#devicesMap = new SvelteMap<string, { state: PortState; devices: UiDevice[]; }>;
 	selection = $state<Selection | null>(null);
+	childrenSelections = new SvelteMap<string, Set<string>>();
+
 
 	constructor() {
 		this.#initializeState();
 
-		listen<[string, PortState]>('port-state-changed', ({ payload: [url, st] }) =>
-			this.#setPortState(url, st)
-		);
+		listen<[string, PortState]>('port-state-changed', ({ payload: [url, newState] }) => {
+			this.#setPortState(url, newState);
+
+			// If a port becomes Streaming, set its default child selections.
+			if (newState === 'Streaming') {
+				this.#setDefaultChildrenForPort(url);
+			}
+		});
+
 		listen<UiDevice[]>('port-devices-discovered', ({ payload: new_devices }) => {
 			if (new_devices.length === 0) return;
 
@@ -32,7 +41,29 @@ class DeviceState {
 			this.#devicesMap.set(url, updatedEntry);
 
 		});
+		
 		listen<string>('device-removed', ({ payload: url }) => this.#removeDevice(url));
+
+		listen<UiDevice>('device-metadata-updated', ({ payload: updatedDevice }) => {
+			console.log(`[DeviceState] Metadata updated for device: ${updatedDevice.meta.name} on route ${updatedDevice.route}`);
+			const portUrl = updatedDevice.url;
+			const portEntry = this.#devicesMap.get(portUrl);
+
+			if (!portEntry) {
+				console.warn(`[DeviceState] Received metadata update for a device on an unknown port: ${portUrl}`);
+				return;
+			}
+            
+			const deviceIndex = portEntry.devices.findIndex(d => d.route === updatedDevice.route);
+
+            if (deviceIndex > -1) {
+                portEntry.devices[deviceIndex] = updatedDevice;
+
+                this.#devicesMap.set(portUrl, { ...portEntry });
+            } else {
+                console.warn(`[DeviceState] Could not find device with route ${updatedDevice.route} to update.`);
+            }
+		});
 	}
 
 	 async #initializeState() {
@@ -58,6 +89,9 @@ class DeviceState {
 
                     this.#devicesMap.set(url, { state: currentState, devices: devicesForPort });
                     console.log(`[DeviceState] Hydrated port ${url} with state: ${JSON.stringify(currentState)}`);
+					if (currentState === 'Streaming') {
+						this.#setDefaultChildrenForPort(url);
+					}
 
                 } catch (e) {
                     console.error(`[DeviceState] Failed to get real-time state for port ${url}. Using fallback.`, e);
@@ -77,24 +111,75 @@ class DeviceState {
         this.#devicesMap.set(url, updatedEntry);
 	}
 
+	#setDefaultChildrenForPort(url:string) {
+		if (this.childrenSelections.has(url)) {
+			return;
+		}
+
+		const portData = this.#devicesMap.get(url);
+		if (!portData || portData.devices.length === 0) {
+			return;
+		}
+
+		const parent = portData.devices.find((d) => d.route === '/' || d.route === '');
+		if (parent) {
+			const allChildrenRoutes = new Set(
+				portData.devices.filter((d) => d.route !== '/' && d.route !== '').map((d) => d.route)
+			);
+			this.childrenSelections.set(url, allChildrenRoutes);
+			console.log(`[DeviceState] Set default children for streaming port ${url}`);
+		}
+	}
+
 	#removeDevice(url: string) {
 		this.#devicesMap.delete(url);
+	}
+
+	toggleChildSelection(portUrl: string, childRoute: string, isChecked: boolean) {
+		const selections = this.childrenSelections.get(portUrl);
+		if (!selections) return;
+		
+		if (isChecked) {
+			selections.add(childRoute);
+		} else {
+			selections.delete(childRoute);
+		}
+		this.childrenSelections.set(portUrl, selections);
 	}
 
     devices = $derived.by(() => Array.from(this.#devicesMap.values()));
 
 	deviceTree = $derived.by(() => {
-		const out: (UiDevice & { children: UiDevice[] })[] = [];
-		for (const [url, { devices }] of this.#devicesMap.entries()) {
+		const out: DeviceTreeItem[] = [];
+
+		for (const [url, { state, devices }] of this.#devicesMap.entries()) {
 			const parent = devices.find((d) => d.route === '/' || d.route === '');
-			if (!parent) continue;
 
-			const children = devices
-				.filter((d) => d.route !== '/' && d.route !== '')
-				.slice()
-				.sort((a, b) => parseInt(a.route.slice(1), 10) - parseInt(b.route.slice(1), 10));
-
-			out.push({ ...parent, children });
+			if (state === 'Discovery' || state === 'Reconnecting') {
+				const placeholderDevice: DeviceTreeItem = {
+					url: url,
+					route: '',
+					state: state,
+					meta: {
+						name: url,
+						serial_number: 'N/A',
+						firmware_hash: 'N/A',
+						n_streams: 0,
+						session_id: 0
+					},
+					streams: [],
+					rpcs: [],
+					children: []
+				};
+				out.push(placeholderDevice);
+			}
+			else if (parent) {
+				const children = devices
+					.filter((d) => d.route !== '/' && d.route !== '')
+					.slice()
+					.sort((a, b) => parseInt(a.route.slice(1), 10) - parseInt(b.route.slice(1), 10));
+				out.push({ ...parent, children });
+			}
 		}
 		return out.sort((a, b) => a.url.localeCompare(b.url));
 	});

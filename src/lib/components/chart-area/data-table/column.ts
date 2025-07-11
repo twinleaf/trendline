@@ -38,11 +38,12 @@ export const columns: ColumnDef<TreeRow>[] = [
     id: 'name',
     header: 'Name',
     cell: ({ row }) => renderComponent(TreeNodeCell, { row }),
+    size: 350,
   },
   {
     accessorKey: 'units',
     header: 'Units',
     cell: ({ row }) => (row.original.type === 'column' ? row.original.units : ''),
-    size: 80,
+    size: 100,
   }
 ];

@@ -42,7 +42,6 @@ pub fn get_latest_fft_data(
     keys: Vec<DataColumnId>,
     window_seconds: f64,
     capture: State<CaptureState>,
-    registry: State<Arc<ProxyRegister>>,
 ) -> Result<PlotData, String> {
     if keys.is_empty() {
         return Ok(PlotData::empty());
@@ -58,29 +57,9 @@ pub fn get_latest_fft_data(
     let mut first_sampling_rate: Option<f64> = None;
 
     for key in &keys {
-        let port_manager = registry.get(&key.port_url).ok_or("Port not found")?;
-        let devices = port_manager.devices.lock().unwrap();
-        let (_device, ui_device) = devices.get(&key.device_route).ok_or("Device not found")?;
-
-        let stream = ui_device
-            .streams
-            .iter()
-            .find(|s| s.meta.stream_id == key.stream_id)
-            .ok_or("Stream not found")?;
-
-        let segment = stream
-            .segment
-            .as_ref()
-            .ok_or("Stream segment metadata not available")?;
-
-        let sampling_rate = segment.sampling_rate as f64;
-        let decimation = segment.decimation as f64;
-
-        let effective_sampling_rate = if decimation > 1.0 {
-            sampling_rate / decimation
-        } else {
-            sampling_rate
-        };
+        let stream_key = key.stream_key();
+        let effective_sampling_rate = capture.get_effective_sampling_rate(&stream_key)
+            .ok_or_else(|| format!("Effective sampling rate not found for stream: {:?}", stream_key))?;
 
         if let Some(first_rate) = first_sampling_rate {
             if (effective_sampling_rate - first_rate).abs() > 1e-6 { // Floating point comparison
@@ -110,7 +89,7 @@ pub fn get_latest_fft_data(
         return Ok(PlotData::empty());
     }
 
-    let sampling_rate = first_sampling_rate.unwrap();
+    let sampling_rate = first_sampling_rate.ok_or("Could not determine sampling rate.")?;
     let mut all_asds: Vec<Vec<f64>> = Vec::new();
     let mut frequencies: Option<Vec<f64>> = None;
 
@@ -163,8 +142,8 @@ pub fn confirm_selection(
     let mut all_selected_routes = children_routes;
     all_selected_routes.push("".to_string());
 
-    // Lock the devices map for reading.
-    let devices_map = port_manager.devices.lock().unwrap();
+    let devices_map = port_manager.devices.lock()
+        .map_err(|e| format!("Failed to access device list. A background task may have crashed. Details: {}", e))?;
 
     for route_str in all_selected_routes {
         let route = match DeviceRoute::from_str(&route_str) {
@@ -194,3 +173,12 @@ pub fn confirm_selection(
     Ok(())
 }
 
+#[tauri::command]
+pub fn connect_to_port(
+    port_url: String,
+    registry: State<'_, Arc<ProxyRegister>>,
+) -> Result<(), String> {
+    println!("[Command] connect_to_port: Ensuring connection to '{}'", port_url);
+    registry.ensure(port_url);
+    Ok(())
+}

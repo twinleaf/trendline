@@ -136,7 +136,7 @@
                                                         <Settings class="size-5 text-muted-foreground" />
                                                     </Popover.Trigger>
                                                     <Popover.Content class="w-[600px]">
-                                                        <div class="max-h-[50vh] overflow-y-auto p-2">
+                                                        <div class="max-h-[50vh] p-2">
                                                             <DataTable 
                                                                 {columns} 
                                                                 data={treeData} 

@@ -91,7 +91,18 @@ export class PlotConfig {
                 if (this.viewType === 'fft') {
                     scalesConfig[unit] = { 
                         auto: true,
-                        range: (u, dataMin, dataMax) => [0.001, dataMax * 11]
+                        range: (u, dataMin, dataMax) => {
+                            const safeDataMin = Math.max(dataMin, Number.EPSILON);
+                            const safeDataMax = Math.max(dataMax, Number.EPSILON);
+
+                            const minPower = Math.floor(Math.log10(safeDataMin));
+                            const finalMin = 10 ** (minPower - 1);
+
+                            const maxPower = Math.ceil(Math.log10(safeDataMax));
+                            const finalMax = 10 ** (maxPower + 1);
+
+                            return [finalMin, finalMax];
+                        }
                     };
                 }
                 else {
@@ -107,20 +118,30 @@ export class PlotConfig {
         for (const unit of uniqueUnits) {
             if (!unit) continue;
             const axisOptions: uPlot.Axis = {
-                    scale: unit,
-                    label: unit,
-                    labelGap: 5,
-                    stroke: this.series.find(s => s.uPlotSeries.scale === unit)?.uPlotSeries.stroke,
-                };
+                scale: unit,
+                label: unit,
+                labelGap: 5,
+                stroke: this.series.find(s => s.uPlotSeries.scale === unit)?.uPlotSeries.stroke,
+                values: (u, vals) => {
+                    if (!vals.length) {
+                        return [];
+                    }
 
-            if (this.viewType === 'timeseries') {
-                axisOptions.values = (u, vals) => {
+                    const minTickAbs = Math.min(...vals.map(v => v == null || v === 0 ? Infinity : Math.abs(v)));
+
+
+                    if (isFinite(minTickAbs) && minTickAbs < 0.001) {
+                        return vals.map(v => {
+                            if (v == null) return "";
+                            if (v === 0) return "0 ";
+                            return v.toExponential(2) + " ";
+                        });
+                    }
+
                     const scale = u.scales[unit!];
-
                     if (!scale || scale.min == null || scale.max == null) {
                         return vals.map(v => v == null ? "" : v.toFixed(2) + " ");
                     }
-
                     const range = scale.max - scale.min;
                     
                     let decimals;
@@ -130,8 +151,8 @@ export class PlotConfig {
                     else decimals = 0;
                     
                     return vals.map(v => v == null ? "" : v.toFixed(decimals) + " ");
-                };
-            }
+                }
+            };
 
             if (yAxisCount > 0) {
                 axisOptions.side = 1;

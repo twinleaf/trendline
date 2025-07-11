@@ -1,18 +1,18 @@
 use crate::state::capture::{CaptureState, DataColumnId, Point};
-use crate::shared::{ColumnMeta, DeviceMeta, PortState, RpcError, RpcMeta, UiDevice, UiStream};
+use crate::shared::{ColumnMeta, DeviceMeta, PortState, RpcMeta, UiDevice, UiStream};
 use crate::util::{self, parse_arg_type_and_size, parse_permissions_string};
+use std::panic::AssertUnwindSafe;
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
     thread,
+    panic,
 };
-use serde_json::Value;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::menu::MenuItemKind;
 use tauri::{Emitter, Manager};
-use tokio::sync::oneshot;
 use twinleaf::{
-    data::Sample,
     tio::{
         proto::{DeviceRoute},
         proxy::{self, Event},
@@ -20,16 +20,15 @@ use twinleaf::{
     Device,
 };
 
+pub struct DebugCounters {
+    pub polls: AtomicUsize,
+    pub samples_received: AtomicUsize,
+    pub points_inserted: AtomicUsize,
+}
 
 // Commands that can be sent from other parts of the application into the PortManager's thread.
 #[derive(Debug)]
 pub enum PortCommand {
-    ExecuteRpc {
-        route: DeviceRoute,
-        name: String,
-        args: Option<Value>, 
-        responder: oneshot::Sender<Result<Value, RpcError>>,
-    },
     Shutdown,
 }
 
@@ -41,6 +40,7 @@ pub struct PortManager {
     pub command_tx: crossbeam::channel::Sender<PortCommand>,
     pub app: tauri::AppHandle,
     pub capture: CaptureState,
+    pub counters: DebugCounters,
 }
 
 impl PortManager {
@@ -55,13 +55,17 @@ impl PortManager {
             command_tx,
             app,
             capture,
+            counters: DebugCounters {
+                polls: AtomicUsize::new(0),
+                samples_received: AtomicUsize::new(0),
+                points_inserted: AtomicUsize::new(0),
+            },
         });
 
         Self::spawn_thread(pm.clone(), command_rx);
         pm
     }
 
-    /// Spawns the dedicated thread that manages the connection lifecycle.
     fn spawn_thread(
         self_: Arc<Self>,
         command_rx: crossbeam::channel::Receiver<PortCommand>,
@@ -69,9 +73,16 @@ impl PortManager {
         thread::Builder::new()
             .name(format!("port-{}", self_.url))
             .spawn(move || {
+                const MAX_RETRIES: u32 = 3;
+                let mut consecutive_failures = 0;
 
                 'lifecycle: loop {
-                    // --- PHASE 1: CONNECTION ---
+                    if consecutive_failures >= MAX_RETRIES {
+                        let err_msg = format!("Connection failed after {} attempts. Giving up.", MAX_RETRIES);
+                        eprintln!("[{}] {}", self_.url, err_msg);
+                        self_.set_state(PortState::Error(err_msg));
+                        break 'lifecycle;
+                    }
                     self_.set_state(PortState::Connecting);
                     println!("[{}] Establishing proxy...", self_.url);
 
@@ -81,110 +92,73 @@ impl PortManager {
                     let proxy_if = Arc::new(proxy::Interface::new_proxy(
                         &self_.url,
                         reconnect_timeout,
-                        Some(status_tx),
+                        Some(status_tx.clone()),
                     ));
-                    
-                    
-                    // Store the interface so other parts of the app could potentially use it.
                     *self_.proxy.lock().unwrap() = Some(proxy_if.clone());
 
-                    // Wait for the connection to be established.
                     match Self::wait_for_connection(&status_rx) {
                         Ok(_) => {
-                             println!("[{}] Proxy connected.", self_.url);
+                            self_.set_state(PortState::Connected);
+                            println!("[{}] Proxy connected.", self_.url);
                         },
                         Err(_) => {
                             println!("[{}] Failed to connect. Will retry.", self_.url);
                             self_.set_state(PortState::Disconnected);
+                            *self_.proxy.lock().unwrap() = None;
+                            consecutive_failures += 1;
                             thread::sleep(Duration::from_secs(5));
-                            continue 'lifecycle; // Restart the connection process
+                            continue 'lifecycle;
                         }
                     }
 
-                    // --- PHASE 2: DEVICE DISCOVERY ---
-                    self_.set_state(PortState::Discovery);
-                    println!("[{}] Starting device discovery on proxy stream...", self_.url);
                     if let Err(e) = self_.discover_devices(&proxy_if) {
                         eprintln!("[{}] Discovery failed: {:?}. Retrying.", self_.url, e);
+                        consecutive_failures += 1;
+                        thread::sleep(Duration::from_secs(5)); 
                         continue 'lifecycle;
                     }
-                    println!("[{}] Discovery finished.", self_.url);
 
-                    // --- PHASE 3: STREAMING & COMMAND HANDLING ---
+                    consecutive_failures = 0;
+                    println!("[{}] Discovery finished. Entering streaming mode.", self_.url);
                     self_.set_state(PortState::Streaming);
-                    println!("[{}] Entering streaming mode.", self_.url);
+                    
+                    let mut last_debug_print = Instant::now();
+
                     loop {
-                        // Check for status changes from the proxy (e.g., disconnects)
                         if let Ok(event) = status_rx.try_recv() {
-                            match event {
-                                Event::SensorDisconnected => {
-                                    println!("[{}] Sensor disconnected. Attempting to reconnect...", self_.url);
+                           match event {
+                                Event::SensorDisconnected | Event::Exiting | Event::FatalError(_) => {
+                                    println!("[{}] Proxy-level disconnect event received: {:?}. Restarting connection.", self_.url, event);
                                     self_.set_state(PortState::Reconnecting);
                                     continue 'lifecycle;
                                 }
-                                Event::Exiting | Event::FatalError(_) => {
-                                    eprintln!("[{}] Fatal proxy error. Shutting down port.", self_.url);
-                                    self_.set_state(PortState::Disconnected);
-                                    break 'lifecycle;
-                                }
-                                _ => { /* Other events can be logged if needed */ }
-                            }
+                                _ => {} 
+                           }
                         }
-                        
-                        // Lock the devices map once to handle all device-related work for this loop iteration.
-                        let mut devices = self_.devices.lock().unwrap();
 
-                        // Check for incoming commands from the app
                         if let Ok(command) = command_rx.try_recv() {
-                            match command {
+                           match command {
                                 PortCommand::Shutdown => {
                                     println!("[{}] Shutdown command received.", self_.url);
                                     break 'lifecycle;
-                                },
-                                PortCommand::ExecuteRpc { route, name, args, responder } => {
-                                    let result: Result<Value, RpcError> = (|| {
-                                        
-                                        let ui_dev = devices.get(&route)
-                                            .map(|(_device, ui_device)| ui_device.clone())
-                                            .ok_or_else(|| RpcError::AppLogic(format!("Device with route '{}' not found.", route)))?;
-                                        
-                                        let rpc_meta = ui_dev.rpcs.iter().find(|r| r.name == name)
-                                            .ok_or_else(|| RpcError::AppLogic(format!("RPC '{}' not found in metadata.", name)))?;
-
-                                        let device = &mut devices.get_mut(&route).unwrap().0;
-
-                                        let arg_bytes = util::json_to_bytes(args, &rpc_meta.arg_type)
-                                            .map_err(|msg| RpcError::AppLogic(msg))?;
-
-                                        let reply_bytes = device.raw_rpc(&name, &arg_bytes)
-                                            .map_err(RpcError::from)?;
-                                        
-                                        let reply_value = util::bytes_to_json_value(&reply_bytes, &rpc_meta.arg_type)
-                                                            .unwrap_or(Value::Null);
-
-                                        if let Some((_d, ui_d)) = devices.get_mut(&route) {
-                                            if let Some(rpc) = ui_d.rpcs.iter_mut().find(|r| r.name == name) {
-                                                rpc.value = Some(reply_value.clone());
-                                            }
-                                        }
-
-                                        Ok(reply_value)
-                                    })();
-                                    let _ = responder.send(result);
                                 }
-                            }
+                           }
                         }
 
-                        // Poll each device for new samples
-                        for (route, (device, _ui_device)) in devices.iter_mut() {
-                            while let Some(sample) = device.try_next() {
-                                self_.process_incoming_sample(&sample, route);
-                            }
-                        }
-                        
-                        drop(devices);
+                        self_.poll_device_data();
 
-                        // Don't busy-wait. A small sleep is crucial.
+                        if last_debug_print.elapsed() > Duration::from_secs(30) {
+                            let polls = self_.counters.polls.swap(0, Ordering::Relaxed);
+                            let samples = self_.counters.samples_received.swap(0, Ordering::Relaxed);
+                            let points = self_.counters.points_inserted.swap(0, Ordering::Relaxed);
+                            let current_state = self_.state.lock().unwrap().clone();
+                            println!(
+                                "[{}] Heartbeat (30s): State={:?}, Polls={}, SamplesRx={}, PointsIns={}",
+                                self_.url, current_state, polls, samples, points
+                            );
+                            last_debug_print = Instant::now();
+                        }
+
                         thread::sleep(Duration::from_millis(1));
                     }
                 }
@@ -193,92 +167,178 @@ impl PortManager {
                 println!("[{}] Port manager thread finished.", self_.url);
                 self_.devices.lock().unwrap().clear();
                 *self_.proxy.lock().unwrap() = None;
-                self_.set_state(PortState::Disconnected);
+                if *self_.state.lock().unwrap() != PortState::Error("".to_string()) {
+                    self_.set_state(PortState::Disconnected);
+                }
             })
             .expect("Failed to spawn port manager thread");
     }
+
+
+    fn wait_for_connection(status_rx: &crossbeam::channel::Receiver<Event>) -> Result<(), ()> {
+        loop {
+            match status_rx.recv_timeout(Duration::from_secs(10)) {
+                Ok(Event::SensorConnected) | Ok(Event::SensorReconnected) => return Ok(()),
+                Ok(Event::FailedToConnect) | Ok(Event::FailedToReconnect) | Ok(Event::FatalError(_)) | Ok(Event::Exiting) => return Err(()),
+                Err(crossbeam::channel::RecvTimeoutError::Disconnected) => return Err(()),
+                _ => continue,
+            }
+        }
+    }
     
-    fn discover_devices(&self, proxy_if: &proxy::Interface) -> Result<(), proxy::PortError> {
+    fn discover_devices(&self, proxy_if: &Arc<proxy::Interface>) -> Result<(), proxy::PortError> {
         let discovery_port = proxy_if.tree_probe()?;
         let mut discovered_routes = HashSet::new();
         let discovery_deadline = Instant::now() + Duration::from_secs(2);
 
+        self.set_state(PortState::Discovery);
+        println!("[{}] Starting device discovery...", self.url);
         println!("[{}] Listening for device routes...", self.url);
+
         while Instant::now() < discovery_deadline {
             if let Ok(pkt) = discovery_port.receiver().recv_timeout(Duration::from_millis(100)) {
-                discovered_routes.insert(pkt.routing);
+                if !self.devices.lock().unwrap().contains_key(&pkt.routing) {
+                    discovered_routes.insert(pkt.routing);
+                }
             }
         }
         drop(discovery_port);
-        println!("[{}] Found routes: {:?}", self.url, discovered_routes);
-
-
-        let mut discovered_ui_devices: Vec<UiDevice> = Vec::new();
-        
-        let mut devices = self.devices.lock().unwrap();
-        for route in discovered_routes {
-            if devices.contains_key(&route) {
-                continue;
-            }
-
-            println!("[{}] Initializing device on route '{}'...", self.url, route);
-            // Create a dedicated port for this device to get metadata and stream data.
-            let dev_port = proxy_if.device_full(route.clone())?;
-            let mut device = Device::new(dev_port);
-            let metadata = device.get_metadata(); 
-            println!("[{}]   -> Metadata for '{}': {:?}", self.url, route, metadata.device.name);
-
-            let mut rpc_list = Self::list_rpcs_for_device(&mut device);
-            for rpc_meta in &mut rpc_list {
-                if rpc_meta.readable {
-                    if let Ok(reply_bytes) = device.raw_rpc(&rpc_meta.name, &[]) {
-                        // Update the value in place
-                        rpc_meta.value = util::bytes_to_json_value(&reply_bytes, &rpc_meta.arg_type);
-                    }
-                }
-            }
-            println!("[{}]   -> Fetched {} RPCs for '{}'", self.url, rpc_list.len(), route);
-            
-            let mut sorted_streams_meta: Vec<_> = metadata.streams.values().collect();
-            sorted_streams_meta.sort_by_key(|s| s.stream.stream_id);
-            
-            let ui_streams: Vec<UiStream> = sorted_streams_meta.into_iter().map(|device_stream_meta| {
-                    let lib_stream_meta = &*device_stream_meta.stream;
-                    let lib_segment_meta = &*device_stream_meta.segment;
-                    
-                    let mut ui_columns: Vec<ColumnMeta> = device_stream_meta.columns.iter().map(|lib_column_arc| {
-                        ColumnMeta::from((**lib_column_arc).clone())
-                    }).collect();
-                    
-                    ui_columns.sort_by_key(|c| c.index);
-
-                    UiStream {
-                        meta: (*lib_stream_meta).clone().into(),
-                        segment: Some((*lib_segment_meta).clone().into()), 
-                        columns: ui_columns,
-                    }
-            }).collect();
-
-            let ui_dev = UiDevice{
-                url: self.url.clone(),
-                route: route.to_string(),
-                state: self.state.lock().unwrap().clone(),
-                meta: DeviceMeta::from((*metadata.device).clone()),
-                streams: ui_streams,
-                rpcs: rpc_list,
-            };
-
-            discovered_ui_devices.push(ui_dev.clone());
-            devices.insert(route, (device, ui_dev));
+        println!("[{}] Found new routes: {:?}", self.url, discovered_routes);
+        if discovered_routes.is_empty() {
+            return Ok(());
         }
 
-        if !discovered_ui_devices.is_empty() {
-            println!("[{}] -> Publishing batch of {} devices", self.url, discovered_ui_devices.len());
-            self.app.emit("port-devices-discovered", discovered_ui_devices).unwrap();
+        let mut discovered_info = Vec::new();
+        for route in discovered_routes {
+            println!("[{}] Initializing device on route '{}'...", self.url, route);
+            match self.initialize_ui_device(proxy_if, &route) {
+                Ok(ui_dev) => {
+                    discovered_info.push((route, ui_dev));
+                }
+                Err(e) => {
+                    eprintln!("[{}] Failed to build UI for device on route '{}': {:?}", self.url, route, e);
+                }
+            }
+        }
+        
+        if discovered_info.is_empty() {
+            return Ok(());
+        }
+
+
+        let mut devices = self.devices.lock().unwrap();
+        let mut discovered_ui_devices_for_event = Vec::new();
+        for (route, ui_dev) in discovered_info {
+            let data_device = Device::open(proxy_if, route.clone());
+            
+            discovered_ui_devices_for_event.push(ui_dev.clone());
+            devices.insert(route, (data_device, ui_dev));
+        }
+
+        if !discovered_ui_devices_for_event.is_empty() {
+            println!("[{}] -> Publishing batch of {} devices", self.url, discovered_ui_devices_for_event.len());
+            self.app.emit("port-devices-discovered", discovered_ui_devices_for_event).unwrap();
         }
 
         Ok(())
     }
+
+    pub fn initialize_ui_device(
+        &self,
+        proxy_if: &Arc<proxy::Interface>,
+        route: &DeviceRoute,
+    ) -> Result<UiDevice, proxy::PortError> {
+        
+        let rpc_port = proxy_if.device_rpc(route.clone())?;
+        let mut temp_rpc_device = Device::new(rpc_port);
+        let rpcs = self.fetch_rpcs(&mut temp_rpc_device);
+
+        let mut temp_data_device = Device::open(proxy_if, route.clone());
+        let (meta, streams) = self.fetch_metadata(&mut temp_data_device);
+        
+        println!("[{}]   -> Fetched {} streams and {} RPCs for '{}'", self.url, streams.len(), rpcs.len(), route);
+
+        Ok(UiDevice {
+            url: self.url.clone(),
+            route: route.to_string(),
+            state: self.state.lock().unwrap().clone(),
+            meta,
+            streams,
+            rpcs,
+        })
+    }
+
+    fn fetch_rpcs(&self, rpc_device: &mut Device) -> Vec<RpcMeta> {
+        let mut rpc_metas = Vec::new();
+        let rpc_count: u16 = match rpc_device.get("rpc.listinfo") {
+            Ok(count) => count,
+            Err(_) => return rpc_metas,
+        };
+
+        for rpc_id in 0..rpc_count {
+            if let Ok((meta_bits, name)) = rpc_device.rpc::<u16, (u16, String)>("rpc.listinfo", rpc_id) {
+                let (arg_type, size) = parse_arg_type_and_size(meta_bits);
+                let mut meta = RpcMeta {
+                    name: name.clone(),
+                    size,
+                    permissions: parse_permissions_string(meta_bits),
+                    arg_type,
+                    readable: (meta_bits & 0x0100) != 0,
+                    writable: (meta_bits & 0x0200) != 0,
+                    persistent: (meta_bits & 0x0400) != 0,
+                    unknown: meta_bits == 0,
+                    value: None,
+                };
+
+                if meta.readable {
+                    let result = panic::catch_unwind(AssertUnwindSafe(|| rpc_device.raw_rpc(&name, &[])));
+                    if let Ok(Ok(reply_bytes)) = result {
+                        meta.value = util::bytes_to_json_value(&reply_bytes, &meta.arg_type);
+                    }
+                }
+                rpc_metas.push(meta);
+            }
+        }
+        rpc_metas
+    }
+
+    fn fetch_metadata(&self, data_device: &mut Device) -> (DeviceMeta, Vec<UiStream>) {
+        let metadata = data_device.get_metadata();
+        
+        let device_meta = DeviceMeta::from((*metadata.device).clone());
+
+        let mut sorted_streams: Vec<_> = metadata.streams.values().collect();
+        sorted_streams.sort_by_key(|s| s.stream.stream_id);
+        
+        let ui_streams: Vec<UiStream> = sorted_streams.into_iter().map(|s| {
+            let mut ui_columns: Vec<ColumnMeta> = s.columns.iter().map(|c| ColumnMeta::from((**c).clone())).collect();
+            ui_columns.sort_by_key(|c| c.index);
+            UiStream {
+                meta: (*s.stream).clone().into(),
+                segment: Some((*s.segment).clone().into()),
+                columns: ui_columns,
+            }
+        }).collect();
+
+        (device_meta, ui_streams)
+    }
+
+    fn update_capture_state(&self, route: &DeviceRoute, streams: &[UiStream]) {
+    for stream in streams {
+        if let Some(segment) = &stream.segment {
+            let key = DataColumnId {
+                port_url: self.url.clone(),
+                device_route: route.clone(),
+                stream_id: stream.meta.stream_id,
+                column_index: 0,
+            };
+            let sampling_rate = segment.sampling_rate as f64;
+            let decimation = if segment.decimation > 0 { segment.decimation as f64 } else { 1.0 };
+            self.capture.update_effective_sampling_rate(&key, sampling_rate / decimation);
+        }
+    }
+}
+
 
     /// Gracefully shuts down the manager's thread.
     pub fn shutdown(&self) {
@@ -329,69 +389,63 @@ impl PortManager {
             }
         }
     }
-    
-    fn wait_for_connection(status_rx: &crossbeam::channel::Receiver<Event>) -> Result<(), ()> {
-        loop {
-            match status_rx.recv_timeout(Duration::from_secs(10)) {
-                Ok(Event::SensorConnected) | Ok(Event::SensorReconnected) => return Ok(()),
-                Ok(Event::FailedToConnect) | Ok(Event::FailedToReconnect) | Ok(Event::FatalError(_)) | Ok(Event::Exiting) => return Err(()),
-                Err(crossbeam::channel::RecvTimeoutError::Disconnected) => return Err(()),
-                _ => continue, // Other events are ignored during initial connection phase.
+
+    fn poll_device_data(&self) {
+        self.counters.polls.fetch_add(1, Ordering::Relaxed);
+        
+        let mut refresh_needed = HashSet::new();
+        
+        let mut devices_lock = self.devices.lock().unwrap();
+        for (route, (device, _)) in devices_lock.iter_mut() {
+            match device.drain() {
+                Ok(samples) => {
+                    for sample in samples {
+                        self.process_sample_data(route, &sample);
+
+                        if sample.meta_changed || sample.segment_changed {
+                            refresh_needed.insert(route.clone());
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error draining device at route {:?}: {:?}", route, e);
+                }
             }
         }
-    }
+        drop(devices_lock); 
 
-    fn process_incoming_sample(&self, sample: &Sample, route: &DeviceRoute) {
-        let timestamp = sample.timestamp_end();
-        for column in &sample.columns {
-            let key = DataColumnId {
-                port_url: self.url.clone(),
-                device_route: route.clone(),
-                stream_id: sample.stream.stream_id,
-                column_index: column.desc.index,
-            };
-
-            if let Some(value) = column.value.try_as_f64() {
-                let point = Point { x: timestamp, y: value };
-                self.capture.insert(&key, point);
-            }
+        if refresh_needed.is_empty() {
+            return;
         }
-    }
 
-    pub fn list_rpcs_for_device(device: &mut Device) -> Vec<RpcMeta> {
-        let mut rpc_metas = Vec::new();
-        
-        let rpc_count: u16 = match device.get("rpc.listinfo") {
-            Ok(count) => count,
-            Err(_) => return rpc_metas, // Return empty list if device doesn't support this.
-        };
-        
-        for rpc_id in 0..rpc_count {
-            if let Ok((meta_bits, name)) = device.rpc::<u16, (u16, String)>("rpc.listinfo", rpc_id) {
+        let mut devices_lock = self.devices.lock().unwrap();
+        for route in refresh_needed {
+            if let Some((data_device, ui_device)) = devices_lock.get_mut(&route) {
+                let (new_meta, new_streams) = self.fetch_metadata(data_device);
                 
-                // Parse the meta_bits directly
-                let (arg_type, size) = parse_arg_type_and_size(meta_bits);
-                let permissions = parse_permissions_string(meta_bits);
-                let readable = (meta_bits & 0x0100) != 0;
-                let writable = (meta_bits & 0x0200) != 0;
-                let persistent = (meta_bits & 0x0400) != 0;
-                let unknown = meta_bits == 0;
-
-                // Create the RpcMeta struct directly
-                let meta = RpcMeta {
-                    name,
-                    size,
-                    permissions,
-                    arg_type,
-                    readable,
-                    writable,
-                    persistent,
-                    unknown,
-                    value: None, // This will be populated in the next step
-                };
-                rpc_metas.push(meta);
+                self.update_capture_state(&route, &new_streams);
+                
+                ui_device.meta = new_meta;
+                ui_device.streams = new_streams;
+                
+                self.app.emit("device-metadata-updated", ui_device.clone()).unwrap();
             }
         }
-        rpc_metas
+    }
+
+    fn process_sample_data(&self, route: &DeviceRoute, sample: &twinleaf::data::Sample) {
+        for column in &sample.columns {
+            if let Some(value) = column.value.try_as_f64() {
+                let key = DataColumnId {
+                    port_url: self.url.clone(),
+                    device_route: route.clone(),
+                    stream_id: sample.stream.stream_id,
+                    column_index: column.desc.index,
+                };
+                let point = Point { x: sample.timestamp_end(), y: value };
+                self.capture.insert(&key, point);
+                self.counters.points_inserted.fetch_add(1, Ordering::Relaxed);
+            }
+        }
     }
 }

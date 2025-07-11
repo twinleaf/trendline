@@ -7,7 +7,7 @@
   --font-sans: "Inter", sans-serif; 
 
   /* 1. Base Colors from Twinleaf Palette */
-  --background: #0c1c0d; /* White */
+  --background: #ffffff; /* White */
   --foreground: #000000; /* Black Text */
 
   /* 2. Primary Interactive Color (The Twinleaf Green) */
@@ -92,6 +92,15 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
   }
 }
 
