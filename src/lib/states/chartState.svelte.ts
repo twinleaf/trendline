@@ -127,30 +127,23 @@ export class PlotConfig {
                         return [];
                     }
 
-                    const minTickAbs = Math.min(...vals.map(v => v == null || v === 0 ? Infinity : Math.abs(v)));
+                     return vals.map(v => {
+                        if (v == null) return "";
+                        if (v === 0) return "0 "; 
 
+                        const absV = Math.abs(v);
 
-                    if (isFinite(minTickAbs) && minTickAbs < 0.001) {
-                        return vals.map(v => {
-                            if (v == null) return "";
-                            if (v === 0) return "0 ";
-                            return v.toExponential(2) + " ";
-                        });
-                    }
-
-                    const scale = u.scales[unit!];
-                    if (!scale || scale.min == null || scale.max == null) {
-                        return vals.map(v => v == null ? "" : v.toFixed(2) + " ");
-                    }
-                    const range = scale.max - scale.min;
-                    
-                    let decimals;
-                    if (range <= 0) decimals = 2;
-                    else if (range < 1) decimals = 3;
-                    else if (range < 100) decimals = 2;
-                    else decimals = 0;
-                    
-                    return vals.map(v => v == null ? "" : v.toFixed(decimals) + " ");
+                        if (absV > 0 && absV < 0.01) {
+                            return v.toExponential(1) + " ";
+                        }
+                        if (absV < 10) {
+                            return v.toFixed(2) + " ";
+                        }
+                        if (absV < 100) {
+                            return v.toFixed(1) + " ";
+                        }
+                        return v.toFixed(0) + " ";
+                    });
                 }
             };
 

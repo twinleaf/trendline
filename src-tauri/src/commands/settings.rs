@@ -18,9 +18,11 @@ pub fn get_all_devices(registry: State<Arc<ProxyRegister>>) -> Vec<UiDevice> {
     for entry in registry.ports.iter() {
         let port_manager = entry.value();
         
-        let devices_lock = port_manager.devices.lock().unwrap();
+        let devices_map = port_manager.devices.read().unwrap();
         
-        for (_route, (_device, ui_device)) in devices_lock.iter() {
+        for device_entry in devices_map.values() {
+            let device_tuple = device_entry.lock().unwrap();
+            let (_device, ui_device) = &*device_tuple;
             all_devices.push(ui_device.clone());
         }
     }
@@ -60,9 +62,12 @@ pub async fn execute_rpc(
         .map_err(|_| RpcError::AppLogic(format!("Invalid device route string: '{}'", device_route)))?;
 
     let rpc_meta = {
-        let devices = port_manager.devices.lock().unwrap();
-        let (_data_device, ui_device) = devices.get(&route)
+        let devices_map = port_manager.devices.read().unwrap();
+        let device_entry = devices_map.get(&route)
             .ok_or_else(|| RpcError::AppLogic(format!("Device '{}' not found in cache.", route)))?;
+        
+        let device_tuple = device_entry.lock().unwrap();
+        let (_data_device, ui_device) = &*device_tuple;
         
         ui_device.rpcs.iter().find(|r| r.name == name)
             .cloned()
@@ -94,8 +99,10 @@ pub async fn execute_rpc(
             };
 
             if let Some(new_val) = new_value_to_cache {
-                let mut devices = port_manager.devices.lock().unwrap();
-                if let Some((_, ui_device)) = devices.get_mut(&route) {
+                let devices_map = port_manager.devices.read().unwrap();
+                if let Some(device_entry) = devices_map.get(&route) {
+                    let mut device_tuple = device_entry.lock().unwrap();
+                    let (_, ui_device) = &mut *device_tuple;
                     if let Some(cached_rpc) = ui_device.rpcs.iter_mut().find(|r| r.name == name) {
                         cached_rpc.value = Some(new_val);
                         port_manager.app.emit("device-metadata-updated", ui_device.clone()).unwrap();

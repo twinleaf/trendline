@@ -13,7 +13,6 @@ use num_enum::{FromPrimitive, IntoPrimitive};
 pub enum PortState {
     Idle,
     Connecting,
-    Connected,
     Discovery,
     Streaming,
     Reconnecting,

@@ -1,5 +1,5 @@
 use crate::state::capture::{CaptureState, DataColumnId, Point};
-use crate::shared::{PlotData};
+use crate::shared::{PlotData, PortState};
 use welch_sde::{Build, SpectralDensity};
 use tauri::State;
 use twinleaf::tio::proto::DeviceRoute;
@@ -138,11 +138,19 @@ pub fn confirm_selection(
         None => return Err(format!("Could not find PortManager for URL: {}", port_url)),
     };
 
+    let current_state = port_manager.state.lock().unwrap().clone();
+    if !matches!(current_state, PortState::Streaming) {
+        return Err(format!(
+            "Cannot confirm selection: port '{}' is not streaming. Current state: {:?}",
+            port_url, current_state
+        ));
+    }
+
     let mut keys_to_activate: Vec<DataColumnId> = Vec::new();
     let mut all_selected_routes = children_routes;
     all_selected_routes.push("".to_string());
 
-    let devices_map = port_manager.devices.lock()
+    let devices_map = port_manager.devices.read()
         .map_err(|e| format!("Failed to access device list. A background task may have crashed. Details: {}", e))?;
 
     for route_str in all_selected_routes {
@@ -151,8 +159,10 @@ pub fn confirm_selection(
             Err(_) => continue,
         };
 
-        // Get the tuple `(Device, Metadata)` from the map.
-         if let Some((_device, cached_ui_device)) = devices_map.get(&route) {
+        if let Some(device_entry) = devices_map.get(&route) {
+            let device_tuple = device_entry.lock().unwrap();
+            let (_device, cached_ui_device) = &*device_tuple;
+
             for stream in &cached_ui_device.streams {
                 for column in &stream.columns {
                     let key = DataColumnId {
