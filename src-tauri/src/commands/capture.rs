@@ -73,9 +73,11 @@ pub fn get_latest_fft_data(
         }
 
         let points = capture.inner.buffers.get(key).map_or(vec![], |buffer_ref| {
-            let offset = capture.inner.offsets.get(key).map_or(0.0, |off| *off.value());
+            let offset = capture.inner.offsets.get(&key.stream_key()).map_or(0.0, |off| *off.value());
+            
             let min_key = (min_time - offset).to_bits();
             let max_key = (latest_time - offset).to_bits();
+
             buffer_ref
                 .data
                 .range(min_key..=max_key)

@@ -194,28 +194,15 @@ impl CaptureState {
     }
 
     pub fn get_latest_timestamp_for_keys(&self, keys: &[DataColumnId]) -> Option<f64> {
-        let mut max_ts_bits = 0u64;
-        let mut found_any = false;
-
-        for key in keys {
-            if let Some(buffer) = self.inner.buffers.get(key) {
-                if let Some((&ts_bits, _)) = buffer.data.iter().next_back() {
-                    if ts_bits > max_ts_bits {
-                        max_ts_bits = ts_bits;
-                        found_any = true;
-                    }
-                }
-            }
-        }
-
-        if !found_any {
-            return None;
-        }
-
-        let stream_key = DataColumnId { column_index: 0, ..keys[0].clone() };
-        let offset = self.inner.offsets.get(&stream_key).map_or(0.0, |o| *o.value());
-
-        Some(f64::from_bits(max_ts_bits) + offset)
+        keys.iter()
+            .filter_map(|key| {
+                let buffer = self.inner.buffers.get(key)?;
+                let (last_raw_ts_bits, _) = buffer.data.iter().next_back()?;
+                let stream_key = key.stream_key();
+                let offset = self.inner.offsets.get(&stream_key).map_or(0.0, |o| *o.value());
+                Some(f64::from_bits(*last_raw_ts_bits) + offset)
+            })
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
     }
 
     pub fn get_interpolated_values_at_time(&self, keys: &[DataColumnId], time: f64) -> Vec<Option<f64>> {
