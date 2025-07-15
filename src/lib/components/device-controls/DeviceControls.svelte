@@ -14,7 +14,7 @@
 	<h3 class="text-lg font-semibold">Device Controls</h3>
 	    <div class="flex-1 overflow-y-auto">
 			{#if selectedDevices.length}
-				<Accordion.Root class="w-full" type="multiple">
+				<Accordion.Root class="w-full" type="single">
 					{#each selectedDevices as device (device.url + device.route)}
 						<Accordion.Item value={device.url + device.route} class="border-b">
 							<Accordion.Trigger class="flex w-full flex-1 select-none items-center justify-between py-4 text-sm font-medium transition-all hover:underline [&[data-state=open]>svg]:rotate-180">

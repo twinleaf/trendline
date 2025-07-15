@@ -28,7 +28,6 @@
 				uplot?.setData([[]]);
 				return;
 			}
-            const numPoints = Math.round(uplot.width * 2);
 			try {
                 const isFFT = plot.viewType === 'fft';
                 const command = isFFT ? 'get_latest_fft_data' : 'get_latest_plot_data';
@@ -38,7 +37,8 @@
                 } : {
                     keys: seriesDataKeys,
                     windowSeconds: 30.0,
-                    numPoints: Math.round(uplot.width * 2),
+                    numPoints: Math.round(uplot.width*2),
+					decimation: plot.decimationMethod
                 };
 
                 const result = await invoke<PlotData>(command, args);
@@ -48,6 +48,10 @@
                     
                     let finalXValues = result.timestamps;
  					let finalSeriesData = result.series_data;
+
+					if (!uplot || result.series_data.length !== uplot.series.length - 1) {
+						return;
+					}
 
                     if (isFFT) {
                         if (finalXValues[0] === 0) {
@@ -64,7 +68,7 @@
                     const finalData: uPlot.AlignedData = [
                         new Float64Array(finalXValues),
                         ...finalSeriesData.map(s => 
-                            new Float64Array(s.map(value => value === null ? NaN : value))
+                            new Float64Array(s) 
                         )
                     ];
                     uplot.setData(finalData, true);

@@ -1,4 +1,4 @@
-import type { ColumnDef } from "@tanstack/table-core";
+import type { ColumnDef, FilterFn } from "@tanstack/table-core";
 import type { DataColumnId } from '$lib/bindings/DataColumnId';
 import type { UiDevice } from '$lib/bindings/UiDevice';
 import { renderComponent } from "$lib/components/ui/data-table";
@@ -14,8 +14,27 @@ export type TreeRow = {
   units?: string;         // Only for 'column' rows
   dataKey?: DataColumnId; // Only for 'column' rows (the selectable leaves)
   description?: string;   // Only for 'column' rows
+  samplingRate?: number;  // Only for 'stream' and 'column' rows
 
   subRows?: TreeRow[];
+};
+
+const samplingRateFilter: FilterFn<TreeRow> = (row, columnId, filterValue: number | null) => {
+    if (filterValue === null) {
+        return true;
+    }
+
+    const checkNode = (node: TreeRow): boolean => {
+        if (node.type === 'column') {
+            return Math.abs((node.samplingRate ?? 0) - filterValue) < 1e-6;
+        }
+        if (node.subRows) {
+            return node.subRows.some(checkNode);
+        }
+        return false;
+    };
+
+    return checkNode(row.original);
 };
 
 export const columns: ColumnDef<TreeRow>[] = [
@@ -33,6 +52,7 @@ export const columns: ColumnDef<TreeRow>[] = [
         });
     },
     size: 40,
+    filterFn: samplingRateFilter,
   },
   {
     id: 'name',

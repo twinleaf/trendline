@@ -1,7 +1,7 @@
 //! trendline_lib/src/shared.rs
 //! Front-end facing data shapes
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 use num_enum::{FromPrimitive, IntoPrimitive};
@@ -326,6 +326,7 @@ pub struct UiStream {
     pub meta: StreamMeta,
     pub segment: Option<SegmentMeta>,
     pub columns: Vec<ColumnMeta>,
+    pub effective_sampling_rate: f64,
 }
 
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
@@ -362,3 +363,13 @@ impl PlotData {
         }
     }
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum DecimationMethod {
+    #[default]
+    None,
+    Fpcs,
+    MinMax,
+}
+

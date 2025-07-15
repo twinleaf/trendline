@@ -1,5 +1,6 @@
 import { deviceState } from '$lib/states/deviceState.svelte';
 import type { DataColumnId } from '$lib/bindings/DataColumnId';
+import type { DecimationMethod } from '$lib/bindings/DecimationMethod';
 import type { RowSelectionState } from '@tanstack/table-core';
 
 
@@ -40,6 +41,21 @@ export class PlotConfig {
     id = crypto.randomUUID();
     title = $state('New Plot');
     rowSelection = $state<RowSelectionState>({});
+    #manualDecimationMethod = $state<DecimationMethod>('Fpcs');
+    #isDecimationManual = $state(false);
+
+    get decimationMethod(): DecimationMethod {
+        if (this.#isDecimationManual) {
+            return this.#manualDecimationMethod;
+        }
+        return this.series.length > 1 ? 'MinMax' : 'Fpcs';
+    }
+
+    set decimationMethod(value: DecimationMethod) {
+        this.#isDecimationManual = true;
+        this.#manualDecimationMethod = value;
+    }
+
     series = $derived.by((): PlotSeries[] => {
         const newSeries: PlotSeries[] = [];
         const selectedKeys = Object.keys(this.rowSelection);
@@ -191,44 +207,6 @@ export class PlotConfig {
             legend: { show: true },
             cursor: {
                 drag: { setScale: false },
-                dataIdx: (self, seriesIdx, hoveredIdx, cursorXVal) => {
-                    if (seriesIdx === 0) {
-                        return hoveredIdx;
-                    }
-
-                    const yValues = self.data[seriesIdx];
-                    const xValues = self.data[0];
-
-                    if (yValues[hoveredIdx] == null) {
-							let nonNullLft = null,
-								nonNullRgt = null,
-								i;
-
-							i = hoveredIdx;
-							while (nonNullLft == null && i-- > 0) {
-								if (yValues[i] != null)
-									nonNullLft = i;
-							}
-
-							i = hoveredIdx;
-							while (nonNullRgt == null && i++ < yValues.length) {
-								if (yValues[i] != null)
-									nonNullRgt = i;
-							}
-
-							let rgtVal = nonNullRgt == null ?  Infinity : xValues[nonNullRgt];
-							let lftVal = nonNullLft == null ? -Infinity : xValues[nonNullLft];
-
-							let lftDelta = cursorXVal - lftVal;
-							let rgtDelta = rgtVal - cursorXVal;
-
-							const newIndex = lftDelta <= rgtDelta ? nonNullLft : nonNullRgt;
-
-                            return newIndex ?? hoveredIdx;
-                        }
-
-						return hoveredIdx;
-                },
                 show: true
             },
         };

@@ -3,4 +3,4 @@ import type { ColumnMeta } from "./ColumnMeta";
 import type { SegmentMeta } from "./SegmentMeta";
 import type { StreamMeta } from "./StreamMeta";
 
-export type UiStream = { meta: StreamMeta, segment: SegmentMeta | null, columns: Array<ColumnMeta>, };
+export type UiStream = { meta: StreamMeta, segment: SegmentMeta | null, columns: Array<ColumnMeta>, effective_sampling_rate: number, };

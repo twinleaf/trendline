@@ -21,9 +21,9 @@ This document outlines the current bugs, desired features, and code quality impr
 
 [ ] Device Selector manual URL input: Implement text entry option for device selection.
 
-[ ] RPC Settings Panel: Create a dedicated UI for viewing and modifying device RPC parameters.
+[X] RPC Settings Panel: Create a dedicated UI for viewing and modifying device RPC parameters.
 
-[ ] Plot Settings Tab: Add a tab panel within the settings modal (cog wheel) for adjusting plot-specific configurations (eg. colors, disable/enable plot title, window length)
+[X] Plot Settings Tab: Add a tab panel within the settings modal (cog wheel) for adjusting plot-specific configurations (eg. colors, disable/enable plot title, window length)
 
 [ ] Channel Search Bar: Implement a search bar in the channel selection interface to allow users to quickly filter available data streams.
 

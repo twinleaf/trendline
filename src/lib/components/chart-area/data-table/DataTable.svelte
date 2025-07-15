@@ -3,6 +3,7 @@
         type ColumnDef, 
         type RowSelectionState,
         type ExpandedState,
+        type ColumnFiltersState,
         getCoreRowModel,
         getExpandedRowModel,
         getFilteredRowModel,
@@ -23,16 +24,42 @@
         rowSelection?: RowSelectionState;
     };
 
-    let { data, columns, getSubRows, initialExpanded, rowSelection = $bindable() }: DataTableProps<TData, TValue> = $props();
+    let {
+		data,
+		columns,
+		getSubRows,
+		initialExpanded,
+		rowSelection = $bindable()
+	}: DataTableProps<TData, TValue> = $props();
     let expanded = $state<ExpandedState>(initialExpanded ?? {}); 
-
+    let columnFilters = $state<ColumnFiltersState>([]);
+    
+    // --- Helper Functions ---
+    function findNodeById(nodes: TreeRow[], id: string): TreeRow | undefined {
+        for (const node of nodes) {
+            if (node.id === id) return node;
+            if (node.subRows) {
+                const found = findNodeById(node.subRows, id);
+                if (found) return found;
+            }
+        }
+        return undefined;
+    }
+    
+    function getLeafNodes(node: TreeRow | undefined): TreeRow[] {
+        if (!node) return [];
+        if (node.type === 'column') return [node];
+        if (node.subRows) return node.subRows.flatMap(getLeafNodes);
+        return [];
+    }
+    
+    // --- State and Table Instance ---
     const table = createSvelteTable({
-        get data() {
-            return data;
-        },
+        get data() { return data; },
         state: {
             get expanded() { return expanded; },
             get rowSelection() { return rowSelection; },
+            get columnFilters() { return columnFilters; },
         },
         getRowId: (row) => row.id,
         columns,
@@ -42,37 +69,73 @@
         onExpandedChange: (updater) => {
             expanded = typeof updater === 'function' ? updater(expanded) : updater;
         },
-        enableRowSelection: true,
-        onRowSelectionChange: (updater) => {
-            rowSelection = typeof updater === 'function' 
-                ? updater(rowSelection ?? {}) 
-                : updater;
+        getFilteredRowModel: getFilteredRowModel(),
+        onColumnFiltersChange: (updater) => {
+            columnFilters = typeof updater === 'function' ? updater(columnFilters) : updater;
         },
+        onRowSelectionChange: (updater) => {
+			rowSelection = typeof updater === 'function' ? updater(rowSelection ?? {}) : updater;
+		},
+        enableRowSelection: true,
+        filterFromLeafRows: true, 
     });
+
+    // --- Core Reactivity Logic ---
+    let previousUniqueRates = new Set<number>();
+
+    $effect(() => {
+        const selectedIds = Object.keys(rowSelection ?? {});
+
+        const selectedLeafNodes = selectedIds.flatMap(id => getLeafNodes(findNodeById(data, id)));
+        const currentUniqueRates = new Set(selectedLeafNodes.map(leaf => leaf.samplingRate).filter(rate => rate != null));
+        
+        let newFilterValue: number | null = null;
+        if (currentUniqueRates.size > 0) {
+            newFilterValue = currentUniqueRates.values().next().value ?? null;
+        }
+
+        if (currentUniqueRates.size > 1 && previousUniqueRates.size <= 1) {
+            console.error("Conflict: Multiple sample rates selected. The plot will only display data for the first selected rate.");
+        }
+
+        previousUniqueRates = currentUniqueRates;
+
+        const currentFilterValue = table.getColumn('select')?.getFilterValue();
+        if (currentFilterValue !== newFilterValue) {
+            table.getColumn('select')?.setFilterValue(newFilterValue);
+        }
+    });
+
 </script>
 
-<div class="h-full rounded-md border">
-	<Table.Root class="block h-full w-full table-fixed">
-		<Table.Header class="h-[40px]">
-            {#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
-                <Table.Row>
-                    {#each headerGroup.headers as header (header.id)}
-                        <Table.Head
-                            colspan={header.colSpan}
-                            style="width: {header.getSize()}px;"
-                        >
-                            {#if !header.isPlaceholder}
-                                <FlexRender
-                                content={header.column.columnDef.header}
-                                context={header.getContext()}
-                                />
-                            {/if}
-                        </Table.Head>
-                    {/each}
-                </Table.Row>
-            {/each}
-        </Table.Header>
-        <Table.Body class="block h-[calc(100%-40px)] overflow-y-auto">
+<div class="h-full rounded-md border overflow-y-auto">
+    <div class="sticky top-0 bg-background z-10">
+        <Table.Root class="w-full table-fixed">
+            <Table.Header class="h-[40px]">
+                {#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
+                    <Table.Row>
+                        {#each headerGroup.headers as header (header.id)}
+                            <Table.Head
+                                class="bg-muted/50"
+                                colspan={header.colSpan}
+                                style="width: {header.getSize()}px;"
+                            >
+                                {#if !header.isPlaceholder}
+                                    <FlexRender
+                                    content={header.column.columnDef.header}
+                                    context={header.getContext()}
+                                    />
+                                {/if}
+                            </Table.Head>
+                        {/each}
+                    </Table.Row>
+                {/each}
+            </Table.Header>
+        </Table.Root>
+    </div>
+
+    <Table.Root class="w-full table-fixed">
+        <Table.Body>
             {#each table.getRowModel().rows as row (row.id)}
                 <Table.Row data-state={row.getIsSelected() && "selected"}>
                     {#each row.getVisibleCells() as cell (cell.id)}

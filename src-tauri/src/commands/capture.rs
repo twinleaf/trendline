@@ -1,5 +1,5 @@
 use crate::state::capture::{CaptureState, DataColumnId, Point};
-use crate::shared::{PlotData, PortState};
+use crate::shared::{PlotData, PortState, DecimationMethod};
 use welch_sde::{Build, SpectralDensity};
 use tauri::State;
 use twinleaf::tio::proto::DeviceRoute;
@@ -13,8 +13,9 @@ pub fn get_plot_data_in_range(
     max_time: f64,
     capture: State<CaptureState>,
     num_points: Option<usize>,
+    decimation: Option<DecimationMethod>,
 ) -> PlotData {
-    capture.get_data_in_range(&keys, min_time, max_time, num_points)
+    capture.get_data_in_range(&keys, min_time, max_time, num_points, decimation)
 }
 
 #[tauri::command]
@@ -23,6 +24,7 @@ pub fn get_latest_plot_data(
     window_seconds: f64,
     num_points: usize,
     capture: State<CaptureState>,
+    decimation: Option<DecimationMethod>,
 ) -> PlotData {
 
     let latest_time = capture.get_latest_timestamp_for_keys(&keys);
@@ -34,8 +36,9 @@ pub fn get_latest_plot_data(
     let max_time = latest_time.unwrap();
     let min_time = max_time - window_seconds;
 
-    capture.get_data_in_range(&keys, min_time, max_time, Some(num_points))
+    capture.get_data_in_range(&keys, min_time, max_time, Some(num_points), decimation)
 }
+
 
 #[tauri::command]
 pub fn get_latest_fft_data(
@@ -122,6 +125,15 @@ pub fn get_latest_fft_data(
 }
 
 #[tauri::command]
+pub fn get_interpolated_values_at_time(
+    keys: Vec<DataColumnId>,
+    time: f64,
+    capture: State<CaptureState>,
+) -> Vec<Option<f64>> {
+    capture.get_interpolated_values_at_time(&keys, time)
+}
+
+#[tauri::command]
 pub fn confirm_selection(
     port_url: String,
     children_routes: Vec<String>,
@@ -129,15 +141,18 @@ pub fn confirm_selection(
     registry: State<Arc<ProxyRegister>>,
 ) -> Result<(), String> {
     println!(
-        "Confirming selection for port '{}' with child routes: {:?}",
+        "[{}] Confirming selection with child routes: {:?}",
         port_url, children_routes
     );
-
+    println!( "[{}] Getting PortManager...", port_url);
     let port_manager = match registry.get(&port_url) {
         Some(pm) => pm,
         None => return Err(format!("Could not find PortManager for URL: {}", port_url)),
     };
+    println!( "[{}]   -> Obtained PortManager", port_url);
 
+
+    println!( "[{}] Getting PortState...", port_url);
     let current_state = port_manager.state.lock().unwrap().clone();
     if !matches!(current_state, PortState::Streaming) {
         return Err(format!(
@@ -145,14 +160,17 @@ pub fn confirm_selection(
             port_url, current_state
         ));
     }
+    println!( "[{}]   -> Confirmed PortState is streaming", port_url);
 
     let mut keys_to_activate: Vec<DataColumnId> = Vec::new();
     let mut all_selected_routes = children_routes;
     all_selected_routes.push("".to_string());
 
+    println!( "[{}] Getting HashMap over DeviceRoutes...", port_url);
     let devices_map = port_manager.devices.read()
         .map_err(|e| format!("Failed to access device list. A background task may have crashed. Details: {}", e))?;
-
+    println!( "[{}]   -> Obtained HashMap", port_url);
+    println!("[{}] Building DataColumnId(s)...", port_url);
     for route_str in all_selected_routes {
         let route = match DeviceRoute::from_str(&route_str) {
             Ok(r) => r,
@@ -177,7 +195,6 @@ pub fn confirm_selection(
         }
     }
     
-    println!("Activating {} total data columns for port '{}'.", keys_to_activate.len(), port_url);
     capture.set_active_columns_for_port(&port_url, keys_to_activate);
 
     Ok(())

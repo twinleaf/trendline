@@ -11,7 +11,7 @@ use std::{
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::menu::MenuItemKind;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, async_runtime};
 use twinleaf::{
     tio::{
         proto::{DeviceRoute},
@@ -91,10 +91,11 @@ impl PortManager {
                 let mut last_debug_print = Instant::now();
 
                 'lifecycle: loop {
-                    let mut state_guard = self_.state.lock().unwrap();
-                    if self_.proxy.lock().unwrap().is_none() && matches!(*state_guard, PortState::Idle) {
-                        *state_guard = PortState::Connecting;
-                        drop(state_guard); 
+                    let current_state = self_.state.lock().unwrap().clone();
+                    let has_proxy = self_.proxy.lock().unwrap().is_some();
+
+                    if !has_proxy && current_state == PortState::Idle {
+                        self_.set_state(PortState::Connecting);
 
                         println!("[{}] Attempting to establish proxy connection...", self_.url);
                         let proxy_if = Arc::new(proxy::Interface::new_proxy(
@@ -184,9 +185,9 @@ impl PortManager {
                             },
                             Ok(PortCommand::AttemptConnection) => {
                                 println!("[{}] Manual connection attempt triggered.", self_.url);
-                                let mut state = self_.state.lock().unwrap();
-                                if matches!(*state, PortState::Error(_)) {
-                                    *state = PortState::Idle;
+                                let current_state = self_.state.lock().unwrap().clone();
+                                if matches!(current_state, PortState::Error(_)) {
+                                    self_.set_state(PortState::Idle);
                                     *self_.proxy.lock().unwrap() = None;
                                 }
                             },
@@ -197,7 +198,8 @@ impl PortManager {
                         },
 
                         recv(ticker) -> _ => {
-                            if *self_.state.lock().unwrap() == PortState::Streaming {
+                            let current_state = self_.state.lock().unwrap().clone();
+                            if current_state == PortState::Streaming {
                                 self_.poll_device_data();
                             }
                             if last_debug_print.elapsed() > Duration::from_secs(30) {
@@ -308,7 +310,7 @@ impl PortManager {
     }
 
     fn fetch_rpcs(&self, rpc_device: &mut Device) -> Vec<RpcMeta> {
-        println!("[{}] -> Fetching RPCs...", self.url);
+        println!("[{}]   -> Fetching RPCs...", self.url);
         let mut rpc_metas = Vec::new();
         let rpc_count: u16 = match rpc_device.get("rpc.listinfo") {
             Ok(count) => count,
@@ -343,7 +345,7 @@ impl PortManager {
     }
 
     fn fetch_metadata(&self, data_device: &mut Device) -> (DeviceMeta, Vec<UiStream>) {
-        println!("[{}] -> Fetching metadata...", self.url);
+        println!("[{}]   -> Fetching metadata...", self.url);
         let metadata = data_device.get_metadata();
         
         let device_meta = DeviceMeta::from((*metadata.device).clone());
@@ -354,10 +356,17 @@ impl PortManager {
         let ui_streams: Vec<UiStream> = sorted_streams.into_iter().map(|s| {
             let mut ui_columns: Vec<ColumnMeta> = s.columns.iter().map(|c| ColumnMeta::from((**c).clone())).collect();
             ui_columns.sort_by_key(|c| c.index);
+
+            let segment_data = (*s.segment).clone();
+
+            let decimation = if segment_data.decimation > 0 { segment_data.decimation as f64 } else { 1.0 };
+            let effective_sampling_rate = segment_data.sampling_rate as f64 / decimation;
+            
             UiStream {
                 meta: (*s.stream).clone().into(),
-                segment: Some((*s.segment).clone().into()),
+                segment: Some(segment_data.into()),
                 columns: ui_columns,
+                effective_sampling_rate,
             }
         }).collect();
 
@@ -407,25 +416,54 @@ impl PortManager {
         }
     }
 
-    fn poll_device_data(&self) {
+    fn poll_device_data(self: &Arc<Self>) {
         self.counters.polls.fetch_add(1, Ordering::Relaxed);
         
         let mut refresh_needed = HashSet::new();
 
+        // {
+        //     let devices_map = self.devices.read().unwrap();
+        //     for (route, entry) in devices_map.iter() {
+        //         let mut tuple = entry.lock().unwrap();
+        //         let (device, _) = &mut *tuple;
+        //         if let Ok(samples) = device.drain() {
+        //             for sample in samples {
+        //                 self.process_sample_data(route, &sample);
+        //                 if sample.meta_changed || sample.segment_changed {
+        //                     refresh_needed.insert(route.clone());
+        //                 }
+        //             }
+        //         } else {
+        //             eprintln!("[{}] Error draining device '{}'. Connection may be lost.", self.url, route);
+        //             // HELP
+        //             return;
+        //         }
+        //     }
+        // }
         {
             let devices_map = self.devices.read().unwrap();
             for (route, entry) in devices_map.iter() {
                 let mut tuple = entry.lock().unwrap();
                 let (device, _) = &mut *tuple;
-                if let Ok(samples) = device.drain() {
-                    for sample in samples {
-                        self.process_sample_data(route, &sample);
-                        if sample.meta_changed || sample.segment_changed {
-                            refresh_needed.insert(route.clone());
+
+                // Use catch_unwind to handle the potential panic in drain()
+                let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+                    device.drain()
+                }));
+
+                match result {
+                    Ok(samples) => {
+                        for sample in samples {
+                            self.process_sample_data(route, &sample);
+                            if sample.meta_changed || sample.segment_changed {
+                                refresh_needed.insert(route.clone());
+                            }
                         }
+                    },
+                    Err(_) => {
+                        eprintln!("[{}] Error draining device '{}'. Connection likely lost.", self.url, route);
+                        return; 
                     }
-                } else {
-                    eprintln!("[{}] Error draining device '{}'. Connection may be lost.", self.url, route);
                 }
             }
         }
@@ -435,38 +473,64 @@ impl PortManager {
         }
 
         let devices_map = self.devices.read().unwrap();
-        for route in &refresh_needed {
-            if let Some(device_entry) = devices_map.get(route) {
-                let mut device_tuple = device_entry.lock().unwrap();
-                let (data_device, ui_device) = &mut *device_tuple;
+        for route in refresh_needed {
+            if let Some(device_entry) = devices_map.get(&route) {
+                let device_arc_clone = device_entry.clone();
+                let self_clone = self.clone();
                 
-                let (new_meta, new_streams) = self.fetch_metadata(data_device);
+                // Use spawn_blocking for synchronous, blocking I/O
+                async_runtime::spawn_blocking(move || {
+                    println!("[{}] Spawning background task to refresh metadata for route '{}'", self_clone.url, route);
 
-                for stream in &new_streams {
-                    if let Some(segment) = &stream.segment {
+                    let mut device_tuple = device_arc_clone.lock().unwrap();
+                    let (data_device, ui_device) = &mut *device_tuple;
+                    
+                    let (new_meta, new_streams) = self_clone.fetch_metadata(data_device);
+
+                    for stream in &new_streams {
                         let key = DataColumnId {
-                            port_url: self.url.clone(),
+                            port_url: self_clone.url.clone(),
                             device_route: route.clone(),
                             stream_id: stream.meta.stream_id,
                             column_index: 0,
                         };
-                        let sampling_rate = segment.sampling_rate as f64;
-                        let decimation = if segment.decimation > 0 { segment.decimation as f64 } else { 1.0 };
-                        self.capture.update_effective_sampling_rate(&key, sampling_rate / decimation);
+                        self_clone.capture.update_effective_sampling_rate(&key, stream.effective_sampling_rate);
                     }
-                }
-
-                ui_device.meta = new_meta;
-                ui_device.streams = new_streams;
-                
-                self.app.emit("device-metadata-updated", ui_device.clone()).unwrap();
+                    ui_device.meta = new_meta;
+                    ui_device.streams = new_streams;
+                    
+                    self_clone.app.emit("device-metadata-updated", ui_device.clone()).unwrap();
+                });
             }
         }
     }
 
+    // fn process_sample_data(&self, route: &DeviceRoute, sample: &twinleaf::data::Sample) {
+    //     for column in &sample.columns {
+    //         if let Some(value) = column.value.try_as_f64() {
+    //             let key = DataColumnId {
+    //                 port_url: self.url.clone(),
+    //                 device_route: route.clone(),
+    //                 stream_id: sample.stream.stream_id,
+    //                 column_index: column.desc.index,
+    //             };
+    //             let point = Point { x: sample.timestamp_end(), y: value };
+    //             self.capture.insert(&key, point);
+    //             self.counters.points_inserted.fetch_add(1, Ordering::Relaxed);
+    //         }
+    //     }
+    // }
     fn process_sample_data(&self, route: &DeviceRoute, sample: &twinleaf::data::Sample) {
         for column in &sample.columns {
-            if let Some(value) = column.value.try_as_f64() {
+            // Inlined logic from try_as_f64
+            let value_f64 = match column.value {
+                twinleaf::data::ColumnData::Int(i) => Some(i as f64),
+                twinleaf::data::ColumnData::UInt(u) => Some(u as f64),
+                twinleaf::data::ColumnData::Float(f) => Some(f),
+                _ => None, // Handles Unknown or any other variants
+            };
+
+            if let Some(value) = value_f64 {
                 let key = DataColumnId {
                     port_url: self.url.clone(),
                     device_route: route.clone(),

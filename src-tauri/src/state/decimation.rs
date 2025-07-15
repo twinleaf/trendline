@@ -1,4 +1,5 @@
 use super::capture::Point;
+use argminmax::ArgMinMax;
 
 #[derive(Clone, Copy, PartialEq)]
 enum LastRetained {
@@ -6,68 +7,6 @@ enum LastRetained {
     Max, 
     Min, 
 }
-
-
-pub fn lttb(data: Vec<Point>, threshold: usize) -> Vec<Point> {
-    if threshold >= data.len() || threshold == 0 {
-        return data; // Nothing to do
-    }
-
-    let mut sampled = Vec::with_capacity(threshold);
-    let data_len = data.len();
-    let every = (data_len - 2) as f64 / (threshold - 2) as f64;
-    let mut a = 0;
-
-    sampled.push(data[a]);
-
-    for i in 0..threshold - 2 {
-        let mut avg_x = 0.0;
-        let mut avg_y = 0.0;
-        let avg_range_start = (((i + 1) as f64) * every) as usize + 1;
-        let mut avg_range_end = (((i + 2) as f64) * every) as usize + 1;
-        if avg_range_end >= data_len {
-            avg_range_end = data_len;
-        }
-
-        let avg_range_len = (avg_range_end - avg_range_start) as f64;
-
-        for i in 0..(avg_range_end - avg_range_start) {
-            let idx = (avg_range_start + i) as usize;
-            avg_x += data[idx].x; 
-            avg_y += data[idx].y;
-        }
-        avg_x /= avg_range_len;
-        avg_y /= avg_range_len;
-
-        let range_offs = ((i as f64) * every) as usize + 1;
-        let range_to = (((i + 1) as f64) * every) as usize + 1;
-        
-        let point_a_x = data[a].x; 
-        let point_a_y = data[a].y;
-
-        let mut max_area = -1.0;
-        let mut next_a = range_offs;
-
-        for i in 0..(range_to - range_offs) {
-            let idx = (range_offs + i) as usize;
-
-            let area = ((point_a_x - avg_x) * (data[idx].y - point_a_y)
-                - (point_a_x - data[idx].x) * (avg_y - point_a_y))
-                .abs() * 0.5;
-
-            if area > max_area {
-                max_area = area;
-                next_a = idx;
-            }
-        }
-        sampled.push(data[next_a]);
-        a = next_a;
-    }
-
-    sampled.push(data[data_len - 1]);
-    sampled
-}
-
 
 pub fn fpcs(data: &[Point], ratio: usize) -> Vec<Point> {
     if data.len() <= 2 || ratio < 2 || data.len() <= ratio {
@@ -136,4 +75,86 @@ pub fn fpcs(data: &[Point], ratio: usize) -> Vec<Point> {
     }
 
     retained_points
+}
+
+pub fn min_max_bucket(data: &[Point], target_points: usize, min_time: f64, max_time: f64) -> Vec<Point> {
+    let data_len = data.len();
+    if data_len <= target_points || target_points < 4 || min_time >= max_time {
+        return data.to_vec();
+    }
+
+    // Always preserve the true start and end points.
+    let mut downsampled = Vec::with_capacity(target_points);
+    downsampled.push(data[0]);
+
+    // The inner data to be decimated.
+    let inner_data = &data[1..data_len - 1];
+    let inner_target_points = target_points - 2;
+
+    let num_buckets = (inner_target_points / 2).max(1);
+    let time_span = max_time - min_time;
+    let bucket_duration = time_span / num_buckets as f64;
+    let mut search_from_idx = 0;
+
+    for i in 0..num_buckets {
+        let bucket_t_start = min_time + (i as f64 * bucket_duration);
+        let bucket_t_end = bucket_t_start + bucket_duration;
+
+        let start_idx = search_from_idx
+            + inner_data[search_from_idx..]
+                .binary_search_by(|p| {
+                    p.x.partial_cmp(&bucket_t_start)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap_or_else(|x| x);
+
+        let end_idx = start_idx
+            + inner_data[start_idx..]
+                .binary_search_by(|p| {
+                    p.x.partial_cmp(&bucket_t_end)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap_or_else(|x| x);
+        
+        search_from_idx = end_idx;
+
+        if start_idx >= end_idx {
+            continue; // No data in this bucket
+        }
+
+        let bucket = &inner_data[start_idx..end_idx];
+        let representative_time = bucket_t_start + bucket_duration / 2.0;
+
+        let y_values: Vec<f64> = bucket.iter().map(|p| p.y).collect();
+        let (min_y_idx, max_y_idx) = y_values.argminmax();
+
+        let mut point_min = bucket[min_y_idx];
+        let mut point_max = bucket[max_y_idx];
+
+        point_min.x = representative_time;
+        point_max.x = representative_time;
+
+        if bucket[min_y_idx].x < bucket[max_y_idx].x {
+            downsampled.push(point_min);
+            downsampled.push(point_max);
+        } else if bucket[max_y_idx].x < bucket[min_y_idx].x {
+            downsampled.push(point_max);
+            downsampled.push(point_min);
+        } else {
+            downsampled.push(point_min);
+            if min_y_idx != max_y_idx {
+                downsampled.push(point_max);
+            }
+        }
+    }
+
+    downsampled.push(data[data_len - 1]);
+    downsampled
+}
+
+
+
+pub fn lerp(p1: &Point, p2: &Point, x: f64) -> f64 {
+    if (p2.x - p1.x).abs() < 1e-9 { return p1.y; }
+    p1.y + (p2.y - p1.y) * (x - p1.x) / (p2.x - p1.x)
 }

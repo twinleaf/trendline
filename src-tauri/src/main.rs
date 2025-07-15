@@ -66,6 +66,7 @@ fn main() {
             trendline_lib::commands::capture::get_latest_plot_data,
             trendline_lib::commands::capture::get_latest_fft_data,
             trendline_lib::commands::capture::connect_to_port,
+            trendline_lib::commands::capture::get_interpolated_values_at_time,
             trendline_lib::commands::settings::get_all_devices,
             trendline_lib::commands::settings::get_port_state,
             trendline_lib::commands::settings::execute_rpc,

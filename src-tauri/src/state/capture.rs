@@ -4,10 +4,10 @@ use ts_rs::TS;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use twinleaf::tio::proto::DeviceRoute;
-use crate::state::decimation::{fpcs};
+use crate::state::decimation::{lerp, fpcs, min_max_bucket};
 use crate::util;
 
-use crate::shared::PlotData;
+use crate::shared::{ PlotData, DecimationMethod };
 
 // The unique identifier for a single column of data from a specific device.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, TS)]
@@ -91,12 +91,13 @@ impl CaptureState {
         }
     }
 
-    pub fn get_data_in_range(
+ pub fn get_data_in_range(
         &self,
         keys: &[DataColumnId],
         min_time: f64,
         max_time: f64,
         num_points: Option<usize>,
+        decimation: Option<DecimationMethod>,
     ) -> PlotData {
         if keys.is_empty() || min_time >= max_time {
             return PlotData::empty();
@@ -124,11 +125,19 @@ impl CaptureState {
         })
         .collect();
             
-        if let Some(n_points) = num_points {
-            for series in &mut aligned_series {
-                if !series.is_empty() && n_points > 0 && series.len() > n_points {
-                    let ratio = series.len() / n_points;
-                    *series = fpcs(series, ratio);
+        if let (Some(n_points), Some(method)) = (num_points, decimation) {
+            if !matches!(method, DecimationMethod::None) {
+                for series in &mut aligned_series {
+                    if series.len() > n_points && n_points > 0 {
+                        *series = match method {
+                            DecimationMethod::Fpcs => {
+                                let ratio = series.len() / n_points;
+                                if ratio > 1 { fpcs(series, ratio) } else { series.clone() }
+                            },
+                            DecimationMethod::MinMax => min_max_bucket(series, n_points, min_time, max_time),
+                            DecimationMethod::None => unreachable!(),
+                        };
+                    }
                 }
             }
         }
@@ -144,9 +153,9 @@ impl CaptureState {
 
         let num_series = series_iters.len();
         let mut plot_data = PlotData::with_series_capacity(num_series);
+        let mut last_points: Vec<Option<Point>> = vec![None; series_iters.len()];
 
         loop {
-
             let next_ts = series_iters
                 .iter_mut()
                 .filter_map(|it| it.peek().map(|p| p.x))
@@ -155,18 +164,25 @@ impl CaptureState {
             if let Some(ts) = next_ts {
                 plot_data.timestamps.push(ts);
 
-                for (i, iter) in series_iters.iter_mut().enumerate() {
-                    let y_val = if let Some(p) = iter.peek() {
-                        if p.x == ts {
-                            let y = p.y;
-                            iter.next();
-                            y
-                        } else {
-                            f64::NAN
-                        }
+                for i in 0..series_iters.len() {
+                    let iter = &mut series_iters[i];
+                    let mut y_val = f64::NAN;
+
+                    let next_point_matches = if let Some(p) = iter.peek() {
+                        p.x == ts
                     } else {
-                        f64::NAN
+                        false
                     };
+
+                    if next_point_matches {
+                        let p_next = iter.next().unwrap(); 
+                        last_points[i] = Some(*p_next);
+                        y_val = p_next.y;
+                    } else {
+                        if let (Some(p_last), Some(p_next_real)) = (last_points[i], iter.peek()) {
+                            y_val = lerp(&p_last, p_next_real, ts);
+                        }
+                    }
                     plot_data.series_data[i].push(y_val);
                 }
             } else {
@@ -200,6 +216,33 @@ impl CaptureState {
         let offset = self.inner.offsets.get(&stream_key).map_or(0.0, |o| *o.value());
 
         Some(f64::from_bits(max_ts_bits) + offset)
+    }
+
+    pub fn get_interpolated_values_at_time(&self, keys: &[DataColumnId], time: f64) -> Vec<Option<f64>> {
+        let mut interpolated_values = Vec::with_capacity(keys.len());
+
+        for key in keys {
+            let value = self.inner.buffers.get(key).and_then(|buffer_ref| {
+                let offset = self.inner.offsets.get(&key.stream_key()).map_or(0.0, |off| *off.value());
+                let target_time_bits = (time - offset).to_bits();
+
+                let p1_opt = buffer_ref.data.range(..=target_time_bits).next_back();
+                let p2_opt = buffer_ref.data.range(target_time_bits..).next();
+
+                match (p1_opt, p2_opt) {
+                    (Some((t1_bits, y1)), Some((t2_bits, y2))) => {
+                        let p1 = Point::new(f64::from_bits(*t1_bits) + offset, *y1);
+                        let p2 = Point::new(f64::from_bits(*t2_bits) + offset, *y2);
+                        Some(lerp(&p1, &p2, time))
+                    },
+                    (Some((_, y1)), None) => Some(*y1),
+                    (None, Some((_, y2))) => Some(*y2),
+                    (None, None) => None,
+                }
+            });
+            interpolated_values.push(value);
+        }
+        interpolated_values
     }
 
     /// Inserts a data point for a given column, but only if that column is active.
@@ -236,6 +279,7 @@ impl CaptureState {
     }
 
     pub fn set_active_columns_for_port(&self, port_url: &str, keys_for_port: Vec<DataColumnId>) {
+        println!("[{}] Built and activating {} total data columns", port_url, keys_for_port.len());
         self.inner.active.retain(|key, _value| key.port_url != port_url);
 
         for key in keys_for_port {

@@ -1,14 +1,13 @@
 <script lang="ts">
     import { chartState } from '$lib/states/chartState.svelte';
     import { deviceState } from '$lib/states/deviceState.svelte';
-    import DataTable from '$lib/components/chart-area/data-table/DataTable.svelte';
-    import { columns, type TreeRow } from '$lib/components/chart-area/data-table/column';
+    import PlotControls from '$lib/components/chart-area/PlotControls.svelte';
+    import { type TreeRow } from '$lib/components/chart-area/data-table/column';
     import UPlotComponent from '$lib/components/chart-area/UPlotComponent.svelte';
     import * as Resizable from '$lib/components/ui/resizable';
-    import * as Popover from "$lib/components/ui/popover/index.js";
     import { Button } from '$lib/components/ui/button/';
     import { Toggle } from '$lib/components/ui/toggle/';
-    import { Settings, Trash2, Plus, ChartLine, ChartColumn} from '@lucide/svelte';
+    import { Trash2, Plus, ChartLine, ChartColumn} from '@lucide/svelte';
     import type { ExpandedState } from '@tanstack/table-core';
 
 
@@ -35,6 +34,7 @@
                 const streamNodes: TreeRow[] = [];
                 for (const stream of device.streams) {
                     const columnNodes: TreeRow[] = [];
+                    const streamSamplingRate = stream.effective_sampling_rate ?? 0;
                     for (const column of stream.columns) {
                         const dataKey = {
                             port_url: device.url,
@@ -49,6 +49,7 @@
                             units: column.units ?? '',
                             description: column.description ?? '',
                             dataKey: dataKey, 
+                            samplingRate: streamSamplingRate,
                         });
                     }
                     streamNodes.push({
@@ -56,6 +57,7 @@
                         type: 'stream',
                         name: stream.meta.name,
                         subRows: columnNodes,
+                        samplingRate: streamSamplingRate,
                     });
                 }
 
@@ -131,23 +133,11 @@
                                                         <ChartColumn class="size-5" />
                                                     {/if}
                                                 </Toggle>
-                                                <Popover.Root>
-                                                    <Popover.Trigger aria-label="Plot settings">
-                                                        <Settings class="size-5 text-muted-foreground" />
-                                                    </Popover.Trigger>
-                                                    <Popover.Content class="w-[600px]">
-                                                        <div class="max-h-[50vh] p-2">
-                                                            <DataTable 
-                                                                {columns} 
-                                                                data={treeData} 
-                                                                getSubRows={(row: TreeRow) => row.subRows}
-                                                                initialExpanded={initialExpandedState}
-                                                                bind:rowSelection={plot.rowSelection}
-                                                            />
-                                                        </div>
-                                                    </Popover.Content>
-                                                </Popover.Root>
-
+                                                <PlotControls
+                                                    bind:plot={plots[i]}
+                                                    treeData={treeData}
+                                                    initialExpanded={initialExpandedState}
+                                                />
                                                 <Button 
                                                         variant="ghost" 
                                                         size="icon" 
