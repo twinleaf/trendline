@@ -6,10 +6,10 @@ import type { DecimationMethod } from '$lib/bindings/DecimationMethod';
 import type { ExpandedState } from '@tanstack/table-core';
 import { columns, type TreeRow } from '$lib/components/chart-area/data-table/column';
 import DataTable from '$lib/components/chart-area/data-table/DataTable.svelte';
+import PlotSettings from '$lib/components/chart-area/PlotSettings.svelte';
+
 
 import { Button } from '$lib/components/ui/button/';
-import { Label } from '$lib/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '$lib/components/ui/radio-group';
 import * as Popover from '$lib/components/ui/popover';
 import * as Tabs from '$lib/components/ui/tabs';
 
@@ -37,7 +37,7 @@ const decimationMethods: { value: DecimationMethod; label: string; description: 
 		</Button>
 	</Popover.Trigger>
 	<Popover.Content class="w-[600px] p-0">
-		<Tabs.Root value="selection" class="w-full">
+		<Tabs.Root value="selection" class="w-full p-2">
 			<Tabs.List class="grid w-full grid-cols-2">
 				<Tabs.Trigger value="selection">Plot Selection</Tabs.Trigger>
 				<Tabs.Trigger value="settings">Plot Settings</Tabs.Trigger>
@@ -54,25 +54,7 @@ const decimationMethods: { value: DecimationMethod; label: string; description: 
 				</div>
 			</Tabs.Content>
 			<Tabs.Content value="settings">
-				<div class="max-h-[50vh] space-y-4 overflow-y-auto p-4">
-					<h4 class="font-medium leading-none">Decimation</h4>
-					<p class="text-sm text-muted-foreground">
-						Select a downsampling method to change visual fidelity and plotting performance.
-					</p>
-					<RadioGroup bind:value={plot.decimationMethod} class="grid gap-2">
-						{#each decimationMethods as method}
-							<Label
-								class="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-accent hover:text-accent-foreground has-[:checked]:bg-accent"
-							>
-								<RadioGroupItem value={method.value} id={method.value} />
-								<div class="grid gap-1.5 leading-normal">
-									<span class="font-semibold">{method.label}</span>
-									<p class="text-sm text-muted-foreground">{method.description}</p>
-								</div>
-							</Label>
-						{/each}
-					</RadioGroup>
-				</div>
+				<PlotSettings bind:plot />
 			</Tabs.Content>
 		</Tabs.Root>
 	</Popover.Content>

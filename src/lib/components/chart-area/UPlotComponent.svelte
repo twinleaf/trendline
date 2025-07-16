@@ -33,10 +33,10 @@
                 const command = isFFT ? 'get_latest_fft_data' : 'get_latest_plot_data';
 				const args = isFFT ? {
                     keys: seriesDataKeys,
-                    windowSeconds: 10.0, // A shorter window is often better for FFT
+                    windowSeconds: plot.fftSeconds, // A shorter window is often better for FFT
                 } : {
                     keys: seriesDataKeys,
-                    windowSeconds: 30.0,
+                    windowSeconds: plot.windowSeconds,
                     numPoints: Math.round(uplot.width*2),
 					decimation: plot.decimationMethod
                 };

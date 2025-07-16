@@ -19,7 +19,7 @@ export const columns: ColumnDef<RpcMeta>[] = [
     },
     filterFn: fuzzyFilter,
     sortingFn: fuzzySort,
-    size: 200 
+    size: 130 
   },
   {
     id: 'name_prefix',
@@ -39,13 +39,15 @@ export const columns: ColumnDef<RpcMeta>[] = [
   { 
     accessorKey: 'arg_type', 
     header: 'Type', 
-    size: 40 
+    size: 40,
+    enableHiding: true
   },
   { 
     accessorKey: 'permissions', 
     header: ({ column }) => {
         return renderComponent(DataTableSortHeader, { title: 'Perms', column });
     },
-    size: 80 
+    size: 80,
+    enableHiding: true 
   }
 ];

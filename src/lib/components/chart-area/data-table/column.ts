@@ -1,4 +1,4 @@
-import type { ColumnDef, FilterFn } from '@tanstack/table-core';
+import type { ColumnDef } from '@tanstack/table-core';
 import type { DataColumnId } from '$lib/bindings/DataColumnId';
 import type { UiDevice } from '$lib/bindings/UiDevice';
 import { renderComponent } from '$lib/components/ui/data-table';
@@ -19,24 +19,6 @@ export type TreeRow = {
 	subRows?: TreeRow[];
 };
 
-const samplingRateFilter: FilterFn<TreeRow> = (row, columnId, filterValue: number | null) => {
-	if (filterValue === null) {
-		return true;
-	}
-
-	const checkNode = (node: TreeRow): boolean => {
-		if (node.type === 'column') {
-			return Math.abs((node.samplingRate ?? 0) - filterValue) < 1e-6;
-		}
-		if (node.subRows) {
-			return node.subRows.some(checkNode);
-		}
-		return false;
-	};
-
-	return checkNode(row.original);
-};
-
 export const columns: ColumnDef<TreeRow>[] = [
 	{
 		id: 'select',
@@ -49,11 +31,11 @@ export const columns: ColumnDef<TreeRow>[] = [
 			return renderComponent(Checkbox, {
 				indeterminate: row.getIsSomeSelected(),
 				checked: row.getIsSelected(),
-				onCheckedChange: (value) => row.toggleSelected(!!value)
+				onCheckedChange: (value) => row.toggleSelected(!!value),
+				disabled: !row.getCanSelect()
 			});
 		},
 		size: 40,
-		filterFn: samplingRateFilter
 	},
 	{
 		id: 'name',

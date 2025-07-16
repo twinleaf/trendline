@@ -14,6 +14,7 @@
 	import { createSvelteTable, FlexRender } from '$lib/components/ui/data-table/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
 	import type { TreeRow } from '$lib/components/chart-area/data-table/column';
+	import { setContext } from 'svelte';
 
 	type DataTableProps<TData, TValue> = {
 		columns: ColumnDef<TData, TValue>[];
@@ -30,10 +31,15 @@
 		initialExpanded,
 		rowSelection = $bindable()
 	}: DataTableProps<TData, TValue> = $props();
+
 	let expanded = $state<ExpandedState>(initialExpanded ?? {});
 	let sorting = $state<SortingState>([]);
 	let columnVisibility = $state<VisibilityState>({});
 	let columnFilters = $state<ColumnFiltersState>([]);
+	let tableContext = $state({
+		primarySamplingRate: null as number | null
+	});
+	setContext('tableContext', tableContext);
 
 	// --- Helper Functions ---
 	function findNodeById(nodes: TreeRow[], id: string): TreeRow | undefined {
@@ -93,38 +99,30 @@
 		onSortingChange: (updater) => {
 			sorting = typeof updater === 'function' ? updater(sorting) : updater;
 		},
-		enableRowSelection: true,
-		filterFromLeafRows: true
+		enableRowSelection: (row) => {
+			if (tableContext.primarySamplingRate === null) return true;
+			const node = row.original;
+			if (node.type === 'device') return true;
+			if (node.samplingRate != null) {
+				return Math.abs(node.samplingRate - tableContext.primarySamplingRate) < 1e-6;
+			}
+			return true;
+		},
 	});
-
-	// --- Core Reactivity Logic ---
-	let previousUniqueRates = new Set<number>();
 
 	$effect(() => {
 		const selectedIds = Object.keys(rowSelection ?? {});
+		if (selectedIds.length === 0) {
+			tableContext.primarySamplingRate = null;
+			return;
+		}
 
 		const selectedLeafNodes = selectedIds.flatMap((id) => getLeafNodes(findNodeById(data, id)));
-		const currentUniqueRates = new Set(
-			selectedLeafNodes.map((leaf) => leaf.samplingRate).filter((rate) => rate != null)
-		);
-
-		let newFilterValue: number | null = null;
-		if (currentUniqueRates.size > 0) {
-			newFilterValue = currentUniqueRates.values().next().value ?? null;
-		}
-
-		if (currentUniqueRates.size > 1 && previousUniqueRates.size <= 1) {
-			console.error(
-				'Conflict: Multiple sample rates selected. The plot will only display data for the first selected rate.'
-			);
-		}
-
-		previousUniqueRates = currentUniqueRates;
-
-		const currentFilterValue = table.getColumn('select')?.getFilterValue();
-		if (currentFilterValue !== newFilterValue) {
-			table.getColumn('select')?.setFilterValue(newFilterValue);
-		}
+		const selectedRates = selectedLeafNodes
+			.map((leaf) => leaf.samplingRate)
+			.filter((rate): rate is number => rate != null);
+		
+		tableContext.primarySamplingRate = selectedRates.length > 0 ? selectedRates[0] : null;
 	});
 </script>
 

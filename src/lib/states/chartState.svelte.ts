@@ -43,6 +43,8 @@ export class PlotConfig {
     rowSelection = $state<RowSelectionState>({});
     #manualDecimationMethod = $state<DecimationMethod>('Fpcs');
     #isDecimationManual = $state(false);
+    windowSeconds = $state<number>(30.0);
+    fftSeconds = $state<number>(10.0);
 
     get decimationMethod(): DecimationMethod {
         if (this.#isDecimationManual) {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount, tick } from 'svelte';
 	import { deviceState } from '$lib/states/deviceState.svelte';
 	import type { UiDevice } from '$lib/bindings/UiDevice';
 	import * as Accordion from '$lib/components/ui/accordion/index.js';
@@ -7,31 +8,51 @@
 
 	let selectedDevices: UiDevice[] = $derived(deviceState.selectedDevices);
 
-	// This logic remains the same
 	let accordionContainerEl: HTMLDivElement | undefined = $state(undefined);
 	let contentHeight = $state(0);
 
-	$effect(() => {
+	const calculateHeight = () => {
 		if (!accordionContainerEl) return;
-		
-		const observer = new ResizeObserver(() => {
-			if (!accordionContainerEl) return;
-			const containerHeight = accordionContainerEl.clientHeight;
-			const triggers = accordionContainerEl.querySelectorAll<HTMLElement>(
-				'[data-accordion-trigger]'
-			);
-			if (triggers.length === 0) return;
 
-			let totalTriggersHeight = 0;
-			triggers.forEach((trigger) => {
-				totalTriggersHeight += trigger.offsetHeight;
-			});
-			
-			contentHeight = Math.max(0, containerHeight - totalTriggersHeight);
+		const containerHeight = accordionContainerEl.clientHeight;
+		const triggers = accordionContainerEl.querySelectorAll<HTMLElement>('[data-accordion-trigger]');
+
+		let totalTriggersHeight = 0;
+		triggers.forEach((trigger) => {
+			totalTriggersHeight += trigger.offsetHeight;
 		});
 
-		observer.observe(accordionContainerEl);
-		return () => observer.disconnect();
+		if (containerHeight === 0 || (triggers.length > 0 && totalTriggersHeight === 0)) {
+			return;
+		}
+
+		contentHeight = Math.max(0, containerHeight - totalTriggersHeight);
+	};
+
+	onMount(() => {
+		const initialize = async () => {
+			await tick();
+			calculateHeight();
+		};
+		initialize();
+
+		const resizeObserver = new ResizeObserver(calculateHeight);
+		resizeObserver.observe(accordionContainerEl!);
+
+		const mutationObserver = new MutationObserver(() => {
+			calculateHeight();
+		});
+
+		mutationObserver.observe(accordionContainerEl!, {
+			attributes: true,
+			subtree: true,
+			attributeFilter: ['data-state']
+		});
+
+		return () => {
+			resizeObserver.disconnect();
+			mutationObserver.disconnect();
+		};
 	});
 </script>
 
@@ -59,8 +80,8 @@
 						<Accordion.Content
 							class="overflow-hidden data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
 						>
-							<div class="h-[var(--radix-accordion-content-height)] overflow-y-auto">
-								<div class="p-2">
+							<div class="h-[var(--radix-accordion-content-height)]">
+								<div class="p-2 h-full">
 									<DataTable {columns} data={device.rpcs} {device} />
 								</div>
 							</div>
