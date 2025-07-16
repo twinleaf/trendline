@@ -57,7 +57,7 @@ const decimationMethods: { value: DecimationMethod; label: string; description: 
 				<div class="max-h-[50vh] space-y-4 overflow-y-auto p-4">
 					<h4 class="font-medium leading-none">Decimation</h4>
 					<p class="text-sm text-muted-foreground">
-						Select a downsampling method to improve performance with large datasets.
+						Select a downsampling method to change visual fidelity and plotting performance.
 					</p>
 					<RadioGroup bind:value={plot.decimationMethod} class="grid gap-2">
 						{#each decimationMethods as method}

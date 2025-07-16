@@ -3,6 +3,8 @@ import type { UiDevice } from '$lib/bindings/UiDevice';
 import type { RpcMeta } from '$lib/bindings/RpcMeta';
 import { renderComponent } from "$lib/components/ui/data-table";
 import RpcActionCell from "./RpcActionCell.svelte";
+import DataTableSortHeader from "./DataTableSortHeader.svelte";
+import { fuzzyFilter, fuzzySort, prefixFilter } from './filtering';
 
 
 export type RpcTableMeta = {
@@ -12,8 +14,18 @@ export type RpcTableMeta = {
 export const columns: ColumnDef<RpcMeta>[] = [
   { 
     accessorKey: 'name', 
-    header: 'Name', 
+    header: ({ column }) => {
+        return renderComponent(DataTableSortHeader, { title: 'Name', column });
+    },
+    filterFn: fuzzyFilter,
+    sortingFn: fuzzySort,
     size: 200 
+  },
+  {
+    id: 'name_prefix',
+    accessorFn: (row) => row.name.split('.')[0],
+    filterFn: prefixFilter,
+    enableSorting: false,
   },
   {
     id: 'action',
@@ -27,11 +39,13 @@ export const columns: ColumnDef<RpcMeta>[] = [
   { 
     accessorKey: 'arg_type', 
     header: 'Type', 
-    size: 100 
+    size: 40 
   },
   { 
     accessorKey: 'permissions', 
-    header: 'Perms', 
+    header: ({ column }) => {
+        return renderComponent(DataTableSortHeader, { title: 'Perms', column });
+    },
     size: 80 
   }
 ];

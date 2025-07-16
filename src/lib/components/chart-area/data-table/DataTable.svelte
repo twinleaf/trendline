@@ -1,111 +1,131 @@
 <script lang="ts" generics="TData extends TreeRow, TValue">
-    import { 
-        type ColumnDef, 
-        type RowSelectionState,
-        type ExpandedState,
-        type ColumnFiltersState,
-        getCoreRowModel,
-        getExpandedRowModel,
-        getFilteredRowModel,
-        getSortedRowModel,
-    } from "@tanstack/table-core";
-    import {
-        createSvelteTable,
-        FlexRender,
-        } from "$lib/components/ui/data-table/index.js";
-    import * as Table from "$lib/components/ui/table/index.js";
-    import type { TreeRow } from "$lib/components/chart-area/data-table/column";
+	import {
+		type ColumnDef,
+		type RowSelectionState,
+		type ExpandedState,
+		type ColumnFiltersState,
+		getCoreRowModel,
+		getExpandedRowModel,
+		getFilteredRowModel,
+		getSortedRowModel,
+		type SortingState,
+		type VisibilityState
+	} from '@tanstack/table-core';
+	import { createSvelteTable, FlexRender } from '$lib/components/ui/data-table/index.js';
+	import * as Table from '$lib/components/ui/table/index.js';
+	import type { TreeRow } from '$lib/components/chart-area/data-table/column';
 
-    type DataTableProps<TData, TValue> = {
-        columns: ColumnDef<TData, TValue>[];
-        data: TData[];
-        getSubRows?: (originalRow: TData) => TData[] | undefined;
-        initialExpanded?: ExpandedState;
-        rowSelection?: RowSelectionState;
-    };
+	type DataTableProps<TData, TValue> = {
+		columns: ColumnDef<TData, TValue>[];
+		data: TData[];
+		getSubRows?: (originalRow: TData) => TData[] | undefined;
+		initialExpanded?: ExpandedState;
+		rowSelection?: RowSelectionState;
+	};
 
-    let {
+	let {
 		data,
 		columns,
 		getSubRows,
 		initialExpanded,
 		rowSelection = $bindable()
 	}: DataTableProps<TData, TValue> = $props();
-    let expanded = $state<ExpandedState>(initialExpanded ?? {}); 
-    let columnFilters = $state<ColumnFiltersState>([]);
-    
-    // --- Helper Functions ---
-    function findNodeById(nodes: TreeRow[], id: string): TreeRow | undefined {
-        for (const node of nodes) {
-            if (node.id === id) return node;
-            if (node.subRows) {
-                const found = findNodeById(node.subRows, id);
-                if (found) return found;
-            }
-        }
-        return undefined;
-    }
-    
-    function getLeafNodes(node: TreeRow | undefined): TreeRow[] {
-        if (!node) return [];
-        if (node.type === 'column') return [node];
-        if (node.subRows) return node.subRows.flatMap(getLeafNodes);
-        return [];
-    }
-    
-    // --- State and Table Instance ---
-    const table = createSvelteTable({
-        get data() { return data; },
-        state: {
-            get expanded() { return expanded; },
-            get rowSelection() { return rowSelection; },
-            get columnFilters() { return columnFilters; },
-        },
-        getRowId: (row) => row.id,
-        columns,
-        getSubRows: getSubRows,
-        getCoreRowModel: getCoreRowModel(),
-        getExpandedRowModel: getExpandedRowModel(),
-        onExpandedChange: (updater) => {
-            expanded = typeof updater === 'function' ? updater(expanded) : updater;
-        },
-        getFilteredRowModel: getFilteredRowModel(),
-        onColumnFiltersChange: (updater) => {
-            columnFilters = typeof updater === 'function' ? updater(columnFilters) : updater;
-        },
-        onRowSelectionChange: (updater) => {
+	let expanded = $state<ExpandedState>(initialExpanded ?? {});
+	let sorting = $state<SortingState>([]);
+	let columnVisibility = $state<VisibilityState>({});
+	let columnFilters = $state<ColumnFiltersState>([]);
+
+	// --- Helper Functions ---
+	function findNodeById(nodes: TreeRow[], id: string): TreeRow | undefined {
+		for (const node of nodes) {
+			if (node.id === id) return node;
+			if (node.subRows) {
+				const found = findNodeById(node.subRows, id);
+				if (found) return found;
+			}
+		}
+		return undefined;
+	}
+
+	function getLeafNodes(node: TreeRow | undefined): TreeRow[] {
+		if (!node) return [];
+		if (node.type === 'column') return [node];
+		if (node.subRows) return node.subRows.flatMap(getLeafNodes);
+		return [];
+	}
+
+	// --- State and Table Instance ---
+	const table = createSvelteTable({
+		get data() {
+			return data;
+		},
+		state: {
+			get sorting() {
+				return sorting;
+			},
+			get expanded() {
+				return expanded;
+			},
+			get rowSelection() {
+				return rowSelection;
+			},
+			get columnFilters() {
+				return columnFilters;
+			},
+			columnVisibility
+		},
+		getRowId: (row) => row.id,
+		columns,
+		getSubRows: getSubRows,
+		getCoreRowModel: getCoreRowModel(),
+		getExpandedRowModel: getExpandedRowModel(),
+		onExpandedChange: (updater) => {
+			expanded = typeof updater === 'function' ? updater(expanded) : updater;
+		},
+		getFilteredRowModel: getFilteredRowModel(),
+		getSortedRowModel: getSortedRowModel(),
+		onColumnFiltersChange: (updater) => {
+			columnFilters = typeof updater === 'function' ? updater(columnFilters) : updater;
+		},
+		onRowSelectionChange: (updater) => {
 			rowSelection = typeof updater === 'function' ? updater(rowSelection ?? {}) : updater;
 		},
-        enableRowSelection: true,
-        filterFromLeafRows: true, 
-    });
+		onSortingChange: (updater) => {
+			sorting = typeof updater === 'function' ? updater(sorting) : updater;
+		},
+		enableRowSelection: true,
+		filterFromLeafRows: true
+	});
 
-    // --- Core Reactivity Logic ---
-    let previousUniqueRates = new Set<number>();
+	// --- Core Reactivity Logic ---
+	let previousUniqueRates = new Set<number>();
 
-    $effect(() => {
-        const selectedIds = Object.keys(rowSelection ?? {});
+	$effect(() => {
+		const selectedIds = Object.keys(rowSelection ?? {});
 
-        const selectedLeafNodes = selectedIds.flatMap(id => getLeafNodes(findNodeById(data, id)));
-        const currentUniqueRates = new Set(selectedLeafNodes.map(leaf => leaf.samplingRate).filter(rate => rate != null));
-        
-        let newFilterValue: number | null = null;
-        if (currentUniqueRates.size > 0) {
-            newFilterValue = currentUniqueRates.values().next().value ?? null;
-        }
+		const selectedLeafNodes = selectedIds.flatMap((id) => getLeafNodes(findNodeById(data, id)));
+		const currentUniqueRates = new Set(
+			selectedLeafNodes.map((leaf) => leaf.samplingRate).filter((rate) => rate != null)
+		);
 
-        if (currentUniqueRates.size > 1 && previousUniqueRates.size <= 1) {
-            console.error("Conflict: Multiple sample rates selected. The plot will only display data for the first selected rate.");
-        }
+		let newFilterValue: number | null = null;
+		if (currentUniqueRates.size > 0) {
+			newFilterValue = currentUniqueRates.values().next().value ?? null;
+		}
 
-        previousUniqueRates = currentUniqueRates;
+		if (currentUniqueRates.size > 1 && previousUniqueRates.size <= 1) {
+			console.error(
+				'Conflict: Multiple sample rates selected. The plot will only display data for the first selected rate.'
+			);
+		}
 
-        const currentFilterValue = table.getColumn('select')?.getFilterValue();
-        if (currentFilterValue !== newFilterValue) {
-            table.getColumn('select')?.setFilterValue(newFilterValue);
-        }
-    });
+		previousUniqueRates = currentUniqueRates;
 
+		const currentFilterValue = table.getColumn('select')?.getFilterValue();
+		if (currentFilterValue !== newFilterValue) {
+			table.getColumn('select')?.setFilterValue(newFilterValue);
+		}
+	});
 </script>
 
 <div class="h-full rounded-md border overflow-y-auto">
@@ -124,7 +144,7 @@
                                     <FlexRender
                                     content={header.column.columnDef.header}
                                     context={header.getContext()}
-                                    />
+                                     />
                                 {/if}
                             </Table.Head>
                         {/each}
@@ -148,7 +168,7 @@
                                 context={cell.getContext()}
                             />
                         </Table.Cell>
-                        {/each}
+                    {/each}
                 </Table.Row>
             {:else}
                 <Table.Row>

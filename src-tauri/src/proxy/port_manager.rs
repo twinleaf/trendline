@@ -86,7 +86,7 @@ impl PortManager {
             .name(format!("port-{}", self_.url))
             .spawn(move || {
                 let (status_tx, status_rx) = crossbeam::channel::unbounded();
-                let ticker = crossbeam::channel::tick(Duration::from_millis(10));
+                let ticker = crossbeam::channel::tick(Duration::from_millis(1));
 
                 let mut last_debug_print = Instant::now();
 

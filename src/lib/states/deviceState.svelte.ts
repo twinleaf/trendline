@@ -174,15 +174,31 @@ class DeviceState {
 				out.push(placeholderDevice);
 			}
 			else if (parent) {
-				const children = devices
-					.filter((d) => d.route !== '/' && d.route !== '')
-					.slice()
-					.sort((a, b) => parseInt(a.route.slice(1), 10) - parseInt(b.route.slice(1), 10));
-				out.push({ ...parent, children });
-			}
-		}
-		return out.sort((a, b) => a.url.localeCompare(b.url));
-	});
+                const children = devices
+                    .filter((d) => d.route !== '/' && d.route !== '')
+                    .sort((a, b) => {
+                        const segmentsA = a.route.split('/').map(s => parseInt(s, 10));
+                        const segmentsB = b.route.split('/').map(s => parseInt(s, 10));
+
+                        if (segmentsA.some(isNaN) || segmentsB.some(isNaN)) {
+                            return a.route.localeCompare(b.route);
+                        }
+
+                        const minLength = Math.min(segmentsA.length, segmentsB.length);
+                        for (let i = 0; i < minLength; i++) {
+                            const diff = segmentsA[i] - segmentsB[i];
+                            if (diff !== 0) {
+                                return diff;
+                            }
+                        }
+
+                        return segmentsA.length - segmentsB.length;
+                    });
+                out.push({ ...parent, children });
+            }
+        }
+        return out.sort((a, b) => a.url.localeCompare(b.url));
+    });
 
 	getPort(url: string) {
 		return this.#devicesMap.get(url);
@@ -196,18 +212,32 @@ class DeviceState {
     }
 
     selectedDevices = $derived.by(() => {
-		const sel = this.selection;
-		if (!sel) return [];
+        const sel = this.selection;
+        if (!sel) return [];
 
-		const portData = this.#devicesMap.get(sel.portUrl);
-		if (!portData) return [];
+        const portData = this.#devicesMap.get(sel.portUrl);
+        if (!portData) return [];
 
-		return portData.devices.filter(d => {
-			const isParent = d.route === '/' || d.route === '';
-			const isSelectedChild = sel.childrenRoutes.includes(d.route);
-			return isParent || isSelectedChild;
-		});
-	});
+        const filteredDevices = portData.devices.filter(d => {
+            const isParent = d.route === '/' || d.route === '';
+            const isSelectedChild = sel.childrenRoutes.includes(d.route);
+            return isParent || isSelectedChild;
+        });
+
+        return filteredDevices.sort((a, b) => {
+            const routeA = a.route;
+            const routeB = b.route;
+
+            const isRootA = routeA === '/' || routeA === '';
+            if (isRootA) return -1;
+            const isRootB = routeB === '/' || routeB === '';
+            if (isRootB) return 1;
+
+            const numA = parseInt(routeA.slice(1), 10);
+            const numB = parseInt(routeB.slice(1), 10);
+            return numA - numB;
+        });
+    });
 
 	selectedPortState = $derived.by((): PortState | null => {
 		const sel = this.selection;

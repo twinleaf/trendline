@@ -1,89 +1,129 @@
 <script lang="ts">
-    import { chartState } from '$lib/states/chartState.svelte';
-    import { deviceState } from '$lib/states/deviceState.svelte';
-    import PlotControls from '$lib/components/chart-area/PlotControls.svelte';
-    import { type TreeRow } from '$lib/components/chart-area/data-table/column';
-    import UPlotComponent from '$lib/components/chart-area/UPlotComponent.svelte';
-    import * as Resizable from '$lib/components/ui/resizable';
-    import { Button } from '$lib/components/ui/button/';
-    import { Toggle } from '$lib/components/ui/toggle/';
-    import { Trash2, Plus, ChartLine, ChartColumn} from '@lucide/svelte';
-    import type { ExpandedState } from '@tanstack/table-core';
+	import { chartState } from '$lib/states/chartState.svelte';
+	import { deviceState } from '$lib/states/deviceState.svelte';
+	import PlotControls from '$lib/components/chart-area/PlotControls.svelte';
+	import { type TreeRow } from '$lib/components/chart-area/data-table/column';
+	import UPlotComponent from '$lib/components/chart-area/UPlotComponent.svelte';
+	import * as Resizable from '$lib/components/ui/resizable';
+	import { Button } from '$lib/components/ui/button/';
+	import { Toggle } from '$lib/components/ui/toggle/';
+	import { Trash2, Plus, ChartLine, ChartColumn } from '@lucide/svelte';
+	import type { ExpandedState } from '@tanstack/table-core';
+	import type { UiDevice } from '$lib/bindings/UiDevice';
+	import type { UiStream } from '$lib/bindings/UiStream';
+    import type { ColumnMeta } from '$lib/bindings/ColumnMeta';
 
+	let plots = $derived(chartState.plots);
+	let layout = $derived(chartState.layout);
+    const originalTitles = new Map<string, string>();
 
-    let plots = $derived(chartState.plots);
-    let layout = $derived(chartState.layout);
+	const MIN_PANE_HEIGHT_PX = 200;
+	let totalResizableHeight = $derived(Object.values(layout).reduce((sum, size) => sum + size, 0));
 
-    const MIN_PANE_HEIGHT_PX = 200;
-    let totalResizableHeight = $derived(Object.values(layout).reduce((sum, size) => sum + size, 0));
+	let openPopoverId = $state<string | null>(null);
 
-    let openPopoverId = $state<string | null>(null);
+	function handleRemoveClick(plotId: string) {
+		chartState.removePlot(plotId);
+		if (openPopoverId === plotId) {
+			openPopoverId = null;
+		}
+	}
 
-    function handleRemoveClick(plotId: string) {
-        chartState.removePlot(plotId);
-        if (openPopoverId === plotId) {
-            openPopoverId = null;
-        }
-    }
+	function sortUiDevicesByRoute(a: UiDevice, b: UiDevice): number {
+		const routeA = a.route;
+		const routeB = b.route;
+
+		const isRootA = routeA === '/' || routeA === '';
+		if (isRootA) return -1;
+		const isRootB = routeB === '/' || routeB === '';
+		if (isRootB) return 1;
+
+		const partsA = routeA.substring(1).split('/').map(Number);
+		const partsB = routeB.substring(1).split('/').map(Number);
+
+		if (partsA.some(isNaN) || partsB.some(isNaN)) {
+			return routeA.localeCompare(routeB);
+		}
+
+		const minLength = Math.min(partsA.length, partsB.length);
+		for (let i = 0; i < minLength; i++) {
+			const diff = partsA[i] - partsB[i];
+			if (diff !== 0) {
+				return diff;
+			}
+		}
+
+		return partsA.length - partsB.length;
+	}
 
 	let treeData = $derived.by((): TreeRow[] => {
-        const topLevelNodes: TreeRow[] = [];
+		const topLevelNodes: TreeRow[] = [];
 
-        for (const portData of deviceState.devices) {
-            for (const device of portData.devices) {
-                const streamNodes: TreeRow[] = [];
-                for (const stream of device.streams) {
-                    const columnNodes: TreeRow[] = [];
-                    const streamSamplingRate = stream.effective_sampling_rate ?? 0;
-                    for (const column of stream.columns) {
-                        const dataKey = {
-                            port_url: device.url,
-                            device_route: device.route,
-                            stream_id: stream.meta.stream_id,
-                            column_index: column.index,
-                        };
-                        columnNodes.push({
-                            id: JSON.stringify(dataKey),
-                            type: 'column',
-                            name: column.name,
-                            units: column.units ?? '',
-                            description: column.description ?? '',
-                            dataKey: dataKey, 
-                            samplingRate: streamSamplingRate,
-                        });
-                    }
-                    streamNodes.push({
-                        id: `${device.url}:${device.route}:${stream.meta.stream_id}`,
-                        type: 'stream',
-                        name: stream.meta.name,
-                        subRows: columnNodes,
-                        samplingRate: streamSamplingRate,
-                    });
-                }
+		for (const portData of deviceState.devices) {
+			const sortedDevices = [...portData.devices].sort(sortUiDevicesByRoute);
 
-                topLevelNodes.push({
-                    id: `${device.url}:${device.route}`,
-                    type: 'device',
-                    name: device.meta.name,
-                    device: device,
-                    subRows: streamNodes,
-                });
-            }
-        }
-        return topLevelNodes;
-    });
+			for (const device of sortedDevices) {
+				const sortedStreams = [...device.streams].sort((a: UiStream, b: UiStream) =>
+					a.meta.name.localeCompare(b.meta.name)
+				);
 
+				const streamNodes: TreeRow[] = [];
+				for (const stream of sortedStreams) {
+					const sortedColumns = [...stream.columns].sort((a: ColumnMeta, b: ColumnMeta) =>
+						a.name.localeCompare(b.name)
+					);
 
-    let initialExpandedState = $derived.by((): ExpandedState => {
-        const expanded: Record<string, boolean> = {};
-        for (const deviceNode of treeData) {
-            if (deviceNode.type === 'device') {
-                expanded[deviceNode.id] = true;
-            }
-        }
-        return expanded;
-    });
+					const columnNodes: TreeRow[] = [];
+					const streamSamplingRate = stream.effective_sampling_rate ?? 0;
+					for (const column of sortedColumns) {
+						const dataKey = {
+							port_url: device.url,
+							device_route: device.route,
+							stream_id: stream.meta.stream_id,
+							column_index: column.index
+						};
+						columnNodes.push({
+							id: JSON.stringify(dataKey),
+							type: 'column',
+							name: column.name,
+							units: column.units ?? '',
+							description: column.description ?? '',
+							dataKey: dataKey,
+							samplingRate: streamSamplingRate
+						});
+					}
+					streamNodes.push({
+						id: `${device.url}:${device.route}:${stream.meta.stream_id}`,
+						type: 'stream',
+						name: stream.meta.name,
+						subRows: columnNodes,
+						samplingRate: streamSamplingRate
+					});
+				}
+
+				topLevelNodes.push({
+					id: `${device.url}:${device.route}`,
+					type: 'device',
+					name: device.meta.name,
+					device: device,
+					subRows: streamNodes
+				});
+			}
+		}
+		return topLevelNodes;
+	});
+
+	let initialExpandedState = $derived.by((): ExpandedState => {
+		const expanded: Record<string, boolean> = {};
+		for (const deviceNode of treeData) {
+			if (deviceNode.type === 'device') {
+				expanded[deviceNode.id] = true;
+			}
+		}
+		return expanded;
+	});
 </script>
+
 <div class="relative flex h-full w-full flex-col">
     <div class="h-full w-full overflow-y-auto">
         <div class="p-4 flex flex-col gap-4 h-full">
@@ -118,7 +158,27 @@
                                 >
                                     <section class="flex h-full flex-col gap-2 rounded-lg border p-4">
                                         <div class="flex justify-between items-center">
-                                            <input type="text" bind:value={plot.title} class="text-lg font-semibold ..."/>
+                                            <input
+                                                type="text"
+                                                class="text-lg font-semibold bg-transparent focus:bg-background rounded-md px-2 -mx-2 outline-none focus:ring-1 focus:ring-ring"
+                                                value={plot.title}
+                                                onfocus={(e) => originalTitles.set(plot.id, e.currentTarget.value)}
+                                                onblur={(e) => {
+                                                    plot.title = e.currentTarget.value;
+                                                    originalTitles.delete(plot.id);
+                                                }}
+                                                onkeydown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        e.currentTarget.blur();
+                                                    } else if (e.key === 'Escape') {
+                                                        const original = originalTitles.get(plot.id);
+                                                        if (original !== undefined) {
+                                                            plot.title = original;
+                                                        }
+                                                        e.currentTarget.blur(); 
+                                                    }
+                                                }}
+                                            />
                                             <div class="flex items-center gap-2">
                                                 <Toggle
                                                     aria-label="Toggle plot view type"
@@ -156,12 +216,12 @@
                                 {#if i < plots.length - 1}
                                     <Resizable.Handle withHandle/>
                                 {/if}
-                                {/each}
+                            {/each}
                         </Resizable.PaneGroup>
                     </div>
-            </div>
+                </div>
             {:else}
-            <div class="flex h-full w-full flex-col items-center justify-center text-muted-foreground">
+                <div class="flex h-full w-full flex-col items-center justify-center text-muted-foreground">
                     <h3 class="text-2xl font-semibold">No Plots to Display</h3>
                     <p class="mb-4 mt-2 text-sm">Get started by adding a new plot.</p>
                     <Button onclick={() => chartState.addPlot()}>

@@ -68,7 +68,7 @@
 		<Input
 			type={rpc.arg_type.includes('f') || rpc.arg_type.includes('i') || rpc.arg_type.includes('u') ? 'number' : 'text'}
 			class="h-8 flex-1 bg-transparent font-mono text-xs"
-			placeholder={`Value: ${JSON.stringify(rpc.value) ?? 'N/A'}`}
+			placeholder={`${JSON.stringify(rpc.value) ?? 'N/A'}`}
 			bind:value={inputValue}
 			onkeydown={(e) => e.key === 'Enter' && handleSet()}
 			disabled={isLoading}
