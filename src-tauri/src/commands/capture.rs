@@ -39,6 +39,46 @@ pub fn get_latest_plot_data(
     capture.get_data_in_range(&keys, min_time, max_time, Some(num_points), decimation)
 }
 
+#[tauri::command]
+pub fn get_decimated_delta(
+    keys: Vec<DataColumnId>,
+    window_seconds: f64,
+    end_timestamp: f64,
+    num_points: usize,
+    decimation: Option<DecimationMethod>,
+    since_timestamp: f64,
+    capture: State<CaptureState>,
+) -> PlotData {
+    let min_timestamp = end_timestamp - window_seconds;
+    let full_decimated_data = capture.get_data_in_range(
+        &keys,
+        min_timestamp,
+        end_timestamp,
+        Some(num_points),
+        decimation,
+    );
+
+    if full_decimated_data.timestamps.is_empty() {
+        return PlotData::empty();
+    }
+    // STUPID BUT WORKS (duplicates decimation calculation and then linear searches -- but it's over decimated vector so not as bad as it looks)
+    let start_index = full_decimated_data.timestamps
+        .iter()
+        .position(|&t| t > since_timestamp)
+        .unwrap_or(full_decimated_data.timestamps.len());
+    
+    let delta_timestamps = full_decimated_data.timestamps[start_index..].to_vec();
+    let delta_series_data = full_decimated_data.series_data
+        .iter()
+        .map(|series| series[start_index..].to_vec())
+        .collect();
+
+    PlotData {
+        timestamps: delta_timestamps,
+        series_data: delta_series_data,
+    }
+}
+
 
 #[tauri::command]
 pub fn get_latest_fft_data(
