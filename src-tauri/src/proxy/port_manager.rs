@@ -86,7 +86,7 @@ impl PortManager {
             .name(format!("port-{}", self_.url))
             .spawn(move || {
                 let (status_tx, status_rx) = crossbeam::channel::unbounded();
-                let ticker = crossbeam::channel::tick(Duration::from_millis(1));
+                let ticker = crossbeam::channel::tick(Duration::from_micros(100));
 
                 let mut last_debug_print = Instant::now();
 
@@ -420,6 +420,7 @@ impl PortManager {
         self.counters.polls.fetch_add(1, Ordering::Relaxed);
         
         let mut refresh_needed = HashSet::new();
+        let mut reinit_needed = HashSet::new();
 
         // {
         //     let devices_map = self.devices.read().unwrap();
@@ -461,8 +462,21 @@ impl PortManager {
                         }
                     },
                     Err(_) => {
-                        eprintln!("[{}] Error draining device '{}'. Connection likely lost.", self.url, route);
-                        return; 
+                        println!("[{}] Device '{}' unresponsive. Attempting to reinstate handler.", self.url, route);
+                        reinit_needed.insert(route.clone());
+                    }
+                }
+            }
+        }
+        
+        if !reinit_needed.is_empty() {
+            if let Some(proxy_if) = self.proxy.lock().unwrap().clone() {
+                let devices_map = self.devices.read().unwrap();
+                for route in reinit_needed {
+                    if let Some(device_entry) = devices_map.get(&route) {
+                        let mut tuple = device_entry.lock().unwrap();
+                        tuple.0 = Device::open(&proxy_if, route.clone());
+                        println!("[{}] Re-initialized TIO device for route '{}'.", self.url, route);
                     }
                 }
             }
