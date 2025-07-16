@@ -1,27 +1,37 @@
-Project TODO List
+# Project TODO List
 This document outlines the current bugs, desired features, and code quality improvements for the Trendline application.
 
-🐞 Bug Fixes
 
-[ ] Mismatched Sample Rates: Investigate why selecting data streams with different sample rates results in NaN values, with behavior dependent on the selection order.
+| Marker | Definition                |
+|:------:|---------------------------|
+|    -   | Temporary fix implemented |
+|    X   | Permanent fix implemented |
+|    O   | Deferred implementation   |
+
+
+## Bug Fixes
+
+[X] Mismatched Sample Rates: Investigate why selecting data streams with different sample rates results in NaN values, with behavior dependent on the selection order.
 
 [ ] Cursor Behavior: Fix the plot cursor to correctly select the nearest non-null data point, instead of just the nearest x-coordinate.
 
-[ ] FFT Data Source: Resolve the issue where the FFT calculation fails for data series that are not the primary X component (column index 0) and for IMU data streams.
+[X] FFT Data Source: Resolve the issue where the FFT calculation fails for data series that are not the primary X component (column index 0) and for IMU data streams.
 
 [ ] Plot Resizing: Determine why adding a new plot to the view causes all existing plots to shrink slightly.
 
-[ ] Proxy Reconnect Loop: Fix the bug where a reconnecting proxy spawns a new, independent proxy instance, leading to multiple reconnection timers.
+[-] Proxy Reconnect Loop: Fix the bug where a reconnecting proxy spawns a new, independent proxy instance, leading to multiple reconnection timers.
 
-✨ Features
+# #Features
 
 [ ] Scalar Data Viewer: Implement exponential moving average and a boxed display for scalar values
 
 [ ] Device Selector UI: Implement the pop-up modal for device selection, triggered from the "Change Device" menu item.
 
-[ ] Device Selector manual URL input: Implement text entry option for device selection.
+[X] Device Selector manual URL input: Implement text entry option for device selection.
 
 [X] RPC Settings Panel: Create a dedicated UI for viewing and modifying device RPC parameters.
+
+[X] RPC Search Bar: Implement a search bar in the channel selection interface to allow users to quickly filter available RPC commands.
 
 [X] Plot Settings Tab: Add a tab panel within the settings modal (cog wheel) for adjusting plot-specific configurations (eg. colors, disable/enable plot title, window length)
 
@@ -33,7 +43,13 @@ This document outlines the current bugs, desired features, and code quality impr
 
 [ ] TCP Proxy: Replicate functionality in `tio-proxy` as a checkbox on device discovery and in the MenuBar toggle setting
 
-🛠️ Code Quality & Refactoring
+[ ] Multi-device view: Allows side-by-side device graphs, possibly separated using a pagination or carousel
+
+[ ] Menubar: Both integrating MacOS native and making a Svelte Menubar component
+
+[ ] Context menu: Should be able to right click to add or move plots in the ChartView area
+
+## Code Quality & Refactoring
 
 [ ] Reactive Data Flow:
 
@@ -47,9 +63,10 @@ Goal: Clean up component-level TypeScript logic by moving it into the centralize
 
 Implementation Idea: Break down the monolithic chartState into smaller, modular uPlot configuration managers. This will simplify state management and make it easier to integrate with the new plot settings panels.
 
-❓ Things to refactor
+## Things to refactor
 
 [ ] Move serialize `match rpc_type` into helper inside `twinleaf` crate
-[ ] Move `RpcMeta` into... somewhere (maybe `twinleaf::meta` but it's not relevant to `proto`)
-[ ] Move `device_enumerate()` into a `twinleaf` `util.rs` or something
 
+[ ] Move `RpcMeta` into... somewhere (maybe `twinleaf::meta` but it's not relevant to `proto`)
+
+[ ] Move `device_enumerate()` into a `twinleaf` `util.rs` or something

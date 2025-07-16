@@ -5,20 +5,19 @@
 - Time series data visualization of device streams
 - RPC control
 
-## TODO
-### User Interface
-- Multi-device view (allows side-by-side device graphs)
-### Data Streams
-- Data logging (saving to binary format)
-- Math channels (filters, addition/subtraction)
-- Cursors (right click to place static cursor)
-- Triggers (threshold-based pausing)
 
 # Developer Setup
 
-`npm run tauri dev` will launch the program on the root directory
+`npm run tauri dev` will launch the program on the root directory. Make sure to run `npm install` first.
 
-`cargo test export_bindings` will export the Rust bindings to be used in the front end Typescript when in the src-tauri directory 
+`cargo test export_bindings` will export the Rust bindings to be used in the front end Typescript when in the src-tauri directory (run to update structures inside `shared.rs`)
 
 # Application Architectural Overview
 `Trendline` uses [`Tauri`](https://tauri.app) to create a desktop application by combining a Rust backend with frontend frameworks (in our case, [`Svelte`](https://svelte.dev)). The corresponding `src-tauri` and `src` contain `README.md` detailing their architecture.
+
+### Known Issues
+
+- Non time aligned data inserts occasional inserts 0s at newest time stamp (min-max bucket algorithm)
+- Multi series plots are notably slower than indiviudal plots of the same series
+- Typing in the RPC filtering slows down over time
+fo
