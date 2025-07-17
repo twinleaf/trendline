@@ -7,16 +7,19 @@
 	interface Props {
 		allPrefixes: string[];
 		selected: SvelteSet<string>;
+		isSmall: boolean;
 	}
 
-	let { allPrefixes, selected = $bindable() }: Props = $props();
+	let { allPrefixes, selected = $bindable(), isSmall }: Props = $props();
 </script>
 
 <DropdownMenu.Root>
 	<DropdownMenu.Trigger>
 		<Button variant="outline" class="h-9">
 			<Funnel class="size-4" />
-			<ChevronDown class="ml-2 size-4" />
+			{#if !isSmall}
+				<ChevronDown class="ml-2 size-4" />
+			{/if}
 		</Button>
 	</DropdownMenu.Trigger>
 	<DropdownMenu.Content align="end">

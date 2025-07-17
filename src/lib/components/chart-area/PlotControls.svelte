@@ -3,7 +3,6 @@ import type { PlotConfig } from '$lib/states/chartState.svelte';
 import type { DecimationMethod } from '$lib/bindings/DecimationMethod';
 
 
-import type { ExpandedState } from '@tanstack/table-core';
 import { columns, type TreeRow } from '$lib/components/chart-area/data-table/column';
 import DataTable from '$lib/components/chart-area/data-table/DataTable.svelte';
 import PlotSettings from '$lib/components/chart-area/PlotSettings.svelte';
@@ -19,10 +18,9 @@ import { Settings } from '@lucide/svelte';
 type Props = {
     plot: PlotConfig;
     treeData: TreeRow[];
-    initialExpanded: ExpandedState;
 };
 
-let { plot = $bindable(), treeData, initialExpanded }: Props = $props();
+let { plot = $bindable(), treeData }: Props = $props();
 
 const decimationMethods: { value: DecimationMethod; label: string; description: string }[] = [
     { value: 'None', label: 'None', description: 'No downsampling. Raw data is rendered.' },
@@ -37,7 +35,7 @@ const decimationMethods: { value: DecimationMethod; label: string; description: 
 		</Button>
 	</Popover.Trigger>
 	<Popover.Content class="w-[600px] p-0">
-		<Tabs.Root value="selection" class="w-full p-2">
+		<Tabs.Root bind:value={plot.activeTab} class="w-full p-2">
 			<Tabs.List class="grid w-full grid-cols-2">
 				<Tabs.Trigger value="selection">Plot Selection</Tabs.Trigger>
 				<Tabs.Trigger value="settings">Plot Settings</Tabs.Trigger>
@@ -48,13 +46,17 @@ const decimationMethods: { value: DecimationMethod; label: string; description: 
 						{columns}
 						data={treeData}
 						getSubRows={(row: TreeRow) => row.subRows}
-						initialExpanded={initialExpanded}
+						bind:expanded={plot.expansion}
 						bind:rowSelection={plot.rowSelection}
+						bind:scrollTop={plot.scrollTops.selection}
 					/>
 				</div>
 			</Tabs.Content>
 			<Tabs.Content value="settings">
-				<PlotSettings bind:plot />
+				<PlotSettings 
+					bind:plot 
+					bind:scrollTop={plot.scrollTops.settings} 
+				/>
 			</Tabs.Content>
 		</Tabs.Root>
 	</Popover.Content>

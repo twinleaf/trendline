@@ -9,6 +9,7 @@ import { fuzzyFilter, fuzzySort, prefixFilter } from './filtering';
 
 export type RpcTableMeta = {
     device: UiDevice;
+    isSmall: boolean;
 }
 
 export const columns: ColumnDef<RpcMeta>[] = [
@@ -19,7 +20,6 @@ export const columns: ColumnDef<RpcMeta>[] = [
     },
     filterFn: fuzzyFilter,
     sortingFn: fuzzySort,
-    size: 130 
   },
   {
     id: 'name_prefix',
@@ -30,16 +30,15 @@ export const columns: ColumnDef<RpcMeta>[] = [
   {
     id: 'action',
     header: 'Value / Action',
-    cell: ({ row, table }) => {
-        const rpc = row.original;
-        const { device } = table.options.meta as RpcTableMeta;
-        return renderComponent(RpcActionCell, { rpc, device });
-    },
+		cell: ({ row, table }) => {
+			const rpc = row.original;
+			const { device, isSmall } = table.options.meta as RpcTableMeta;
+			return renderComponent(RpcActionCell, { rpc, device, isSmall });
+		},
   },
   { 
     accessorKey: 'arg_type', 
     header: 'Type', 
-    size: 40,
     enableHiding: true
   },
   { 
@@ -47,7 +46,6 @@ export const columns: ColumnDef<RpcMeta>[] = [
     header: ({ column }) => {
         return renderComponent(DataTableSortHeader, { title: 'Perms', column });
     },
-    size: 80,
     enableHiding: true 
   }
 ];

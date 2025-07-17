@@ -4,12 +4,15 @@
 	import { Label } from '$lib/components/ui/label';
 	import { RadioGroup, RadioGroupItem } from '$lib/components/ui/radio-group';
 	import { Separator } from "$lib/components/ui/separator/index.js";
+	import { onMount } from 'svelte';
 
 	type Props = {
 		plot: PlotConfig;
+		scrollTop?: number;
 	};
 
-	let { plot = $bindable() }: Props = $props();
+	let { plot = $bindable(), scrollTop = $bindable() }: Props = $props();
+	let scrollableDiv: HTMLDivElement;
 
 	const decimationMethods: { value: DecimationMethod; label: string; description: string }[] = [
 		{ value: 'None', label: 'None', description: 'No downsampling. Raw data is rendered.' },
@@ -38,9 +41,22 @@
 		{ value: 5, label: '5s' },
 		{ value: 10, label: '10s' }
 	];
+	onMount(() => {
+		if (scrollableDiv && scrollTop !== undefined) {
+			scrollableDiv.scrollTop = scrollTop;
+		}
+	});
 </script>
 
-<div class="max-h-[50vh] space-y-6 overflow-y-auto p-4">
+<div
+	class="max-h-[50vh] space-y-6 overflow-y-auto p-4"
+	bind:this={scrollableDiv}
+	onscroll={() => {
+		if (scrollableDiv) {
+			scrollTop = scrollableDiv.scrollTop;
+		}
+	}}
+>
 	<div>
 		<h4 class="font-medium leading-none">Decimation</h4>
 		<p class="mt-1 text-sm text-muted-foreground">

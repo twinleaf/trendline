@@ -1,46 +1,44 @@
 <script lang="ts">
-	import type { Row, Table } from '@tanstack/table-core';
-    import type { TreeRow } from '$lib/components/chart-area/data-table/column';
-    import Button from '$lib/components/ui/button/button.svelte';
-    import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-    import DeviceInfoHoverCard from '$lib/components/device-select/DeviceInfoHoverCard.svelte';
-    import { ChevronDown, ChevronRight, Info, TriangleAlert } from '@lucide/svelte';
-    import { getContext } from 'svelte';
+	import type { Row } from '@tanstack/table-core';
+	import type { TreeRow } from '$lib/components/chart-area/data-table/column';
+	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
+	import DeviceInfoHoverCard from '$lib/components/device-select/DeviceInfoHoverCard.svelte';
+	import { ChevronDown, ChevronRight, Info, TriangleAlert } from '@lucide/svelte';
+	import { getContext } from 'svelte';
 
-    type Props = {
-            row: Row<TreeRow>;
-        };
-    let { row }: Props = $props();    
-    const item = row.original;
-    const paddingLeft = `${row.depth * 1.25}rem`;
+	type Props = {
+		row: Row<TreeRow>;
+	};
+	let { row }: Props = $props();
+	const item = row.original;
+	const paddingLeft = `${row.depth * 1.25}rem`;
 
-    const tableContext = getContext<{ primarySamplingRate: number | null }>('tableContext');
+	const tableContext = getContext<{ primarySamplingRate: number | null }>('tableContext');
 
 	let primaryRate = $derived(tableContext.primarySamplingRate);
 	let isMismatched = $derived(
 		item.type === 'stream' &&
-		primaryRate != null &&
-		item.samplingRate != null &&
-		Math.abs(item.samplingRate - primaryRate) > 1e-6
+			primaryRate != null &&
+			item.samplingRate != null &&
+			Math.abs(item.samplingRate - primaryRate) > 1e-6
 	);
-    $inspect(isMismatched);
 </script>
 
 <div style="padding-left: {paddingLeft}" class="flex items-center gap-2">
 	{#if row.getCanExpand()}
-		<Button variant="ghost" size="icon" class="h-6 w-6" onclick={row.getToggleExpandedHandler()}>
+		<span class="flex h-6 w-6 items-center justify-center">
 			{#if row.getIsExpanded()}
 				<ChevronDown class="size-4" />
 			{:else}
 				<ChevronRight class="size-4" />
 			{/if}
-		</Button>
+		</span>
 	{:else}
 		<span class="inline-block w-6"></span>
 	{/if}
 
 	{#if isMismatched}
-		<Tooltip.Provider delayDuration={ 500 }>
+		<Tooltip.Provider delayDuration={500}>
 			<Tooltip.Root>
 				<Tooltip.Trigger>
 					<TriangleAlert class="size-4 text-amber-500" />

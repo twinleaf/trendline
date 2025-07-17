@@ -9,8 +9,9 @@
 	import { TriangleAlert } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 	import { onMount, onDestroy } from 'svelte';
+    import { cn } from '$lib/utils';
 
-	let { rpc, device }: { rpc: RpcMeta; device: UiDevice } = $props();
+	let { rpc, device, isSmall }: { rpc: RpcMeta; device: UiDevice; isSmall: boolean } = $props();
 
 	let inputValue = $state('');
 	let isLoading = $state(false);
@@ -163,7 +164,10 @@
 			<Button
 				variant="default"
 				size="sm"
-				class="h-8 w-20 justify-center"
+				class={cn('h-8 justify-center', {
+					'w-full': isSmall,
+					'w-20': !isSmall
+				})}
 				onclick={handleAction}
 				disabled={isLoading}
 			>
@@ -204,15 +208,18 @@
 					autocomplete="off"
 				/>
 			</div>
-			<Button
-				variant="default"
-				size="sm"
-				class="h-8 w-20 justify-center"
-				onclick={handleSet}
-				disabled={isLoading}
-			>
-				{isLoading ? '...' : 'Set'}
-			</Button>
+
+			{#if !isSmall}
+				<Button
+					variant="default"
+					size="sm"
+					class="h-8 w-20 justify-center"
+					onclick={handleSet}
+					disabled={isLoading}
+				>
+					{isLoading ? '...' : 'Set'}
+				</Button>
+			{/if}
 		</div>
 		<Popover.Content
 			customAnchor={inputContainerEl}

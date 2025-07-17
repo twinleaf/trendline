@@ -113,14 +113,20 @@
 		return topLevelNodes;
 	});
 
-	let initialExpandedState = $derived.by((): ExpandedState => {
-		const expanded: Record<string, boolean> = {};
-		for (const deviceNode of treeData) {
-			if (deviceNode.type === 'device') {
-				expanded[deviceNode.id] = true;
+	$effect(() => {
+		if (treeData.length > 0) {
+			for (const plot of plots) {
+				if (Object.keys(plot.expansion).length === 0) {
+					const initial: ExpandedState = {};
+					for (const deviceNode of treeData) {
+						if (deviceNode.type === 'device') {
+							initial[deviceNode.id] = true;
+						}
+					}
+					plot.expansion = initial;
+				}
 			}
 		}
-		return expanded;
 	});
 </script>
 
@@ -196,7 +202,6 @@
                                                 <PlotControls
                                                     bind:plot={plots[i]}
                                                     treeData={treeData}
-                                                    initialExpanded={initialExpandedState}
                                                 />
                                                 <Button 
                                                         variant="ghost" 

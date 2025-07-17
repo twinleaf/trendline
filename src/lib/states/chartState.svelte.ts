@@ -2,6 +2,7 @@ import { deviceState } from '$lib/states/deviceState.svelte';
 import type { DataColumnId } from '$lib/bindings/DataColumnId';
 import type { DecimationMethod } from '$lib/bindings/DecimationMethod';
 import type { RowSelectionState } from '@tanstack/table-core';
+import type { ExpandedState } from '@tanstack/table-core';
 
 
 export type ChartLayout = 'carousel' | 'vertical' | 'horizontal';
@@ -41,10 +42,18 @@ export class PlotConfig {
     id = crypto.randomUUID();
     title = $state('New Plot');
     rowSelection = $state<RowSelectionState>({});
+    expansion = $state<ExpandedState>({});
+    activeTab = $state<'selection' | 'settings'>('selection');
+    scrollTops = $state<{ selection: number; settings: number }>({
+        selection: 0,
+        settings: 0
+    });
+
     #manualDecimationMethod = $state<DecimationMethod>('Fpcs');
     #isDecimationManual = $state(false);
     windowSeconds = $state<number>(30.0);
     fftSeconds = $state<number>(10.0);
+    fftYAxisPower = $state(4);
 
     get decimationMethod(): DecimationMethod {
         if (this.#isDecimationManual) {
@@ -110,17 +119,23 @@ export class PlotConfig {
                     scalesConfig[unit] = { 
                         auto: true,
                         range: (u, dataMin, dataMax) => {
-                            const safeDataMin = Math.max(dataMin, Number.EPSILON);
-                            const safeDataMax = Math.max(dataMax, Number.EPSILON);
+                        const HYSTERESIS_FACTOR = 0.1;
 
-                            const minPower = Math.floor(Math.log10(safeDataMin));
-                            const finalMin = 10 ** (minPower - 1);
-
-                            const maxPower = Math.ceil(Math.log10(safeDataMax));
-                            const finalMax = 10 ** (maxPower + 1);
-
-                            return [finalMin, finalMax];
+                        if (dataMin <= 0 || dataMax <= 0) {
+                            return [10 ** -this.fftYAxisPower, 10 ** this.fftYAxisPower];
                         }
+
+                        const maxMagnitude = Math.max(Math.abs(Math.log10(dataMin)), Math.abs(Math.log10(dataMax)));
+                        const currentPower = this.fftYAxisPower;
+
+                        if (maxMagnitude > currentPower) {
+                            this.fftYAxisPower = Math.ceil(maxMagnitude);
+                        }
+                        else if (maxMagnitude < currentPower - 1 - HYSTERESIS_FACTOR) {
+                            this.fftYAxisPower = Math.ceil(maxMagnitude);
+                        }
+                        return [10 ** -this.fftYAxisPower, 10 ** this.fftYAxisPower];
+                    }
                     };
                 }
                 else {

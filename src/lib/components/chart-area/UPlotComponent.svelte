@@ -37,7 +37,7 @@
                 } : {
                     keys: seriesDataKeys,
                     windowSeconds: plot.windowSeconds,
-                    numPoints: Math.round(uplot.width*2),
+                    numPoints: Math.round(uplot.width*1.5),
 					decimation: plot.decimationMethod
                 };
 
