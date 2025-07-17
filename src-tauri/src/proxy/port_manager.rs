@@ -87,7 +87,7 @@ impl PortManager {
             .name(format!("port-{}", self_.url))
             .spawn(move || {
                 let (status_tx, status_rx) = crossbeam::channel::unbounded();
-                let ticker = crossbeam::channel::tick(Duration::from_micros(100));
+                let ticker = crossbeam::channel::tick(Duration::from_millis(10));
 
                 let mut last_debug_print = Instant::now();
 
@@ -272,7 +272,7 @@ impl PortManager {
         let mut discovered_ui_devices_for_event = Vec::new();
         for (route, ui_dev) in discovered_info {
             let data_device = Device::open(proxy_if, route.clone());
-            
+
             self.update_capture_state_with_stream_metadata(&route, &ui_dev.streams);
 
             discovered_ui_devices_for_event.push(ui_dev.clone());

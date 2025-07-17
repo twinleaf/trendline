@@ -214,7 +214,7 @@
                                             </div>
                                         </div>
                                         <div class="flex-1 min-h-0">
-                                            <UPlotComponent {plot} />
+                                            <UPlotComponent {plot} bind:latestTimestamp={plot.latestTimestamp} />
                                         </div>
                                     </section>
                                 </Resizable.Pane>

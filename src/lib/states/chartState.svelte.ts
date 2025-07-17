@@ -55,6 +55,9 @@ export class PlotConfig {
     fftSeconds = $state<number>(10.0);
     fftYAxisPower = $state(4);
 
+    hasData = $state(false);
+    latestTimestamp = $state(0);
+
     get decimationMethod(): DecimationMethod {
         if (this.#isDecimationManual) {
             return this.#manualDecimationMethod;
@@ -97,8 +100,20 @@ export class PlotConfig {
         }
         return newSeries;
     });
-    hasData = $state(false);
+
     viewType = $state<'timeseries' | 'fft'>('timeseries');
+
+    maxSamplingRate = $derived.by((): number => {
+        if (this.series.length === 0) {
+            return 0;
+        }
+        const rates = this.series.map(s => {
+            const device = deviceState.getDevice(s.dataKey.port_url, s.dataKey.device_route);
+            const stream = device?.streams.find(st => st.meta.stream_id === s.dataKey.stream_id);
+            return stream?.effective_sampling_rate ?? 0;
+        });
+        return Math.max(...rates);
+    });
 
     uPlotOptions = $derived.by((): uPlot.Options => {
         if (this.series.length === 0) {
@@ -143,8 +158,42 @@ export class PlotConfig {
                 }
             }
         }
+        const axesConfig: uPlot.Axis[] = [{}];
 
-        const axesConfig: uPlot.Axis[] = [{}]; 
+        if (this.viewType === 'fft') {
+            scalesConfig['x'] = { time: false, distr: 3, log: 10 };
+            axesConfig[0] = { 
+                scale: 'x',
+                label: "Frequency (Hz)",
+            };
+
+            for (const unit of uniqueUnits) {
+                if (unit && scalesConfig[unit]) {
+                    scalesConfig[unit].distr = 3;
+                    scalesConfig[unit].log = 10;
+                }
+            }
+        } else {
+            scalesConfig['x'] = { time: false };
+             axesConfig[0] = {
+                scale: 'x',
+                space: 100, 
+                values: (self, ticks) => {
+                    const latest_t = this.latestTimestamp;
+                    if (latest_t === 0) return ticks.map(t => t.toFixed(1));
+
+                    return ticks.map(rawTick => {
+                        const secondsAgo = latest_t - rawTick;
+
+                        if (Math.abs(secondsAgo) < 0.01) {
+                            return "Now";
+                        }
+                        
+                        return `-${secondsAgo.toFixed(1)}s`;
+                    });
+                }
+            };
+        }
 
         let yAxisCount = 0;
             
@@ -193,26 +242,6 @@ export class PlotConfig {
             {}, // x-axis placeholder
             ...this.series.map(s => s.uPlotSeries)
         ];
-
-        if (this.viewType === 'fft') {
-            scalesConfig['x'] = { time: false, distr: 3, log: 10 };
-            for (const unit of uniqueUnits) {
-                if (unit && scalesConfig[unit]) {
-                    scalesConfig[unit].distr = 3;
-                    scalesConfig[unit].log = 10;
-                }
-            }
-            axesConfig[0] = { 
-                scale: 'x',
-                label: "Frequency (Hz)",
-            };
-
-            axesConfig.forEach(axis => {
-                if (axis.scale && axis.label && axis.scale !== 'x') {
-                    axis.label += "/√Hz";
-                }
-            });
-        }
 
         return {
             width: 800,
