@@ -1,4 +1,4 @@
-use crate::state::capture::{CaptureState, DataColumnId, Point};
+use crate::state::capture::{CaptureCommand, DataColumnId, Point};
 use crate::shared::{ColumnMeta, DeviceMeta, PortState, RpcMeta, UiDevice, UiStream};
 use crate::util::{self, parse_arg_type_and_size, parse_permissions_string};
 use std::panic::AssertUnwindSafe;
@@ -20,6 +20,7 @@ use twinleaf::{
     Device,
 };
 use crossbeam::select;
+use crossbeam::channel::Sender;
 
 pub struct DebugCounters {
     pub polls: AtomicUsize,
@@ -42,12 +43,12 @@ pub struct PortManager {
     pub devices: RwLock<HashMap<DeviceRoute, Arc<Mutex<(Device, UiDevice)>>>>,
     pub command_tx: crossbeam::channel::Sender<PortCommand>,
     pub app: tauri::AppHandle,
-    pub capture: CaptureState,
+    pub capture_tx: Sender<CaptureCommand>,
     pub counters: DebugCounters,
 }
 
 impl PortManager {
-    pub fn new(url: String, app: tauri::AppHandle, capture: CaptureState) -> Arc<Self> {
+    pub fn new(url: String, app: tauri::AppHandle, capture_tx: Sender<CaptureCommand>) -> Arc<Self> {
         let (command_tx, command_rx) = crossbeam::channel::unbounded();
 
         let pm = Arc::new(Self {
@@ -58,7 +59,7 @@ impl PortManager {
             devices: RwLock::new(HashMap::new()),
             command_tx,
             app,
-            capture,
+            capture_tx,
             counters: DebugCounters {
                 polls: AtomicUsize::new(0),
                 samples_received: AtomicUsize::new(0),
@@ -272,6 +273,8 @@ impl PortManager {
         for (route, ui_dev) in discovered_info {
             let data_device = Device::open(proxy_if, route.clone());
             
+            self.update_capture_state_with_stream_metadata(&route, &ui_dev.streams);
+
             discovered_ui_devices_for_event.push(ui_dev.clone());
             devices.insert(route, Arc::new(Mutex::new((data_device, ui_dev))));
         }
@@ -455,7 +458,7 @@ impl PortManager {
                 match result {
                     Ok(samples) => {
                         for sample in samples {
-                            self.process_sample_data(route, &sample);
+                            self.update_capture_state_with_sample(route, &sample);
                             if sample.meta_changed || sample.segment_changed {
                                 refresh_needed.insert(route.clone());
                             }
@@ -501,15 +504,8 @@ impl PortManager {
                     
                     let (new_meta, new_streams) = self_clone.fetch_metadata(data_device);
 
-                    for stream in &new_streams {
-                        let key = DataColumnId {
-                            port_url: self_clone.url.clone(),
-                            device_route: route.clone(),
-                            stream_id: stream.meta.stream_id,
-                            column_index: 0,
-                        };
-                        self_clone.capture.update_effective_sampling_rate(&key, stream.effective_sampling_rate);
-                    }
+                    self_clone.update_capture_state_with_stream_metadata(&route, &new_streams);
+
                     ui_device.meta = new_meta;
                     ui_device.streams = new_streams;
                     
@@ -534,14 +530,13 @@ impl PortManager {
     //         }
     //     }
     // }
-    fn process_sample_data(&self, route: &DeviceRoute, sample: &twinleaf::data::Sample) {
+    fn update_capture_state_with_sample(&self, route: &DeviceRoute, sample: &twinleaf::data::Sample) {
         for column in &sample.columns {
-            // Inlined logic from try_as_f64
             let value_f64 = match column.value {
                 twinleaf::data::ColumnData::Int(i) => Some(i as f64),
                 twinleaf::data::ColumnData::UInt(u) => Some(u as f64),
                 twinleaf::data::ColumnData::Float(f) => Some(f),
-                _ => None, // Handles Unknown or any other variants
+                _ => None,
             };
 
             if let Some(value) = value_f64 {
@@ -552,8 +547,33 @@ impl PortManager {
                     column_index: column.desc.index,
                 };
                 let point = Point { x: sample.timestamp_end(), y: value };
-                self.capture.insert(&key, point);
-                self.counters.points_inserted.fetch_add(1, Ordering::Relaxed);
+                
+                let command = CaptureCommand::Insert(key, point);
+                if self.capture_tx.send(command).is_ok() {
+                    self.counters.points_inserted.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    eprintln!("[{}] Failed to send data to capture thread. It may have panicked.", self.url);
+                }
+            }
+        }
+    }
+
+    fn update_capture_state_with_stream_metadata(&self, route: &DeviceRoute, streams: &[UiStream]) {
+        for stream in streams {
+            let stream_key = DataColumnId {
+                port_url: self.url.clone(),
+                device_route: route.clone(),
+                stream_id: stream.meta.stream_id,
+                column_index: 0,
+            };
+
+            let command = CaptureCommand::UpdateSampleRate {
+                key: stream_key,
+                rate: stream.effective_sampling_rate,
+            };
+
+            if let Err(e) = self.capture_tx.send(command) {
+                 eprintln!("[{}] Failed to send sample rate for '{}' to capture thread: {}", self.url, route, e);
             }
         }
     }

@@ -26,9 +26,10 @@ impl ProxyRegister {
     }
 
     pub fn ensure(&self, url: String) {
+        let capture_tx = self.capture.inner.command_tx.clone();
         self.ports
             .entry(url.clone())
-            .or_insert_with(|| PortManager::new(url, self.app.clone(), self.capture.clone()));
+            .or_insert_with(|| PortManager::new(url, self.app.clone(), capture_tx));
     }
 
     pub fn prune<F>(&self, keep: F)

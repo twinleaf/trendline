@@ -82,73 +82,72 @@ pub fn min_max_bucket(data: &[Point], target_points: usize, min_time: f64, max_t
     if data_len <= target_points || target_points < 4 || min_time >= max_time {
         return data.to_vec();
     }
+    
+    let Some(first_point) = data.first() else { return vec![]; };
+    let Some(last_point) = data.last() else { return vec![]; };
 
-    // Always preserve the true start and end points.
-    let mut downsampled = Vec::with_capacity(target_points);
-    downsampled.push(data[0]);
-
-    // The inner data to be decimated.
-    let inner_data = &data[1..data_len - 1];
-    let inner_target_points = target_points - 2;
-
+    let inner_target_points = target_points.saturating_sub(2);
     let num_buckets = (inner_target_points / 2).max(1);
+    let final_capacity = 2 + num_buckets * 2;
+    let mut downsampled = Vec::with_capacity(final_capacity);
+
+    downsampled.push(Point::new(min_time, first_point.y));
+
     let time_span = max_time - min_time;
     let bucket_duration = time_span / num_buckets as f64;
+    
     let mut search_from_idx = 0;
+    let mut last_real_y_value = first_point.y;
 
     for i in 0..num_buckets {
         let bucket_t_start = min_time + (i as f64 * bucket_duration);
         let bucket_t_end = bucket_t_start + bucket_duration;
 
-        let start_idx = search_from_idx
-            + inner_data[search_from_idx..]
-                .binary_search_by(|p| {
-                    p.x.partial_cmp(&bucket_t_start)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .unwrap_or_else(|x| x);
-
-        let end_idx = start_idx
-            + inner_data[start_idx..]
-                .binary_search_by(|p| {
-                    p.x.partial_cmp(&bucket_t_end)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .unwrap_or_else(|x| x);
-        
-        search_from_idx = end_idx;
-
-        if start_idx >= end_idx {
-            continue; // No data in this bucket
+        let mut bucket_start_idx = search_from_idx;
+        while bucket_start_idx < data_len && data[bucket_start_idx].x < bucket_t_start {
+            bucket_start_idx += 1;
         }
 
-        let bucket = &inner_data[start_idx..end_idx];
+        let mut bucket_end_idx = bucket_start_idx;
+        while bucket_end_idx < data_len && data[bucket_end_idx].x < bucket_t_end {
+            bucket_end_idx += 1;
+        }
+        
+        search_from_idx = bucket_end_idx;
+        
+        let bucket_slice = &data[bucket_start_idx..bucket_end_idx];
         let representative_time = bucket_t_start + bucket_duration / 2.0;
 
-        let y_values: Vec<f64> = bucket.iter().map(|p| p.y).collect();
-        let (min_y_idx, max_y_idx) = y_values.argminmax();
+        if bucket_slice.is_empty() {
 
-        let mut point_min = bucket[min_y_idx];
-        let mut point_max = bucket[max_y_idx];
+            downsampled.push(Point::new(representative_time, last_real_y_value));
+            downsampled.push(Point::new(representative_time, last_real_y_value));
+            continue;
+        }
 
-        point_min.x = representative_time;
-        point_max.x = representative_time;
+        let (min_idx, max_idx) = bucket_slice.iter().map(|p| p.y).collect::<Vec<_>>().argminmax();
+        
+        let p_min = bucket_slice[min_idx];
+        let p_max = bucket_slice[max_idx];
+        
+        let p_min_aligned = Point::new(representative_time, p_min.y);
+        let p_max_aligned = Point::new(representative_time, p_max.y);
 
-        if bucket[min_y_idx].x < bucket[max_y_idx].x {
-            downsampled.push(point_min);
-            downsampled.push(point_max);
-        } else if bucket[max_y_idx].x < bucket[min_y_idx].x {
-            downsampled.push(point_max);
-            downsampled.push(point_min);
+        if p_min.x <= p_max.x {
+            downsampled.push(p_min_aligned);
+            downsampled.push(p_max_aligned);
         } else {
-            downsampled.push(point_min);
-            if min_y_idx != max_y_idx {
-                downsampled.push(point_max);
-            }
+            downsampled.push(p_max_aligned);
+            downsampled.push(p_min_aligned);
+        }
+        
+        if let Some(p) = bucket_slice.last() {
+            last_real_y_value = p.y;
         }
     }
 
-    downsampled.push(data[data_len - 1]);
+    downsampled.push(Point::new(max_time, last_point.y));
+
     downsampled
 }
 

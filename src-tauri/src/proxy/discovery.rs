@@ -18,5 +18,5 @@ pub fn spawn(registry: Arc<ProxyRegister>) {
 
             thread::sleep(Duration::from_secs(2));
         })
-        .expect("spawn discovery thread");
+        .expect("Failed to spawn Discovery thread.");
 }

@@ -6,6 +6,8 @@ use std::sync::Arc;
 use twinleaf::tio::proto::DeviceRoute;
 use crate::state::decimation::{lerp, fpcs, min_max_bucket};
 use crate::util;
+use crossbeam::channel::{unbounded, Sender, Receiver};
+use std::thread;
 
 use crate::shared::{ PlotData, DecimationMethod };
 
@@ -56,11 +58,15 @@ impl Buffer {
     fn push(&mut self, p: Point) {
         self.data.insert(p.x.to_bits(), p.y);
 
-        if self.data.len() > self.cap {
+        while self.data.len() > self.cap {
             if let Some(oldest_key) = self.data.keys().next().copied() {
                 self.data.remove(&oldest_key);
             }
         }
+    }
+
+     pub fn set_capacity(&mut self, new_cap: usize) {
+        self.cap = new_cap;
     }
 }
 
@@ -70,7 +76,17 @@ pub struct Inner {
     pub active: DashMap<DataColumnId, ()>,
     pub offsets: DashMap<DataColumnId, f64>,
     pub effective_sampling_rates: DashMap<DataColumnId, f64>,
-    pub default_cap: usize,
+    pub initial_buffer_cap: usize,
+    pub command_tx: Sender<CaptureCommand>,
+}
+
+#[derive(Debug)]
+pub enum CaptureCommand {
+    Insert(DataColumnId, Point),
+    UpdateSampleRate {
+        key: DataColumnId,
+        rate: f64,
+    },
 }
 
 #[derive(Clone)]
@@ -79,19 +95,29 @@ pub struct CaptureState {
 }
 
 impl CaptureState {
+    const BUFFER_WINDOW_SECONDS: f64 = 180.0;
+
     pub fn new() -> Self {
-        Self {
-            inner: Arc::new(Inner {
+        let (command_tx, command_rx): (Sender<CaptureCommand>, Receiver<CaptureCommand>) = unbounded();
+
+        let inner = Arc::new(Inner {
                 buffers: DashMap::new(),
                 active: DashMap::new(),
                 offsets: DashMap::new(),
                 effective_sampling_rates: DashMap::new(),
-                default_cap: 120_000, // e.g., 1000 samples/sec * 120 seconds
-            }),
-        }
+                initial_buffer_cap: 200_000, // e.g., 1000 samples/sec * 200 seconds, 1600 samples/sec * 125 seconds
+                command_tx,
+             });
+
+        let consumer_inner = inner.clone();
+        thread::Builder::new().name("capture-consumer".into()).spawn(move || {
+            Self::run_consumer(consumer_inner, command_rx);
+        }).expect("Failed to spawn CaptureState thread.");
+
+        Self { inner }
     }
 
- pub fn get_data_in_range(
+    pub fn get_data_in_range(
         &self,
         keys: &[DataColumnId],
         min_time: f64,
@@ -126,6 +152,26 @@ impl CaptureState {
         .collect();
             
         if let (Some(n_points), Some(method)) = (num_points, decimation) {
+            if method == DecimationMethod::MinMax && n_points > 0 {
+                let mut decimated_series_data = Vec::with_capacity(aligned_series.len());
+                let mut final_timestamps = Vec::new();
+
+                for (i, series) in aligned_series.iter_mut().enumerate() {
+                    if series.len() > n_points {
+                        *series = min_max_bucket(series, n_points, min_time, max_time);
+                    }
+                    
+                    if i == 0 {
+                        final_timestamps = series.iter().map(|p| p.x).collect();
+                    }
+                    decimated_series_data.push(series.iter().map(|p| p.y).collect());
+                }
+                return PlotData {
+                    timestamps: final_timestamps,
+                    series_data: decimated_series_data,
+                };
+            }
+            
             if !matches!(method, DecimationMethod::None) {
                 for series in &mut aligned_series {
                     if series.len() > n_points && n_points > 0 {
@@ -134,7 +180,7 @@ impl CaptureState {
                                 let ratio = series.len() / n_points;
                                 if ratio > 1 { fpcs(series, ratio) } else { series.clone() }
                             },
-                            DecimationMethod::MinMax => min_max_bucket(series, n_points, min_time, max_time),
+                            DecimationMethod::MinMax => series.clone(), 
                             DecimationMethod::None => unreachable!(),
                         };
                     }
@@ -169,7 +215,7 @@ impl CaptureState {
                     let mut y_val = f64::NAN;
 
                     let next_point_matches = if let Some(p) = iter.peek() {
-                        p.x == ts
+                        (p.x - ts).abs() < 1e-9
                     } else {
                         false
                     };
@@ -179,8 +225,16 @@ impl CaptureState {
                         last_points[i] = Some(*p_next);
                         y_val = p_next.y;
                     } else {
-                        if let (Some(p_last), Some(p_next_real)) = (last_points[i], iter.peek()) {
-                            y_val = lerp(&p_last, p_next_real, ts);
+                        if let Some(p_next_real) = iter.peek() {
+                            if let Some(p_last) = last_points[i] {
+                                y_val = lerp(&p_last, p_next_real, ts);
+                            } else {
+                                y_val = p_next_real.y;
+                            }
+                        } else {
+                            if let Some(p_last) = last_points[i] {
+                                y_val = p_last.y;
+                            }
                         }
                     }
                     plot_data.series_data[i].push(y_val);
@@ -189,7 +243,6 @@ impl CaptureState {
                 break;
             }
         }
-
         plot_data
     }
 
@@ -232,28 +285,68 @@ impl CaptureState {
         interpolated_values
     }
 
-    /// Inserts a data point for a given column, but only if that column is active.
-    pub fn insert(&self, key: &DataColumnId, p: Point) {
-        if !self.inner.active.contains_key(key) {
-            return;
-        }
-        let stream_key = DataColumnId { column_index: 0, ..key.clone() };
-        self.inner.offsets.entry(stream_key).or_insert_with(|| {
-            println!(
-                "[Capture] New stream activated (Port: {}, Device: {}, Stream: {}). Setting t=0 baseline from first timestamp {}.",
-                key.port_url, key.device_route, key.stream_id, p.x
-            );
-            -p.x // The offset is the negative of the first point's timestamp.
-        });
+    fn run_consumer(inner: Arc<Inner>, rx: Receiver<CaptureCommand>) {
+        while let Ok(command) = rx.recv() {
+            match command {
+                CaptureCommand::Insert(key, p) => {
+                    // This is the logic that used to be in `insert`
+                    if !inner.active.contains_key(&key) {
+                        continue;
+                    }
+                    let stream_key = key.stream_key();
+                    inner.offsets.entry(stream_key.clone()).or_insert_with(|| {
+                        println!(
+                            "[Capture] New stream activated (Port: {}, Device: {}, Stream: {}). Setting t=0 baseline from first timestamp {}.",
+                            key.port_url, key.device_route, key.stream_id, p.x
+                        );
+                        -p.x
+                    });
 
-        // Store the point with its ORIGINAL, UNMODIFIED timestamp.
-        let mut buffer = self
-            .inner
-            .buffers
-            .entry(key.clone())
-            .or_insert_with(|| Buffer::new(self.inner.default_cap));
-        
-        buffer.push(p);
+                    let mut buffer = inner
+                        .buffers
+                        .entry(key.clone())
+                        .or_insert_with(|| {
+                            let rate = inner.effective_sampling_rates
+                                .get(&stream_key)
+                                .map_or(
+                                    1000.0,
+                                    |r| *r.value()
+                                );
+                            
+                            let initial_cap = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
+                            println!("[Capture] Creating new buffer for {:?} with capacity {} points", key, initial_cap);
+                            Buffer::new(initial_cap)
+                        });
+                    
+                    buffer.push(p);
+                },
+                CaptureCommand::UpdateSampleRate { key, rate } => {
+                    if let Some(existing_rate) = inner.effective_sampling_rates.get(&key.stream_key()) {
+                        if (existing_rate.value() - rate).abs() < 1e-9 {
+                            continue; 
+                        }
+                    }
+                    println!("[Capture] Updating sample rate for device at route '{}' to {} Hz", key.device_route, rate);
+                    inner.effective_sampling_rates.insert(key.stream_key(), rate);
+
+
+                    let new_cap = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100); 
+
+                    for active_key_ref in inner.active.iter() {
+                        let active_key = active_key_ref.key();
+                        if active_key.port_url == key.port_url &&
+                        active_key.device_route == key.device_route &&
+                        active_key.stream_id == key.stream_id {
+                            
+                            if let Some(mut buffer) = inner.buffers.get_mut(active_key) {
+                                println!("[Capture] Resizing buffer for {:?} to {} points", active_key, new_cap);
+                                buffer.set_capacity(new_cap);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub fn start_capture(&self, key: &DataColumnId) {
