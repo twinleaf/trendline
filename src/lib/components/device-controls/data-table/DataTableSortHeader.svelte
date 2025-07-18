@@ -9,7 +9,11 @@
 	const sorted = $derived(column.getIsSorted());
 </script>
 
-<Button variant="ghost" onclick={() => column.toggleSorting(sorted === 'asc')} class="p-1 h-auto text-left">
+<Button
+	variant="ghost"
+	onclick={() => column.toggleSorting(sorted === 'asc')}
+	class="w-full h-auto p-1 flex items-center justify-between"
+>
 	{title}
 	{#if sorted === 'desc'}
 		<ArrowDown class="ml-2 h-4 w-4 shrink-0" />

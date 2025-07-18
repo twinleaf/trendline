@@ -39,13 +39,15 @@ export const columns: ColumnDef<RpcMeta>[] = [
   { 
     accessorKey: 'arg_type', 
     header: 'Type', 
-    enableHiding: true
+    enableHiding: true,
+    size: 40,
   },
   { 
     accessorKey: 'permissions', 
     header: ({ column }) => {
         return renderComponent(DataTableSortHeader, { title: 'Perms', column });
     },
-    enableHiding: true 
+    enableHiding: true,
+    size: 90,
   }
 ];

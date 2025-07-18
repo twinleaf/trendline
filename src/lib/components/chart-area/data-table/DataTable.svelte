@@ -66,6 +66,26 @@
 		return [];
 	}
 
+	function canSelectNode(node: TreeRow, primaryRate: number | null): boolean {
+		// If no primary rate is set yet, everything is selectable.
+		if (primaryRate === null) {
+			return true;
+		}
+
+		// For leaf nodes (columns), check their sampling rate.
+		if (node.type === 'column') {
+			return node.samplingRate != null && Math.abs(node.samplingRate - primaryRate) < 1e-6;
+		}
+
+		// For parent nodes (devices/streams), check if ANY child can be selected.
+		if (node.subRows && node.subRows.length > 0) {
+			return node.subRows.some((child) => canSelectNode(child, primaryRate));
+		}
+
+		return false;
+	}
+
+
 	function handleRowClick(row: Row<TData>, event: MouseEvent) {
 		const { shiftKey, ctrlKey, metaKey } = event;
 
@@ -81,7 +101,7 @@
 
 		// --- B. Handle clicks on non-expandable LEAF nodes (Channel) ---
 		if (!row.getCanSelect()) {
-			return; 
+			return;
 		}
 
 		// Handle Shift-click for range selection
@@ -112,8 +132,7 @@
 				}
 			}
 			table.setRowSelection(newSelection);
-		}
-		else {
+		} else {
 			row.toggleSelected();
 			lastSelectedRowId = row.id;
 		}
@@ -129,7 +148,7 @@
 				return sorting;
 			},
 			get expanded() {
-				return expanded ?? {};;
+				return expanded ?? {};
 			},
 			get rowSelection() {
 				return rowSelection;
@@ -159,13 +178,7 @@
 			sorting = typeof updater === 'function' ? updater(sorting) : updater;
 		},
 		enableRowSelection: (row) => {
-			if (tableContext.primarySamplingRate === null) return true;
-			const node = row.original;
-			if (node.type === 'device') return true;
-			if (node.samplingRate != null) {
-				return Math.abs(node.samplingRate - tableContext.primarySamplingRate) < 1e-6;
-			}
-			return true;
+			return canSelectNode(row.original, tableContext.primarySamplingRate);
 		}
 	});
 

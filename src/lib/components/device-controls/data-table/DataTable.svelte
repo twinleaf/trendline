@@ -31,7 +31,6 @@
 	let sorting = $state<SortingState>([{ id: 'name', desc: false }]);
 	let fuzzySearchValue = $state('');
 	let toggleState = $state<string[]>(['header']);
-	// The `searchHasFocus` state has been removed.
 
 	let allPrefixes = $state<string[]>([]);
 	let selectedPrefixes = $state(new SvelteSet<string>());

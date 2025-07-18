@@ -11,29 +11,21 @@ This document outlines the current bugs, desired features, and code quality impr
 
 ## Bug Fixes
 
-[X] Mismatched Sample Rates: Investigate why selecting data streams with different sample rates results in NaN values, with behavior dependent on the selection order.
-
 [ ] Cursor Behavior: Fix the plot cursor to correctly select the nearest non-null data point, instead of just the nearest x-coordinate.
-
-[X] FFT Data Source: Resolve the issue where the FFT calculation fails for data series that are not the primary X component (column index 0) and for IMU data streams.
 
 [ ] Plot Resizing: Determine why adding a new plot to the view causes all existing plots to shrink slightly.
 
 [-] Proxy Reconnect Loop: Fix the bug where a reconnecting proxy spawns a new, independent proxy instance, leading to multiple reconnection timers.
+
+[ ] Accessibility Behavior: Fix the bug where removing the explicit Chevron button in the Plot Selection means that it is not possible to expand the DataTable using only keyboard navigation
+
+[ ] Plot Control Focus: Fix how plot control's focus is not removed when the PopOver disappears (eg. hitting space bar after closing the popover reopens it). Presumably tied to the button focus.
 
 # #Features
 
 [ ] Scalar Data Viewer: Implement exponential moving average and a boxed display for scalar values
 
 [ ] Device Selector UI: Implement the pop-up modal for device selection, triggered from the "Change Device" menu item.
-
-[X] Device Selector manual URL input: Implement text entry option for device selection.
-
-[X] RPC Settings Panel: Create a dedicated UI for viewing and modifying device RPC parameters.
-
-[X] RPC Search Bar: Implement a search bar in the channel selection interface to allow users to quickly filter available RPC commands.
-
-[X] Plot Settings Tab: Add a tab panel within the settings modal (cog wheel) for adjusting plot-specific configurations (eg. colors, disable/enable plot title, window length)
 
 [ ] Channel Search Bar: Implement a search bar in the channel selection interface to allow users to quickly filter available data streams.
 

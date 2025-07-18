@@ -1,6 +1,7 @@
 import { deviceState } from '$lib/states/deviceState.svelte';
 import type { DataColumnId } from '$lib/bindings/DataColumnId';
 import type { DecimationMethod } from '$lib/bindings/DecimationMethod';
+import type { DetrendMethod } from '$lib/bindings/DetrendMethod';
 import type { RowSelectionState } from '@tanstack/table-core';
 import type { ExpandedState } from '@tanstack/table-core';
 
@@ -52,11 +53,15 @@ export class PlotConfig {
     #manualDecimationMethod = $state<DecimationMethod>('Fpcs');
     #isDecimationManual = $state(false);
     windowSeconds = $state<number>(30.0);
+    resolutionMultiplier = $state<number>(100);
+    
     fftSeconds = $state<number>(10.0);
     fftYAxisPower = $state(4);
+    fftDetrendMethod = $state<DetrendMethod>('None');
 
     hasData = $state(false);
     latestTimestamp = $state(0);
+    isPaused = $state(false);
 
     get decimationMethod(): DecimationMethod {
         if (this.#isDecimationManual) {
@@ -120,40 +125,39 @@ export class PlotConfig {
             return {
                 width: 800,
                 height: 400,
+                legend: { show: false },
                 series: [{}],
-                axes: [{}, { show: false }],
+                axes: [{}, { show: false }]
             };
         }
 
-        const uniqueUnits = new Set(this.series.map(s => s.uPlotSeries.scale));
+        const uniqueUnits = new Set(this.series.map((s) => s.uPlotSeries.scale));
 
         const scalesConfig: Record<string, uPlot.Scale> = {};
         for (const unit of uniqueUnits) {
-            if(unit) {
+            if (unit) {
                 if (this.viewType === 'fft') {
-                    scalesConfig[unit] = { 
+                    scalesConfig[unit] = {
                         auto: true,
                         range: (u, dataMin, dataMax) => {
-                        const HYSTERESIS_FACTOR = 0.1;
+                            const HYSTERESIS_FACTOR = 0.1;
 
-                        if (dataMin <= 0 || dataMax <= 0) {
+                            if (dataMin <= 0 || dataMax <= 0) {
+                                return [10 ** -this.fftYAxisPower, 10 ** this.fftYAxisPower];
+                            }
+
+                            const maxMagnitude = Math.max(Math.abs(Math.log10(dataMin)), Math.abs(Math.log10(dataMax)));
+                            const currentPower = this.fftYAxisPower;
+
+                            if (maxMagnitude > currentPower) {
+                                this.fftYAxisPower = Math.ceil(maxMagnitude);
+                            } else if (maxMagnitude < currentPower - 1 - HYSTERESIS_FACTOR) {
+                                this.fftYAxisPower = Math.ceil(maxMagnitude);
+                            }
                             return [10 ** -this.fftYAxisPower, 10 ** this.fftYAxisPower];
                         }
-
-                        const maxMagnitude = Math.max(Math.abs(Math.log10(dataMin)), Math.abs(Math.log10(dataMax)));
-                        const currentPower = this.fftYAxisPower;
-
-                        if (maxMagnitude > currentPower) {
-                            this.fftYAxisPower = Math.ceil(maxMagnitude);
-                        }
-                        else if (maxMagnitude < currentPower - 1 - HYSTERESIS_FACTOR) {
-                            this.fftYAxisPower = Math.ceil(maxMagnitude);
-                        }
-                        return [10 ** -this.fftYAxisPower, 10 ** this.fftYAxisPower];
-                    }
                     };
-                }
-                else {
+                } else {
                     scalesConfig[unit] = { auto: true };
                 }
             }
@@ -162,9 +166,9 @@ export class PlotConfig {
 
         if (this.viewType === 'fft') {
             scalesConfig['x'] = { time: false, distr: 3, log: 10 };
-            axesConfig[0] = { 
+            axesConfig[0] = {
                 scale: 'x',
-                label: "Frequency (Hz)",
+                label: 'Frequency (Hz)'
             };
 
             for (const unit of uniqueUnits) {
@@ -175,63 +179,60 @@ export class PlotConfig {
             }
         } else {
             scalesConfig['x'] = { time: false };
-             axesConfig[0] = {
+            axesConfig[0] = {
                 scale: 'x',
-                space: 100, 
+                space: 100,
                 values: (self, ticks) => {
-                    const latest_t = this.latestTimestamp;
-                    if (latest_t === 0) return ticks.map(t => t.toFixed(1));
-
-                    return ticks.map(rawTick => {
-                        const secondsAgo = latest_t - rawTick;
-
-                        if (Math.abs(secondsAgo) < 0.01) {
-                            return "Now";
+                    return ticks.map((rawTick) => {
+                        if (Math.abs(rawTick) < 1e-9) {
+                            return 'Now';
                         }
-                        
-                        return `-${secondsAgo.toFixed(1)}s`;
+                        return `-${Math.abs(rawTick).toFixed(1)}s`;
                     });
                 }
             };
         }
 
         let yAxisCount = 0;
-            
+
         for (const unit of uniqueUnits) {
             if (!unit) continue;
+
+            const yAxisLabel = this.viewType === 'fft' ? `${unit}/√Hz` : unit;
+
             const axisOptions: uPlot.Axis = {
                 scale: unit,
-                label: unit,
+                label: yAxisLabel,
                 labelGap: 5,
-                stroke: this.series.find(s => s.uPlotSeries.scale === unit)?.uPlotSeries.stroke,
+                stroke: this.series.find((s) => s.uPlotSeries.scale === unit)?.uPlotSeries.stroke,
                 values: (u, vals) => {
                     if (!vals.length) {
                         return [];
                     }
 
-                     return vals.map(v => {
-                        if (v == null) return "";
-                        if (v === 0) return "0 "; 
+                    return vals.map((v) => {
+                        if (v == null) return '';
+                        if (v === 0) return '0 ';
 
                         const absV = Math.abs(v);
 
                         if (absV > 0 && absV < 0.01) {
-                            return v.toExponential(1) + " ";
+                            return v.toExponential(1) + ' ';
                         }
                         if (absV < 10) {
-                            return v.toFixed(2) + " ";
+                            return v.toFixed(2) + ' ';
                         }
                         if (absV < 100) {
-                            return v.toFixed(1) + " ";
+                            return v.toFixed(1) + ' ';
                         }
-                        return v.toFixed(0) + " ";
+                        return v.toFixed(0) + ' ';
                     });
                 }
             };
 
             if (yAxisCount > 0) {
                 axisOptions.side = 1;
-                axisOptions.grid = { show: false }; 
+                axisOptions.grid = { show: false };
             }
 
             axesConfig.push(axisOptions);
@@ -240,7 +241,7 @@ export class PlotConfig {
 
         const uplotSeriesConfig: uPlot.Series[] = [
             {}, // x-axis placeholder
-            ...this.series.map(s => s.uPlotSeries)
+            ...this.series.map((s) => s.uPlotSeries)
         ];
 
         return {
@@ -250,17 +251,23 @@ export class PlotConfig {
             scales: scalesConfig,
             axes: axesConfig,
             pxAlign: 0,
-            legend: { show: true },
+            legend: { show: false },
             cursor: {
                 drag: { setScale: false },
-                show: true
-            },
+                show: true,
+                points: { show: false }
+            }
         };
     });
 
-    constructor(title: string, initialSelection: RowSelectionState = {}) {
+    constructor(
+        title: string,
+        initialSelection: RowSelectionState = {},
+        initialExpansion: ExpandedState = {}
+    ) {
         this.title = title;
         this.rowSelection = initialSelection;
+        this.expansion = initialExpansion;
     }
 }
 
@@ -271,9 +278,19 @@ class ChartState {
     layout = $state<Record<string, number>>({}); 
     chartLayout = $state<ChartLayout>('vertical');
 
+    selectedPlotId = $state<string | null>(null);
+
     addPlot() {
-        const newPlot = new PlotConfig('New Plot', {});
-        
+        const initialExpansion: ExpandedState = {};
+        for (const portData of deviceState.devices) {
+            for (const device of portData.devices) {
+                const deviceId = `${device.url}:${device.route}`;
+                initialExpansion[deviceId] = true;
+            }
+        }
+
+        const newPlot = new PlotConfig('New Plot', {}, initialExpansion);
+
         this.plots.push(newPlot);
         this.layout[newPlot.id] = DEFAULT_PLOT_HEIGHT;
     }
@@ -284,6 +301,21 @@ class ChartState {
         if (index > -1) {
             this.plots.splice(index, 1);
             delete this.layout[plotId];
+        }
+    }
+
+    togglePause() {
+        if (this.selectedPlotId) {
+            const plot = this.plots.find(p => p.id === this.selectedPlotId);
+            if (plot) {
+                plot.isPaused = !plot.isPaused;
+            }
+        } 
+        else {
+            const newPausedState = this.plots.some(p => !p.isPaused);
+            for (const plot of this.plots) {
+                plot.isPaused = newPausedState;
+            }
         }
     }
 }

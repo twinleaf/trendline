@@ -1,6 +1,7 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import type { AlignedData } from 'uplot';
+import type { UiDevice } from '$lib/bindings/UiDevice';
 
 export function cn(...inputs: ClassValue[]) {
 	return twMerge(clsx(inputs));
@@ -14,6 +15,40 @@ export type WithoutChildrenOrChild<T> = WithoutChildren<WithoutChild<T>>;
 export type WithElementRef<T, U extends HTMLElement = HTMLElement> = T & { ref?: U | null };
 
 
+/**
+ * Sorts UiDevice objects based on their route. Handles numeric sorting for
+ * routes like '/1' vs '/10' and places the root device ('/' or '') first.
+ * @param a The first UiDevice to compare.
+ * @param b The second UiDevice to compare.
+ * @returns A number indicating the sort order.
+ */
+export function sortUiDevicesByRoute(a: UiDevice, b: UiDevice): number {
+    const routeA = a.route;
+    const routeB = b.route;
+
+    const isRootA = routeA === '/' || routeA === '';
+    if (isRootA) return -1;
+    const isRootB = routeB === '/' || routeB === '';
+    if (isRootB) return 1;
+
+    // Attempt to sort numerically if routes are slash-delimited numbers
+    const partsA = routeA.substring(1).split('/').map(Number);
+    const partsB = routeB.substring(1).split('/').map(Number);
+
+    if (partsA.some(isNaN) || partsB.some(isNaN)) {
+        return routeA.localeCompare(routeB); // Fallback to string compare
+    }
+
+    const minLength = Math.min(partsA.length, partsB.length);
+    for (let i = 0; i < minLength; i++) {
+        const diff = partsA[i] - partsB[i];
+        if (diff !== 0) {
+            return diff;
+        }
+    }
+
+    return partsA.length - partsB.length;
+}
 
 /**
  * A Ring Buffer specifically designed for uPlot time-series data.

@@ -1,6 +1,5 @@
 <script lang="ts">
 import type { PlotConfig } from '$lib/states/chartState.svelte';
-import type { DecimationMethod } from '$lib/bindings/DecimationMethod';
 
 
 import { columns, type TreeRow } from '$lib/components/chart-area/data-table/column';
@@ -22,11 +21,6 @@ type Props = {
 
 let { plot = $bindable(), treeData }: Props = $props();
 
-const decimationMethods: { value: DecimationMethod; label: string; description: string }[] = [
-    { value: 'None', label: 'None', description: 'No downsampling. Raw data is rendered.' },
-    { value: 'MinMax', label: 'Min/Max', description: 'Selects the min and max values for each bucket. Best for multiple series on a single plot.' },
-    { value: 'Fpcs', label: 'FPCS', description: 'Fast Point-Cloud Simplification. Highest visual fidelity. Best for single series.' }
-];
 </script>
 <Popover.Root>
 	<Popover.Trigger>
@@ -34,7 +28,10 @@ const decimationMethods: { value: DecimationMethod; label: string; description: 
 			<Settings class="size-5 text-muted-foreground" />
 		</Button>
 	</Popover.Trigger>
-	<Popover.Content class="w-[600px] p-0">
+	<Popover.Content
+        class="w-[600px] p-0"
+        onCloseAutoFocus={(e) => e.preventDefault()}
+    >
 		<Tabs.Root bind:value={plot.activeTab} class="w-full p-2">
 			<Tabs.List class="grid w-full grid-cols-2">
 				<Tabs.Trigger value="selection">Plot Selection</Tabs.Trigger>

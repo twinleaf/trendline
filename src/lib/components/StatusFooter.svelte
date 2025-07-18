@@ -1,5 +1,3 @@
-// src/lib/components/StatusFooter.svelte
-
 <script lang="ts">
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
@@ -66,16 +64,17 @@
                 Streaming
             </Badge>
 
-        {:else if deviceState.selectedPortState === 'Idle'}
-            <Badge variant="default" class="gap-1.5 bg-yellow-500 text-yellow-950 hover:bg-yellow-500/80">
-                <CircleCheck class="size-3.5" />
-                Idle
-            </Badge>
-		{:else}
+        {:else if deviceState.selectedPortState && typeof deviceState.selectedPortState === 'object'}
 			<Badge variant="destructive" class="gap-1.5">
-                <CircleX class="size-3.5" />
-                Error
-            </Badge>
-        {/if}
+				<CircleX class="size-3.5" />
+				Error
+			</Badge>
+
+		{:else}
+   			<Badge variant="default" class="gap-1.5 bg-gray-400 text-gray-900 hover:bg-gray-400/80">
+				<CircleCheck class="size-3.5" />
+				Idle
+			</Badge>
+		{/if}
 	</div>
 </div>
