@@ -35,6 +35,7 @@ rustfft = "6.4.0"
 welch-sde = "0.1.0"
 num_enum = "0.7.4"
 argminmax = { version = "0.6.3", default-features = false, features = ["float"] }
+nalgebra = "0.33.2"
 
 [profile.release]
 debug = true

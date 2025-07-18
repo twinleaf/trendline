@@ -373,3 +373,12 @@ pub enum DecimationMethod {
     MinMax,
 }
 
+
+#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum DetrendMethod {
+    #[default]
+    None,      // Only remove the mean (DC offset)
+    Linear,    // Remove a linear trend (y = mt + c)
+    Quadratic, // Remove a quadratic trend (y = at^2 + bt + c)
+}

@@ -1,8 +1,10 @@
 use dashmap::DashMap;
 use serde::Deserialize;
 use ts_rs::TS;
+use dashmap::mapref::entry::Entry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 use twinleaf::tio::proto::DeviceRoute;
 use crate::state::decimation::{lerp, fpcs, min_max_bucket};
 use crate::util;
@@ -70,11 +72,19 @@ impl Buffer {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct SessionMeta {
+    pub first_wall_time: SystemTime,
+    pub last_wall_time: SystemTime,
+    pub first_device_time: f64,
+    pub last_device_time: f64,
+}
+
 // The shared data that needs to be accessed by multiple threads.
 pub struct Inner {
-    pub buffers: DashMap<DataColumnId, Buffer>,
+    pub buffers: DashMap<DataColumnId, DashMap<u32, Buffer>>,
+    pub session_meta: DashMap<DataColumnId, DashMap<u32, SessionMeta>>,
     pub active: DashMap<DataColumnId, ()>,
-    pub offsets: DashMap<DataColumnId, f64>,
     pub effective_sampling_rates: DashMap<DataColumnId, f64>,
     pub initial_buffer_cap: usize,
     pub command_tx: Sender<CaptureCommand>,
@@ -82,7 +92,12 @@ pub struct Inner {
 
 #[derive(Debug)]
 pub enum CaptureCommand {
-    Insert(DataColumnId, Point),
+    Insert {
+        key: DataColumnId, 
+        data: Point,
+        session_id: u32,
+        wall_time: SystemTime,
+    },
     UpdateSampleRate {
         key: DataColumnId,
         rate: f64,
@@ -102,8 +117,8 @@ impl CaptureState {
 
         let inner = Arc::new(Inner {
                 buffers: DashMap::new(),
+                session_meta: DashMap::new(),
                 active: DashMap::new(),
-                offsets: DashMap::new(),
                 effective_sampling_rates: DashMap::new(),
                 initial_buffer_cap: 200_000, // e.g., 1000 samples/sec * 200 seconds, 1600 samples/sec * 125 seconds
                 command_tx,
@@ -128,29 +143,223 @@ impl CaptureState {
         if keys.is_empty() || min_time >= max_time {
             return PlotData::empty();
         }
-        let mut aligned_series: Vec<Vec<Point>> = keys
-        .iter()
-        .map(|key| {
-            let stream_key = DataColumnId { column_index: 0, ..key.clone() };
-            let offset = self.inner.offsets.get(&stream_key).map_or(0.0, |off| *off.value());
+        
+        let stitched_series = self.get_stitched_series_in_range(keys, min_time, max_time);
 
-            let min_key = (min_time - offset).to_bits();
-            let max_key = (max_time - offset).to_bits();
+        self.process_and_merge_series(stitched_series, min_time, max_time, num_points, decimation)
+    }
 
-            self.inner.buffers.get(key)
-                .map(|buffer| {
-                    buffer.data
-                        .range(min_key..=max_key)
-                        .map(|(&t_bits, &y)| {
-                            let original_timestamp = f64::from_bits(t_bits);
-                            Point::new(original_timestamp + offset, y)
-                        })
-                        .collect()
-                })
-                .unwrap_or_else(Vec::new)
-        })
-        .collect();
+    pub fn get_latest_timestamp_for_keys(&self, keys: &[DataColumnId]) -> Option<f64> {
+        keys.iter()
+            .filter_map(|key| {
+                let session_map = self.inner.buffers.get(key)?;
+                let latest_session_id = session_map.iter().map(|entry| *entry.key()).max()?;
+                let buffer = session_map.get(&latest_session_id)?;
+
+                let (last_ts_bits, _) = buffer.data.iter().next_back()?;
+                Some(f64::from_bits(*last_ts_bits))
+            })
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+    }
+
+    pub fn get_interpolated_values_at_time(&self, keys: &[DataColumnId], time: f64) -> Vec<Option<f64>> {
+        keys.iter().map(|key| {
+            let window_for_search = 10.0;
+            let stitched_points = self.get_stitched_series_in_range(
+                &[key.clone()],
+                time - window_for_search,
+                time + window_for_search,
+            );
             
+            if let Some(points) = stitched_points.first() {
+                if points.is_empty() {
+                    return None;
+                }
+                
+
+                let p2_index_opt = points.iter().position(|p| p.x >= time);
+
+                match p2_index_opt {
+                    Some(p2_index) => {
+                        if (points[p2_index].x - time).abs() < 1e-9 {
+                            return Some(points[p2_index].y);
+                        }
+                        
+                        if p2_index > 0 {
+                            let p1 = points[p2_index - 1];
+                            let p2 = points[p2_index];
+                            Some(lerp(&p1, &p2, time))
+                        } else {
+                            Some(points[p2_index].y)
+                        }
+                    }
+                    None => {
+                        points.last().map(|p| p.y)
+                    }
+                }
+            } else {
+                None
+            }
+        }).collect()
+    }
+
+    fn run_consumer(inner: Arc<Inner>, rx: Receiver<CaptureCommand>) {
+        while let Ok(command) = rx.recv() {
+            match command {
+                CaptureCommand::Insert { key, data: p, session_id, wall_time } => {
+                    if !inner.active.contains_key(&key) {
+                        continue;
+                    }
+
+                    let meta_map = inner.session_meta.entry(key.clone()).or_default();
+                    match meta_map.entry(session_id) {
+                        Entry::Occupied(mut entry) => {
+                            let meta = entry.get_mut();
+                            meta.last_wall_time = wall_time;
+                            meta.last_device_time = p.x;
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(SessionMeta {
+                                first_wall_time: wall_time,
+                                last_wall_time: wall_time,
+                                first_device_time: p.x,
+                                last_device_time: p.x,
+                            });
+                        }
+                    }
+
+                    let session_map = inner.buffers.entry(key.clone()).or_default();
+                    let mut buffer = session_map.entry(session_id).or_insert_with(|| {
+                        let stream_key = key.stream_key();
+                        let rate = inner
+                            .effective_sampling_rates
+                            .get(&stream_key)
+                            .map_or(1000.0, |r| *r.value());
+                        let initial_cap =
+                            ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
+                        Buffer::new(initial_cap)
+                    });
+                    buffer.push(p);
+                }
+                CaptureCommand::UpdateSampleRate { key, rate } => {
+                    let stream_key = key.stream_key();
+                    if let Some(existing_rate) = inner.effective_sampling_rates.get(&stream_key) {
+                        if (existing_rate.value() - rate).abs() < 1e-9 {
+                            continue;
+                        }
+                    }
+                    println!(
+                        "[Capture] Updating sample rate for stream at route '{}' to {} Hz",
+                        key.device_route, rate
+                    );
+                    inner.effective_sampling_rates.insert(stream_key.clone(), rate);
+                    let new_cap = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
+
+                    if let Some(session_map) = inner.buffers.get(&stream_key) {
+                        for mut buffer in session_map.iter_mut() {
+                            println!(
+                                "[Capture] Resizing buffer for {:?} (Session {}) to {} points",
+                                key, buffer.key(), new_cap
+                            );
+                            buffer.set_capacity(new_cap);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn collect_points_for_key(
+        &self,
+        key: &DataColumnId,
+        window_seconds: f64,
+    ) -> Vec<Point> {
+        let Some(session_map) = self.inner.buffers.get(key) else { return vec![]; };
+        let Some(meta_map) = self.inner.session_meta.get(key) else { return vec![]; };
+
+        let mut session_ids: Vec<_> = session_map.iter().map(|r| *r.key()).collect();
+        session_ids.sort_unstable_by(|a, b| b.cmp(a));
+
+        let mut collected_points: Vec<Point> = Vec::new();
+        let mut time_to_gather = window_seconds;
+        let mut time_offset = 0.0;
+
+        for (i, &session_id) in session_ids.iter().enumerate() {
+            if time_to_gather <= 0.0 { break; }
+
+            let Some(buffer) = session_map.get(&session_id) else { continue; };
+            let Some(meta) = meta_map.get(&session_id) else { continue; };
+            if buffer.data.is_empty() { continue; }
+            
+            let session_points: Vec<Point> = buffer.data.iter()
+                .map(|(&t_bits, &y)| Point::new(f64::from_bits(t_bits) + time_offset, y))
+                .collect();
+
+            let session_adjusted_min_ts = session_points.first().unwrap().x;
+            let session_adjusted_max_ts = session_points.last().unwrap().x;
+            let session_duration = session_adjusted_max_ts - session_adjusted_min_ts;
+            
+            let points_to_prepend = if session_duration >= time_to_gather {
+                let required_start_time = session_adjusted_max_ts - time_to_gather;
+                let start_idx = session_points.iter().position(|p| p.x >= required_start_time).unwrap_or(0);
+                time_to_gather = 0.0;
+                session_points[start_idx..].to_vec()
+            } else {
+                time_to_gather -= session_duration;
+                session_points
+            };
+
+            collected_points.splice(0..0, points_to_prepend);
+            
+            if i + 1 < session_ids.len() {
+            let next_session_id = session_ids[i + 1];
+            if let Some(next_meta) = meta_map.get(&next_session_id) {
+                let wall_clock_gap = meta
+                    .first_wall_time
+                    .duration_since(next_meta.last_wall_time)
+                    .unwrap_or(Duration::ZERO);
+
+                let unified_current_session_start = meta.first_device_time + time_offset;
+                
+                let next_session_total_offset = unified_current_session_start
+                    - wall_clock_gap.as_secs_f64()
+                    - next_meta.last_device_time;
+
+                time_offset = next_session_total_offset;
+            }
+        }
+    }
+    collected_points
+}
+
+    fn get_stitched_series_in_range(
+        &self,
+        keys: &[DataColumnId],
+        min_time: f64,
+        max_time: f64,
+    ) -> Vec<Vec<Point>> {
+        keys.iter()
+            .map(|key| {
+                let window_seconds = (max_time - min_time) + Self::BUFFER_WINDOW_SECONDS;
+                
+                let all_stitched_points = self.collect_points_for_key(key, window_seconds);
+
+                all_stitched_points
+                    .into_iter()
+                    .filter(|p| p.x >= min_time && p.x <= max_time)
+                    .collect::<Vec<Point>>()
+            })
+            .collect()
+    }
+
+    fn process_and_merge_series(
+        &self,
+        mut aligned_series: Vec<Vec<Point>>,
+        min_time: f64,
+        max_time: f64,
+        num_points: Option<usize>,
+        decimation: Option<DecimationMethod>,
+    ) -> PlotData {
         if let (Some(n_points), Some(method)) = (num_points, decimation) {
             if method == DecimationMethod::MinMax && n_points > 0 {
                 let mut decimated_series_data = Vec::with_capacity(aligned_series.len());
@@ -188,165 +397,37 @@ impl CaptureState {
             }
         }
 
-        let mut series_iters: Vec<_> = aligned_series
-            .iter()
-            .map(|series| series.iter().peekable())
-            .collect();
-
-        if series_iters.is_empty() {
-            return PlotData::empty();
-        }
+        // K-Way Merge Logic
+        let mut series_iters: Vec<_> = aligned_series.iter().map(|s| s.iter().peekable()).collect();
+        if series_iters.is_empty() { return PlotData::empty(); }
 
         let num_series = series_iters.len();
         let mut plot_data = PlotData::with_series_capacity(num_series);
-        let mut last_points: Vec<Option<Point>> = vec![None; series_iters.len()];
-
+        let mut last_points: Vec<Option<Point>> = vec![None; num_series];
         loop {
-            let next_ts = series_iters
-                .iter_mut()
-                .filter_map(|it| it.peek().map(|p| p.x))
+            let next_ts = series_iters.iter_mut().filter_map(|it| it.peek().map(|p| p.x))
                 .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
             if let Some(ts) = next_ts {
                 plot_data.timestamps.push(ts);
-
-                for i in 0..series_iters.len() {
+                for i in 0..num_series {
                     let iter = &mut series_iters[i];
                     let mut y_val = f64::NAN;
-
-                    let next_point_matches = if let Some(p) = iter.peek() {
-                        (p.x - ts).abs() < 1e-9
-                    } else {
-                        false
-                    };
-
-                    if next_point_matches {
-                        let p_next = iter.next().unwrap(); 
+                    if iter.peek().map_or(false, |p| (p.x - ts).abs() < 1e-9) {
+                        let p_next = iter.next().unwrap();
                         last_points[i] = Some(*p_next);
                         y_val = p_next.y;
-                    } else {
-                        if let Some(p_next_real) = iter.peek() {
-                            if let Some(p_last) = last_points[i] {
-                                y_val = lerp(&p_last, p_next_real, ts);
-                            } else {
-                                y_val = p_next_real.y;
-                            }
-                        } else {
-                            if let Some(p_last) = last_points[i] {
-                                y_val = p_last.y;
-                            }
-                        }
+                    } else if let (Some(p_next_real), Some(p_last)) = (iter.peek(), last_points[i]) {
+                        y_val = lerp(&p_last, p_next_real, ts);
+                    } else if let Some(p_last) = last_points[i] {
+                        y_val = p_last.y;
+                    } else if let Some(p_next_real) = iter.peek() {
+                        y_val = p_next_real.y;
                     }
                     plot_data.series_data[i].push(y_val);
                 }
-            } else {
-                break;
-            }
+            } else { break; }
         }
         plot_data
-    }
-
-    pub fn get_latest_timestamp_for_keys(&self, keys: &[DataColumnId]) -> Option<f64> {
-        keys.iter()
-            .filter_map(|key| {
-                let buffer = self.inner.buffers.get(key)?;
-                let (last_raw_ts_bits, _) = buffer.data.iter().next_back()?;
-                let stream_key = key.stream_key();
-                let offset = self.inner.offsets.get(&stream_key).map_or(0.0, |o| *o.value());
-                Some(f64::from_bits(*last_raw_ts_bits) + offset)
-            })
-            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-    }
-
-    pub fn get_interpolated_values_at_time(&self, keys: &[DataColumnId], time: f64) -> Vec<Option<f64>> {
-        let mut interpolated_values = Vec::with_capacity(keys.len());
-
-        for key in keys {
-            let value = self.inner.buffers.get(key).and_then(|buffer_ref| {
-                let offset = self.inner.offsets.get(&key.stream_key()).map_or(0.0, |off| *off.value());
-                let target_time_bits = (time - offset).to_bits();
-
-                let p1_opt = buffer_ref.data.range(..=target_time_bits).next_back();
-                let p2_opt = buffer_ref.data.range(target_time_bits..).next();
-
-                match (p1_opt, p2_opt) {
-                    (Some((t1_bits, y1)), Some((t2_bits, y2))) => {
-                        let p1 = Point::new(f64::from_bits(*t1_bits) + offset, *y1);
-                        let p2 = Point::new(f64::from_bits(*t2_bits) + offset, *y2);
-                        Some(lerp(&p1, &p2, time))
-                    },
-                    (Some((_, y1)), None) => Some(*y1),
-                    (None, Some((_, y2))) => Some(*y2),
-                    (None, None) => None,
-                }
-            });
-            interpolated_values.push(value);
-        }
-        interpolated_values
-    }
-
-    fn run_consumer(inner: Arc<Inner>, rx: Receiver<CaptureCommand>) {
-        while let Ok(command) = rx.recv() {
-            match command {
-                CaptureCommand::Insert(key, p) => {
-                    // This is the logic that used to be in `insert`
-                    if !inner.active.contains_key(&key) {
-                        continue;
-                    }
-                    let stream_key = key.stream_key();
-                    inner.offsets.entry(stream_key.clone()).or_insert_with(|| {
-                        println!(
-                            "[Capture] New stream activated (Port: {}, Device: {}, Stream: {}). Setting t=0 baseline from first timestamp {}.",
-                            key.port_url, key.device_route, key.stream_id, p.x
-                        );
-                        -p.x
-                    });
-
-                    let mut buffer = inner
-                        .buffers
-                        .entry(key.clone())
-                        .or_insert_with(|| {
-                            let rate = inner.effective_sampling_rates
-                                .get(&stream_key)
-                                .map_or(
-                                    1000.0,
-                                    |r| *r.value()
-                                );
-                            
-                            let initial_cap = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
-                            println!("[Capture] Creating new buffer for {:?} with capacity {} points", key, initial_cap);
-                            Buffer::new(initial_cap)
-                        });
-                    
-                    buffer.push(p);
-                },
-                CaptureCommand::UpdateSampleRate { key, rate } => {
-                    if let Some(existing_rate) = inner.effective_sampling_rates.get(&key.stream_key()) {
-                        if (existing_rate.value() - rate).abs() < 1e-9 {
-                            continue; 
-                        }
-                    }
-                    println!("[Capture] Updating sample rate for device at route '{}' to {} Hz", key.device_route, rate);
-                    inner.effective_sampling_rates.insert(key.stream_key(), rate);
-
-
-                    let new_cap = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100); 
-
-                    for active_key_ref in inner.active.iter() {
-                        let active_key = active_key_ref.key();
-                        if active_key.port_url == key.port_url &&
-                        active_key.device_route == key.device_route &&
-                        active_key.stream_id == key.stream_id {
-                            
-                            if let Some(mut buffer) = inner.buffers.get_mut(active_key) {
-                                println!("[Capture] Resizing buffer for {:?} to {} points", active_key, new_cap);
-                                buffer.set_capacity(new_cap);
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 
     pub fn start_capture(&self, key: &DataColumnId) {
@@ -355,7 +436,6 @@ impl CaptureState {
 
     pub fn stop_capture(&self, key: &DataColumnId) {
         self.inner.active.remove(key);
-        self.inner.offsets.remove(key);
     }
 
     pub fn set_active_columns_for_port(&self, port_url: &str, keys_for_port: Vec<DataColumnId>) {
@@ -368,6 +448,7 @@ impl CaptureState {
             }
         }
     }
+
     pub fn update_effective_sampling_rate(&self, key: &DataColumnId, rate: f64) {
         self.inner.effective_sampling_rates.insert(key.stream_key(), rate);
     }

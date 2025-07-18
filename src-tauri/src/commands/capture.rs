@@ -1,5 +1,6 @@
 use crate::state::capture::{CaptureState, DataColumnId, Point};
-use crate::shared::{PlotData, PortState, DecimationMethod};
+use crate::shared::{DecimationMethod, DetrendMethod, PlotData, PortState};
+use crate::state::detrend::{remove_quadratic_trend, remove_linear_trend};
 use welch_sde::{Build, SpectralDensity};
 use tauri::State;
 use twinleaf::tio::proto::DeviceRoute;
@@ -84,6 +85,7 @@ pub fn get_decimated_delta(
 pub fn get_latest_fft_data(
     keys: Vec<DataColumnId>,
     window_seconds: f64,
+    detrend: DetrendMethod,
     capture: State<CaptureState>,
 ) -> Result<PlotData, String> {
     if keys.is_empty() {
@@ -112,17 +114,22 @@ pub fn get_latest_fft_data(
             first_sampling_rate = Some(effective_sampling_rate);
         }
 
-        let points = capture.inner.buffers.get(key).map_or(vec![], |buffer_ref| {
-            let offset = capture.inner.offsets.get(&key.stream_key()).map_or(0.0, |off| *off.value());
+        let points = capture.inner.buffers.get(key).map_or(vec![], |session_map| {
+            let latest_session_id = session_map.iter().map(|entry| *entry.key()).max();
             
-            let min_key = (min_time - offset).to_bits();
-            let max_key = (latest_time - offset).to_bits();
+            if let Some(session_id) = latest_session_id {
+                if let Some(buffer) = session_map.get(&session_id) {
+                    let min_key = min_time.to_bits();
+                    let max_key = latest_time.to_bits();
 
-            buffer_ref
-                .data
-                .range(min_key..=max_key)
-                .map(|(&t_bits, &y)| Point::new(f64::from_bits(t_bits) + offset, y))
-                .collect()
+                    return buffer
+                        .data
+                        .range(min_key..=max_key)
+                        .map(|(&t_bits, &y)| Point::new(f64::from_bits(t_bits), y))
+                        .collect();
+                }
+            }
+            vec![]
         });
 
         if !points.is_empty() {
@@ -140,16 +147,22 @@ pub fn get_latest_fft_data(
 
     for points in all_series_points {
         let y_values: Vec<f64> = points.iter().map(|p| p.y).collect();
-        if y_values.len() < 16 { // Welch's method needs a minimum number of points
+        if y_values.len() < 16 {
             all_asds.push(vec![]);
             continue;
         }
 
-        let mean = y_values.iter().sum::<f64>() / y_values.len() as f64;
-        let mean_adjusted_signal: Vec<f64> = y_values.iter().map(|&y| y - mean).collect();
+        let signal_to_process = match detrend {
+            DetrendMethod::None => {
+                let mean = y_values.iter().sum::<f64>() / y_values.len() as f64;
+                y_values.iter().map(|&y| y - mean).collect()
+            }
+            DetrendMethod::Linear => remove_linear_trend(&y_values),
+            DetrendMethod::Quadratic => remove_quadratic_trend(&y_values),
+        };
 
         let welch: SpectralDensity<f64> =
-            SpectralDensity::builder(&mean_adjusted_signal, sampling_rate).build();
+            SpectralDensity::builder(&signal_to_process, sampling_rate).build();
 
         let psd = welch.periodogram();
         let asd: Vec<f64> = psd.to_vec().iter().map(|&p| p.sqrt()).collect();
@@ -237,7 +250,10 @@ pub fn confirm_selection(
         }
     }
     
-    capture.set_active_columns_for_port(&port_url, keys_to_activate);
+    capture.set_active_columns_for_port(&port_url, keys_to_activate.clone());
+
+    println!("[{}] Caching selection of {} data columns.", port_url, keys_to_activate.len());
+    registry.active_selections.insert(port_url, keys_to_activate);
 
     Ok(())
 }

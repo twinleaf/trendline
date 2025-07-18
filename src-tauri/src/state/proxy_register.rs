@@ -1,13 +1,14 @@
 // TAKES SERIAL/TCP PORT URL and maps it to a PortManager
 
 use crate::proxy::port_manager::PortManager;
-use crate::state::capture::CaptureState;
+use crate::state::capture::{ CaptureState, DataColumnId };
 use dashmap::DashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
 pub struct ProxyRegister {
     pub ports: DashMap<String, Arc<PortManager>>,
+    pub active_selections: DashMap<String, Vec<DataColumnId>>, 
     capture: CaptureState,
     app: AppHandle,
 }
@@ -16,6 +17,7 @@ impl ProxyRegister {
     pub fn new(app: AppHandle, capture: CaptureState) -> Self {
         Self {
             ports: DashMap::new(),
+            active_selections: DashMap::new(),
             app,
             capture,
         }
@@ -45,7 +47,6 @@ impl ProxyRegister {
                 true
             } else {
                 println!("[Discovery] Pruning disconnected port: {}", url);
-
                 self.app.emit("device-removed", url.clone()).unwrap();
 
                 pm.shutdown();

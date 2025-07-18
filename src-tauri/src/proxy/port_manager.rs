@@ -1,11 +1,12 @@
-use crate::state::capture::{CaptureCommand, DataColumnId, Point};
+use crate::state::capture::{CaptureCommand, CaptureState, DataColumnId, Point};
 use crate::shared::{ColumnMeta, DeviceMeta, PortState, RpcMeta, UiDevice, UiStream};
+use crate::state::proxy_register::ProxyRegister;
 use crate::util::{self, parse_arg_type_and_size, parse_permissions_string};
 use std::panic::AssertUnwindSafe;
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex, RwLock},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
     thread,
     panic,
 };
@@ -118,6 +119,12 @@ impl PortManager {
                                 if let Some(proxy_if) = self_.proxy.lock().unwrap().clone() {
                                     if self_.discover_devices(&proxy_if).is_ok() {
                                         println!("[{}] Discovery finished, beginning to stream data.", self_.url);
+                                        let registry = self_.app.state::<Arc<ProxyRegister>>();
+                                        if let Some(keys) = registry.active_selections.get(&self_.url) {
+                                            println!("[{}] Re-applying cached selection of {} columns.", self_.url, keys.len());
+                                            let capture_state = self_.app.state::<CaptureState>();
+                                            capture_state.set_active_columns_for_port(&self_.url, keys.value().clone());
+                                        }
                                         self_.set_state(PortState::Streaming);
                                     } else {
                                         let err_msg = "Discovery failed after connection.".to_string();
@@ -531,6 +538,7 @@ impl PortManager {
     //     }
     // }
     fn update_capture_state_with_sample(&self, route: &DeviceRoute, sample: &twinleaf::data::Sample) {
+        let wall_time = SystemTime::now();
         for column in &sample.columns {
             let value_f64 = match column.value {
                 twinleaf::data::ColumnData::Int(i) => Some(i as f64),
@@ -540,7 +548,7 @@ impl PortManager {
             };
 
             if let Some(value) = value_f64 {
-                let key = DataColumnId {
+                let stream_key = DataColumnId {
                     port_url: self.url.clone(),
                     device_route: route.clone(),
                     stream_id: sample.stream.stream_id,
@@ -548,7 +556,12 @@ impl PortManager {
                 };
                 let point = Point { x: sample.timestamp_end(), y: value };
                 
-                let command = CaptureCommand::Insert(key, point);
+                let command = CaptureCommand::Insert {
+                    key: stream_key, 
+                    data: point, 
+                    session_id: sample.device.session_id,
+                    wall_time,
+                }; 
                 if self.capture_tx.send(command).is_ok() {
                     self.counters.points_inserted.fetch_add(1, Ordering::Relaxed);
                 } else {
