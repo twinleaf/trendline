@@ -4,7 +4,7 @@ use ts_rs::TS;
 use dashmap::mapref::entry::Entry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{SystemTime};
 use twinleaf::tio::proto::DeviceRoute;
 use crate::state::decimation::{lerp, fpcs, min_max_bucket};
 use crate::util;
@@ -269,68 +269,6 @@ impl CaptureState {
         }
     }
 
-    fn collect_points_for_key(
-        &self,
-        key: &DataColumnId,
-        window_seconds: f64,
-    ) -> Vec<Point> {
-        let Some(session_map) = self.inner.buffers.get(key) else { return vec![]; };
-        let Some(meta_map) = self.inner.session_meta.get(key) else { return vec![]; };
-
-        let mut session_ids: Vec<_> = session_map.iter().map(|r| *r.key()).collect();
-        session_ids.sort_unstable_by(|a, b| b.cmp(a));
-
-        let mut collected_points: Vec<Point> = Vec::new();
-        let mut time_to_gather = window_seconds;
-        let mut time_offset = 0.0;
-
-        for (i, &session_id) in session_ids.iter().enumerate() {
-            if time_to_gather <= 0.0 { break; }
-
-            let Some(buffer) = session_map.get(&session_id) else { continue; };
-            let Some(meta) = meta_map.get(&session_id) else { continue; };
-            if buffer.data.is_empty() { continue; }
-            
-            let session_points: Vec<Point> = buffer.data.iter()
-                .map(|(&t_bits, &y)| Point::new(f64::from_bits(t_bits) + time_offset, y))
-                .collect();
-
-            let session_adjusted_min_ts = session_points.first().unwrap().x;
-            let session_adjusted_max_ts = session_points.last().unwrap().x;
-            let session_duration = session_adjusted_max_ts - session_adjusted_min_ts;
-            
-            let points_to_prepend = if session_duration >= time_to_gather {
-                let required_start_time = session_adjusted_max_ts - time_to_gather;
-                let start_idx = session_points.iter().position(|p| p.x >= required_start_time).unwrap_or(0);
-                time_to_gather = 0.0;
-                session_points[start_idx..].to_vec()
-            } else {
-                time_to_gather -= session_duration;
-                session_points
-            };
-
-            collected_points.splice(0..0, points_to_prepend);
-            
-            if i + 1 < session_ids.len() {
-            let next_session_id = session_ids[i + 1];
-            if let Some(next_meta) = meta_map.get(&next_session_id) {
-                let wall_clock_gap = meta
-                    .first_wall_time
-                    .duration_since(next_meta.last_wall_time)
-                    .unwrap_or(Duration::ZERO);
-
-                let unified_current_session_start = meta.first_device_time + time_offset;
-                
-                let next_session_total_offset = unified_current_session_start
-                    - wall_clock_gap.as_secs_f64()
-                    - next_meta.last_device_time;
-
-                time_offset = next_session_total_offset;
-            }
-        }
-    }
-    collected_points
-}
 
     fn get_stitched_series_in_range(
         &self,
@@ -340,17 +278,67 @@ impl CaptureState {
     ) -> Vec<Vec<Point>> {
         keys.iter()
             .map(|key| {
-                let window_seconds = (max_time - min_time) + Self::BUFFER_WINDOW_SECONDS;
-                
-                let all_stitched_points = self.collect_points_for_key(key, window_seconds);
+                let Some(session_map) = self.inner.buffers.get(key) else { return vec![]; };
+                let Some(meta_map) = self.inner.session_meta.get(key) else { return vec![]; };
 
-                all_stitched_points
-                    .into_iter()
-                    .filter(|p| p.x >= min_time && p.x <= max_time)
-                    .collect::<Vec<Point>>()
+                let mut session_ids: Vec<_> = session_map.iter().map(|r| *r.key()).collect();
+                session_ids.sort_unstable_by(|a, b| b.cmp(a));
+
+                let mut offsets = std::collections::HashMap::new();
+                let mut current_offset = 0.0;
+
+                for i in 0..session_ids.len() {
+                    let session_id = session_ids[i];
+                    offsets.insert(session_id, current_offset);
+
+                    if i + 1 < session_ids.len() {
+                        let next_session_id = session_ids[i + 1];
+                        if let (Some(current_meta), Some(next_meta)) =
+                            (meta_map.get(&session_id), meta_map.get(&next_session_id))
+                        {
+                            let wall_clock_gap = current_meta
+                                .first_wall_time
+                                .duration_since(next_meta.last_wall_time)
+                                .unwrap_or(std::time::Duration::ZERO);
+
+                            let unified_current_start = current_meta.first_device_time + current_offset;
+
+                            let next_offset = unified_current_start
+                                - wall_clock_gap.as_secs_f64()
+                                - next_meta.last_device_time;
+
+                            current_offset = next_offset;
+                        }
+                    }
+                }
+
+                let mut result_points = Vec::new();
+                session_ids.reverse();
+
+                for session_id in session_ids {
+                    let offset = offsets.get(&session_id).copied().unwrap_or(0.0);
+                    let Some(buffer) = session_map.get(&session_id) else { continue };
+
+                    let session_min_time = min_time - offset;
+                    let session_max_time = max_time - offset;
+
+                    for (&t_bits, &y) in buffer
+                        .data
+                        .range(session_min_time.to_bits()..=session_max_time.to_bits())
+                    {
+                        let device_time = f64::from_bits(t_bits);
+                        let unified_time = device_time + offset;
+
+                        if unified_time >= min_time && unified_time <= max_time {
+                            result_points.push(Point::new(unified_time, y));
+                        }
+                    }
+                }
+                result_points
             })
             .collect()
     }
+
 
     fn process_and_merge_series(
         &self,

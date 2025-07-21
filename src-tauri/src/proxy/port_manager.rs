@@ -1,5 +1,5 @@
 use crate::state::capture::{CaptureCommand, CaptureState, DataColumnId, Point};
-use crate::shared::{ColumnMeta, DeviceMeta, PortState, RpcMeta, UiDevice, UiStream};
+use crate::shared::{ColumnMeta, DeviceMeta, PortState, RpcError, RpcMeta, UiDevice, UiStream};
 use crate::state::proxy_register::ProxyRegister;
 use crate::util::{self, parse_arg_type_and_size, parse_permissions_string};
 use std::panic::AssertUnwindSafe;
@@ -11,6 +11,7 @@ use std::{
     panic,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
+use serde_json::Value;
 use tauri::menu::MenuItemKind;
 use tauri::{Emitter, Manager, async_runtime};
 use twinleaf::{
@@ -522,21 +523,83 @@ impl PortManager {
         }
     }
 
-    // fn process_sample_data(&self, route: &DeviceRoute, sample: &twinleaf::data::Sample) {
-    //     for column in &sample.columns {
-    //         if let Some(value) = column.value.try_as_f64() {
-    //             let key = DataColumnId {
-    //                 port_url: self.url.clone(),
-    //                 device_route: route.clone(),
-    //                 stream_id: sample.stream.stream_id,
-    //                 column_index: column.desc.index,
-    //             };
-    //             let point = Point { x: sample.timestamp_end(), y: value };
-    //             self.capture.insert(&key, point);
-    //             self.counters.points_inserted.fetch_add(1, Ordering::Relaxed);
-    //         }
-    //     }
-    // }
+    pub async fn execute_rpc(
+        &self,
+        device_route_str: &str,
+        name: &str,
+        args: Option<Value>,
+    ) -> Result<Value, RpcError> {
+        let route = DeviceRoute::from_str(device_route_str)
+            .map_err(|_| RpcError::AppLogic(format!("Invalid device route string: '{}'", device_route_str)))?;
+
+        let proxy_if = self.proxy.lock()
+            .map_err(|_| RpcError::AppLogic("Proxy lock was poisoned.".to_string()))?
+            .clone()
+            .ok_or_else(|| RpcError::AppLogic("Proxy interface not available.".to_string()))?;
+
+        let rpc_meta = {
+            let devices_map = self.devices.read()
+                .map_err(|_| RpcError::AppLogic("Device cache read lock was poisoned.".to_string()))?;
+
+            let device_entry = devices_map.get(&route)
+                .ok_or_else(|| RpcError::AppLogic(format!("Device '{}' not found in cache.", route)))?;
+            
+            let device_tuple = device_entry.lock()
+                .map_err(|_| RpcError::AppLogic(format!("Device lock for '{}' was poisoned.", route)))?;
+
+            let (_data_device, ui_device) = &*device_tuple;
+            
+            ui_device.rpcs.iter().find(|r| r.name == name)
+                .cloned()
+                .ok_or_else(|| RpcError::AppLogic(format!("RPC '{}' not found.", name)))?
+        };
+
+        let rpc_task_result = {
+            let route_clone = route.clone();
+            let name_clone = name.to_string();
+            let args_clone = args.clone();
+
+            tauri::async_runtime::spawn_blocking(move || -> Result<Value, RpcError> {
+                let rpc_port = proxy_if.device_rpc(route_clone)?;
+                let mut device = Device::new(rpc_port);
+                let arg_bytes = util::json_to_bytes(args_clone, &rpc_meta.arg_type)?;
+                let reply_bytes = device.raw_rpc(&name_clone, &arg_bytes)?;
+                util::bytes_to_json_value(&reply_bytes, &rpc_meta.arg_type)
+                    .ok_or_else(|| RpcError::AppLogic("Failed to parse RPC reply".to_string()))
+            }).await.map_err(|e| RpcError::AppLogic(format!("RPC task panicked: {}", e)))?
+        };
+
+        let rpc_result = rpc_task_result?;
+
+        let new_value_to_cache = if rpc_meta.writable && args.is_some() {
+            args
+        } else if rpc_meta.readable {
+            Some(rpc_result.clone())
+        } else {
+            None
+        };
+
+        if let Some(new_val) = new_value_to_cache {
+            let devices_map = self.devices.read()
+                .map_err(|_| RpcError::AppLogic("Device cache read lock was poisoned.".to_string()))?;
+
+            if let Some(device_entry) = devices_map.get(&route) {
+                let mut device_tuple = device_entry.lock()
+                    .map_err(|_| RpcError::AppLogic(format!("Device lock for '{}' was poisoned.", route)))?;
+                
+                let (_, ui_device) = &mut *device_tuple;
+                if let Some(cached_rpc) = ui_device.rpcs.iter_mut().find(|r| r.name == name) {
+                    cached_rpc.value = Some(new_val);
+                    if let Err(e) = self.app.emit("device-metadata-updated", ui_device.clone()) {
+                        eprintln!("[{}] Failed to emit device-metadata-updated event: {}", self.url, e);
+                    }
+                }
+            }
+        }
+        
+        Ok(rpc_result)
+    }
+
     fn update_capture_state_with_sample(&self, route: &DeviceRoute, sample: &twinleaf::data::Sample) {
         let wall_time = SystemTime::now();
         for column in &sample.columns {
