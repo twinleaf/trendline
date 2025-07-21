@@ -1,4 +1,4 @@
-use super::capture::Point;
+use crate::shared::Point;
 use argminmax::ArgMinMax;
 
 #[derive(Clone, Copy, PartialEq)]

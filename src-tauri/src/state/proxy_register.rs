@@ -1,7 +1,8 @@
 // TAKES SERIAL/TCP PORT URL and maps it to a PortManager
 
 use crate::proxy::port_manager::PortManager;
-use crate::state::capture::{ CaptureState, DataColumnId };
+use crate::state::capture::CaptureState;
+use crate::shared::DataColumnId;
 use dashmap::DashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};

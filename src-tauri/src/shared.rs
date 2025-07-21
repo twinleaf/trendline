@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 use num_enum::{FromPrimitive, IntoPrimitive};
+use crate::util;
 
 // ─────────────────────────── 1. Port state ──────────────────────────────
 
@@ -342,6 +343,31 @@ pub struct UiDevice {
 
 // ───────────────────────── 4.  PlotData slice ───────────────────────────
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, TS)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct DataColumnId {
+    pub port_url: String,
+    #[serde(with = "util")]
+    #[ts(type = "string")]
+    pub device_route: twinleaf::tio::proto::DeviceRoute,
+    pub stream_id: u8,
+    pub column_index: usize,
+}
+
+impl DataColumnId {
+    pub fn device_key(&self) -> Self {
+        Self {
+            stream_id: 0,
+            column_index: 0,
+            ..self.clone()
+        }
+    }
+
+    pub fn stream_key(&self) -> Self {
+        Self { column_index: 0, ..self.clone() }
+    }
+}
+
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct PlotData {
@@ -363,6 +389,19 @@ impl PlotData {
         }
     }
 }
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct Point {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Point {
+    pub fn new(x: f64, y: f64) -> Self {
+        Point { x, y }
+    }
+}
+
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
 #[ts(export, export_to = "../../src/lib/bindings/")]

@@ -1,11 +1,26 @@
-use crate::state::capture::{CaptureState, DataColumnId, Point};
-use crate::shared::{DecimationMethod, DetrendMethod, PlotData, PortState};
+use crate::state::capture::{CaptureState};
+use crate::shared::{DecimationMethod, DetrendMethod, PlotData, PortState, DataColumnId, Point};
 use crate::state::detrend::{remove_quadratic_trend, remove_linear_trend};
 use welch_sde::{Build, SpectralDensity};
 use tauri::State;
 use twinleaf::tio::proto::DeviceRoute;
 use std::sync::Arc;
 use crate::state::proxy_register::ProxyRegister;
+
+#[tauri::command]
+pub fn get_latest_plot_data(
+    keys: Vec<DataColumnId>,
+    window_seconds: f64,
+    num_points: usize,
+    capture: State<CaptureState>,
+    decimation: Option<DecimationMethod>,
+) -> PlotData {
+    let Some(max_time) = capture.get_latest_unified_timestamp(&keys) else {
+        return PlotData::empty();
+    };
+    let min_time = max_time - window_seconds;
+    capture.get_plot_data(&keys, min_time, max_time, Some(num_points), decimation)
+}
 
 #[tauri::command]
 pub fn get_plot_data_in_range(
@@ -16,28 +31,7 @@ pub fn get_plot_data_in_range(
     num_points: Option<usize>,
     decimation: Option<DecimationMethod>,
 ) -> PlotData {
-    capture.get_data_in_range(&keys, min_time, max_time, num_points, decimation)
-}
-
-#[tauri::command]
-pub fn get_latest_plot_data(
-    keys: Vec<DataColumnId>,
-    window_seconds: f64,
-    num_points: usize,
-    capture: State<CaptureState>,
-    decimation: Option<DecimationMethod>,
-) -> PlotData {
-
-    let latest_time = capture.get_latest_timestamp_for_keys(&keys);
-
-    if latest_time.is_none() {
-        return PlotData::empty();
-    }
-
-    let max_time = latest_time.unwrap();
-    let min_time = max_time - window_seconds;
-
-    capture.get_data_in_range(&keys, min_time, max_time, Some(num_points), decimation)
+    capture.get_plot_data(&keys, min_time, max_time, num_points, decimation)
 }
 
 #[tauri::command]
@@ -51,7 +45,7 @@ pub fn get_decimated_delta(
     capture: State<CaptureState>,
 ) -> PlotData {
     let min_timestamp = end_timestamp - window_seconds;
-    let full_decimated_data = capture.get_data_in_range(
+    let full_decimated_data = capture.get_plot_data(
         &keys,
         min_timestamp,
         end_timestamp,
@@ -92,65 +86,41 @@ pub fn get_latest_fft_data(
         return Ok(PlotData::empty());
     }
 
-    let latest_time = match capture.get_latest_timestamp_for_keys(&keys) {
+    let latest_time = match capture.get_latest_unified_timestamp(&keys) {
         Some(t) => t,
         None => return Ok(PlotData::empty()),
     };
     let min_time = latest_time - window_seconds;
 
-    let mut all_series_points: Vec<Vec<Point>> = Vec::new();
-    let mut first_sampling_rate: Option<f64> = None;
-
-    for key in &keys {
-        let stream_key = key.stream_key();
-        let effective_sampling_rate = capture.get_effective_sampling_rate(&stream_key)
-            .ok_or_else(|| format!("Effective sampling rate not found for stream: {:?}", stream_key))?;
-
-        if let Some(first_rate) = first_sampling_rate {
-            if (effective_sampling_rate - first_rate).abs() > 1e-6 { // Floating point comparison
-                return Err("All streams must have the same effective sampling rate.".to_string());
-            }
-        } else {
-            first_sampling_rate = Some(effective_sampling_rate);
-        }
-
-        let points = capture.inner.buffers.get(key).map_or(vec![], |session_map| {
-            let latest_session_id = session_map.iter().map(|entry| *entry.key()).max();
-            
-            if let Some(session_id) = latest_session_id {
-                if let Some(buffer) = session_map.get(&session_id) {
-                    let min_key = min_time.to_bits();
-                    let max_key = latest_time.to_bits();
-
-                    return buffer
-                        .data
-                        .range(min_key..=max_key)
-                        .map(|(&t_bits, &y)| Point::new(f64::from_bits(t_bits), y))
-                        .collect();
-                }
-            }
-            vec![]
-        });
-
-        if !points.is_empty() {
-            all_series_points.push(points);
-        }
-    }
-
-    if all_series_points.is_empty() {
-        return Ok(PlotData::empty());
-    }
-
-    let sampling_rate = first_sampling_rate.ok_or("Could not determine sampling rate.")?;
-    let mut all_asds: Vec<Vec<f64>> = Vec::new();
+    let mut all_asds: Vec<Vec<f64>> = Vec::with_capacity(keys.len());
     let mut frequencies: Option<Vec<f64>> = None;
 
-    for points in all_series_points {
-        let y_values: Vec<f64> = points.iter().map(|p| p.y).collect();
-        if y_values.len() < 16 {
+    for key in &keys {
+
+        let stitched_series_vec: Vec<Vec<Point>> = capture.get_data_across_sessions_for_keys(
+            &[key.clone()],
+            min_time,
+            latest_time,
+        );
+
+        let points = if let Some(p) = stitched_series_vec.get(0) {
+            p
+        } else {
+            all_asds.push(vec![]);
+            continue;
+        };
+
+        if points.len() < 16 {
             all_asds.push(vec![]);
             continue;
         }
+
+        let stream_key = key.stream_key();
+        let sampling_rate = capture
+            .get_effective_sampling_rate(&stream_key)
+            .ok_or_else(|| format!("Effective sampling rate not found for stream: {:?}", stream_key))?;
+
+        let y_values: Vec<f64> = points.iter().map(|p| p.y).collect();
 
         let signal_to_process = match detrend {
             DetrendMethod::None => {

@@ -1,49 +1,20 @@
 use dashmap::DashMap;
-use serde::Deserialize;
-use ts_rs::TS;
 use dashmap::mapref::entry::Entry;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use std::time::{SystemTime};
-use twinleaf::tio::proto::DeviceRoute;
+use std::time::{Instant};
 use crate::state::decimation::{lerp, fpcs, min_max_bucket};
-use crate::util;
-use crossbeam::channel::{unbounded, Sender, Receiver};
+use crate::shared::{DataColumnId, Point};
+use crossbeam::channel::{unbounded, Receiver, Sender};
 use std::thread;
 
 use crate::shared::{ PlotData, DecimationMethod };
 
-// The unique identifier for a single column of data from a specific device.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, TS)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
-pub struct DataColumnId {
-    pub port_url: String,
-    #[serde(with = "util")]
-    #[ts(type = "string")]
-    pub device_route: DeviceRoute,
-    pub stream_id: u8,
-    pub column_index: usize,
-}
+pub type SessionId = u32;
+pub type DeviceTime = f64;
+pub type UnifiedTime = f64;
+pub type TimeOffset = f64;
 
-impl DataColumnId {
-    pub fn stream_key(&self) -> Self {
-        Self { column_index: 0, ..self.clone() }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub struct Point {
-    pub x: f64,
-    pub y: f64,
-}
-
-impl Point {
-    pub fn new(x: f64, y: f64) -> Self {
-        Point { x, y }
-    }
-}
-
-// A circular buffer for a single time series.
 pub struct Buffer {
     pub data: BTreeMap<u64, f64>,
     pub cap: usize,
@@ -68,35 +39,43 @@ impl Buffer {
     }
 
      pub fn set_capacity(&mut self, new_cap: usize) {
-        self.cap = new_cap;
+        if self.cap != new_cap {
+            println!(
+                "[Buffer] Capacity changed from {} to {}. Current size: {}",
+                self.cap,
+                new_cap,
+                self.data.len()
+            );
+            self.cap = new_cap;
+        }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct SessionMeta {
-    pub first_wall_time: SystemTime,
-    pub last_wall_time: SystemTime,
-    pub first_device_time: f64,
-    pub last_device_time: f64,
+    pub first_instant: Instant,
+    pub last_instant: Instant,
+    pub first_device_time: DeviceTime,
+    pub last_device_time: DeviceTime,
 }
 
 // The shared data that needs to be accessed by multiple threads.
 pub struct Inner {
-    pub buffers: DashMap<DataColumnId, DashMap<u32, Buffer>>,
-    pub session_meta: DashMap<DataColumnId, DashMap<u32, SessionMeta>>,
+    pub buffers: DashMap<DataColumnId, DashMap<SessionId, Buffer>>,
+    pub session_meta: DashMap<DataColumnId, DashMap<SessionId, SessionMeta>>,
+    pub offsets_cache: DashMap<DataColumnId, Arc<HashMap<SessionId, TimeOffset>>>,
     pub active: DashMap<DataColumnId, ()>,
     pub effective_sampling_rates: DashMap<DataColumnId, f64>,
-    pub initial_buffer_cap: usize,
     pub command_tx: Sender<CaptureCommand>,
 }
 
 #[derive(Debug)]
 pub enum CaptureCommand {
     Insert {
-        key: DataColumnId, 
+        key: DataColumnId,
         data: Point,
-        session_id: u32,
-        wall_time: SystemTime,
+        session_id: SessionId,
+        instant: Instant,
     },
     UpdateSampleRate {
         key: DataColumnId,
@@ -113,117 +92,203 @@ impl CaptureState {
     const BUFFER_WINDOW_SECONDS: f64 = 180.0;
 
     pub fn new() -> Self {
-        let (command_tx, command_rx): (Sender<CaptureCommand>, Receiver<CaptureCommand>) = unbounded();
-
+        let (command_tx, command_rx) = unbounded();
         let inner = Arc::new(Inner {
-                buffers: DashMap::new(),
-                session_meta: DashMap::new(),
-                active: DashMap::new(),
-                effective_sampling_rates: DashMap::new(),
-                initial_buffer_cap: 200_000, // e.g., 1000 samples/sec * 200 seconds, 1600 samples/sec * 125 seconds
-                command_tx,
-             });
+            buffers: DashMap::new(),
+            session_meta: DashMap::new(),
+            offsets_cache: DashMap::new(),
+            active: DashMap::new(),
+            effective_sampling_rates: DashMap::new(),
+            command_tx,
+        });
 
         let consumer_inner = inner.clone();
-        thread::Builder::new().name("capture-consumer".into()).spawn(move || {
-            Self::run_consumer(consumer_inner, command_rx);
-        }).expect("Failed to spawn CaptureState thread.");
+        thread::Builder::new()
+            .name("capture-consumer".into())
+            .spawn(move || Self::run_consumer(consumer_inner, command_rx))
+            .expect("Failed to spawn CaptureState thread.");
 
         Self { inner }
     }
 
-    pub fn get_data_in_range(
+    pub fn get_plot_data(
         &self,
         keys: &[DataColumnId],
-        min_time: f64,
-        max_time: f64,
+        start_time: UnifiedTime,
+        end_time: UnifiedTime,
         num_points: Option<usize>,
         decimation: Option<DecimationMethod>,
-    ) -> PlotData {
-        if keys.is_empty() || min_time >= max_time {
-            return PlotData::empty();
+        ) -> PlotData {
+            let stitched_series = self.get_data_across_sessions_for_keys(keys, start_time, end_time);
+            self._process_and_merge_series(stitched_series, start_time, end_time, num_points, decimation)
         }
-        
-        let stitched_series = self.get_stitched_series_in_range(keys, min_time, max_time);
 
-        self.process_and_merge_series(stitched_series, min_time, max_time, num_points, decimation)
-    }
+    pub fn get_latest_unified_timestamp(&self, keys: &[DataColumnId]) -> Option<UnifiedTime> {
+        let all_offsets = self._get_or_compute_global_offsets(keys);
 
-    pub fn get_latest_timestamp_for_keys(&self, keys: &[DataColumnId]) -> Option<f64> {
         keys.iter()
             .filter_map(|key| {
-                let session_map = self.inner.buffers.get(key)?;
-                let latest_session_id = session_map.iter().map(|entry| *entry.key()).max()?;
-                let buffer = session_map.get(&latest_session_id)?;
+                let offsets = all_offsets.get(key)?;
 
-                let (last_ts_bits, _) = buffer.data.iter().next_back()?;
-                Some(f64::from_bits(*last_ts_bits))
+                let (latest_session_id, max_offset) = offsets
+                    .iter()
+                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))?;
+
+                let binding = self.inner.buffers.get(key)?;
+                let buffer = binding.get(latest_session_id)?;
+
+                let (last_raw_ts_bits, _) = buffer.data.iter().next_back()?;
+                
+                let last_raw_ts = DeviceTime::from_bits(*last_raw_ts_bits);
+                Some(last_raw_ts + max_offset)
             })
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
     }
+    
+    pub fn get_interpolated_values_at_time(
+        &self,
+        keys: &[DataColumnId],
+        time: UnifiedTime,
+    ) -> Vec<Option<f64>> {
+        let all_offsets = self._get_or_compute_global_offsets(keys);
 
-    pub fn get_interpolated_values_at_time(&self, keys: &[DataColumnId], time: f64) -> Vec<Option<f64>> {
-        keys.iter().map(|key| {
-            let window_for_search = 10.0;
-            let stitched_points = self.get_stitched_series_in_range(
-                &[key.clone()],
-                time - window_for_search,
-                time + window_for_search,
-            );
-            
-            if let Some(points) = stitched_points.first() {
-                if points.is_empty() {
-                    return None;
-                }
-                
+        keys.iter()
+            .map(|key| {
+                let find_value = || -> Option<f64> {
+                    let offsets = all_offsets.get(key)?;
+                    let meta_map = self.inner.session_meta.get(&key.device_key())?;
 
-                let p2_index_opt = points.iter().position(|p| p.x >= time);
+                    for entry in meta_map.iter() {
+                        let session_id = entry.key();
+                        let meta = entry.value();
+                        let offset = offsets.get(session_id).copied().unwrap_or(0.0);
 
-                match p2_index_opt {
-                    Some(p2_index) => {
-                        if (points[p2_index].x - time).abs() < 1e-9 {
-                            return Some(points[p2_index].y);
-                        }
-                        
-                        if p2_index > 0 {
-                            let p1 = points[p2_index - 1];
-                            let p2 = points[p2_index];
-                            Some(lerp(&p1, &p2, time))
-                        } else {
-                            Some(points[p2_index].y)
+                        let session_start_unified = meta.first_device_time + offset;
+                        let session_end_unified = meta.last_device_time + offset;
+
+                        if time >= session_start_unified && time <= session_end_unified {
+                            let raw_time_needed = time - offset;
+                            let session_map = self.inner.buffers.get(key)?;
+                            let buffer = session_map.get(session_id)?;
+
+                            let p1_opt = buffer.data.range(..=raw_time_needed.to_bits()).next_back();
+                            let p2_opt = buffer.data.range(raw_time_needed.to_bits()..).next();
+                            
+                            return match (p1_opt, p2_opt) {
+                                (Some((t1_bits, y1)), Some((t2_bits, y2))) => {
+                                    let t1 = DeviceTime::from_bits(*t1_bits);
+                                    if (t1 - raw_time_needed).abs() < 1e-9 {
+                                        return Some(*y1);
+                                    }
+                                    
+                                    let p1 = Point::new(t1, *y1);
+                                    let p2 = Point::new(DeviceTime::from_bits(*t2_bits), *y2);
+                                    Some(lerp(&p1, &p2, raw_time_needed))
+                                }
+                                (Some((_, y1)), None) => Some(*y1),
+                                (None, Some((_, y2))) => Some(*y2),
+                                (None, None) => None,
+                            };
                         }
                     }
-                    None => {
-                        points.last().map(|p| p.y)
+                    None
+                };
+                find_value()
+            })
+            .collect()
+    }
+
+    pub fn get_data_across_sessions_for_keys(
+        &self,
+        keys: &[DataColumnId],
+        start_time: UnifiedTime,
+        end_time: UnifiedTime,
+    ) -> Vec<Vec<Point>> {
+        let all_offsets = self._get_or_compute_global_offsets(keys);
+
+        keys.iter()
+            .map(|key| {
+                let Some(offsets) = all_offsets.get(key) else { return vec![]; };
+                let Some(meta_map) = self.inner.session_meta.get(&key.device_key()) else { return vec![]; };
+                let Some(session_map) = self.inner.buffers.get(key) else { return vec![]; };
+
+                let mut sorted_sessions: Vec<_> = meta_map
+                    .iter()
+                    .filter_map(|entry| {
+                        let session_id = *entry.key();
+                        let meta = entry.value();
+                        offsets
+                            .get(&session_id)
+                            .map(|offset| (session_id, meta.clone(), *offset))
+                    })
+                    .collect();
+
+                sorted_sessions.sort_by(|a, b| {
+                    let start_a = a.1.first_device_time + a.2;
+                    let start_b = b.1.first_device_time + b.2;
+                    start_a.partial_cmp(&start_b).unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+                let mut result_points = Vec::new();
+                for (session_id, meta, offset) in sorted_sessions {
+                    let session_start_unified = meta.first_device_time + offset;
+                    let session_end_unified = meta.last_device_time + offset;
+
+                    if session_end_unified < start_time || session_start_unified > end_time {
+                        continue;
+                    }
+
+                    if let Some(buffer) = session_map.get(&session_id) {
+                        let session_min_query = start_time - offset;
+                        let session_max_query = end_time - offset;
+
+                        let clamped_min_query = session_min_query.max(0.0);
+
+                        if clamped_min_query > session_max_query {
+                            continue;
+                        }
+
+                        let points_iter = buffer
+                            .data
+                            .range(clamped_min_query.to_bits()..=session_max_query.to_bits())
+                            .map(|(t_bits, y)| Point {
+                                x: DeviceTime::from_bits(*t_bits) + offset,
+                                y: *y,
+                            });
+
+                        result_points.extend(points_iter);
                     }
                 }
-            } else {
-                None
-            }
-        }).collect()
+
+                result_points
+            })
+            .collect()
     }
 
     fn run_consumer(inner: Arc<Inner>, rx: Receiver<CaptureCommand>) {
         while let Ok(command) = rx.recv() {
             match command {
-                CaptureCommand::Insert { key, data: p, session_id, wall_time } => {
-                    if !inner.active.contains_key(&key) {
-                        continue;
-                    }
+                CaptureCommand::Insert { key, data, session_id, instant } => {
+                    if !inner.active.contains_key(&key) { continue; }
 
-                    let meta_map = inner.session_meta.entry(key.clone()).or_default();
+                    let device_key = key.device_key();
+                    let meta_map = inner.session_meta.entry(device_key).or_default();
                     match meta_map.entry(session_id) {
                         Entry::Occupied(mut entry) => {
                             let meta = entry.get_mut();
-                            meta.last_wall_time = wall_time;
-                            meta.last_device_time = p.x;
+                            meta.last_instant = instant;
+                            meta.last_device_time = data.x;
                         }
                         Entry::Vacant(entry) => {
+                            println!(
+                                "[Capture] New session detected for device {}:{}, Session ID: {}",
+                                key.port_url, key.device_route, session_id
+                            );
                             entry.insert(SessionMeta {
-                                first_wall_time: wall_time,
-                                last_wall_time: wall_time,
-                                first_device_time: p.x,
-                                last_device_time: p.x,
+                                first_instant: instant,
+                                last_instant: instant,
+                                first_device_time: data.x,
+                                last_device_time: data.x,
                             });
                         }
                     }
@@ -231,118 +296,110 @@ impl CaptureState {
                     let session_map = inner.buffers.entry(key.clone()).or_default();
                     let mut buffer = session_map.entry(session_id).or_insert_with(|| {
                         let stream_key = key.stream_key();
-                        let rate = inner
-                            .effective_sampling_rates
-                            .get(&stream_key)
-                            .map_or(1000.0, |r| *r.value());
-                        let initial_cap =
-                            ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
-                        Buffer::new(initial_cap)
+                        let rate = inner.effective_sampling_rates.get(&stream_key).map_or(1000.0, |r| *r.value());
+                        let cap = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
+                        Buffer::new(cap)
                     });
-                    buffer.push(p);
+                    buffer.push(data);
                 }
                 CaptureCommand::UpdateSampleRate { key, rate } => {
                     let stream_key = key.stream_key();
-                    if let Some(existing_rate) = inner.effective_sampling_rates.get(&stream_key) {
-                        if (existing_rate.value() - rate).abs() < 1e-9 {
-                            continue;
-                        }
+                    if let Some(r) = inner.effective_sampling_rates.get(&stream_key) {
+                        if (r.value() - rate).abs() < 1e-9 { continue; }
                     }
-                    println!(
-                        "[Capture] Updating sample rate for stream at route '{}' to {} Hz",
-                        key.device_route, rate
-                    );
                     inner.effective_sampling_rates.insert(stream_key.clone(), rate);
                     let new_cap = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
 
-                    if let Some(session_map) = inner.buffers.get(&stream_key) {
-                        for mut buffer in session_map.iter_mut() {
-                            println!(
-                                "[Capture] Resizing buffer for {:?} (Session {}) to {} points",
-                                key, buffer.key(), new_cap
-                            );
-                            buffer.set_capacity(new_cap);
-                        }
-                    }
+                    println!(
+                        "[Capture] Updating buffer capacity for stream {}:{}/{} to {}. (New Rate: {} Hz)",
+                        stream_key.port_url, stream_key.device_route, stream_key.stream_id, new_cap, rate
+                    );
+
+                    inner.active
+                        .iter()
+                        .filter(|r| r.key().stream_key() == stream_key)
+                        .for_each(|r| {
+                            let col_key = r.key();
+                            if let Some(mut column_buffers) = inner.buffers.get_mut(col_key) {
+                                for mut session_buffer in column_buffers.value_mut().iter_mut() {
+                                    session_buffer.value_mut().set_capacity(new_cap);
+                                }
+                            }
+                        });
                 }
             }
         }
     }
 
-
-    fn get_stitched_series_in_range(
+    fn _get_or_compute_global_offsets(
         &self,
         keys: &[DataColumnId],
-        min_time: f64,
-        max_time: f64,
-    ) -> Vec<Vec<Point>> {
+    ) -> HashMap<DataColumnId, Arc<HashMap<SessionId, TimeOffset>>> {
+        let mut device_level_offsets = HashMap::new();
+        let unique_device_keys: std::collections::HashSet<_> = keys.iter().map(|k| k.device_key()).collect();
+
+        for device_key in unique_device_keys {
+            let Some(session_meta_map) = self.inner.session_meta.get(&device_key) else { continue; };
+            if session_meta_map.is_empty() {
+                continue;
+            };
+
+            let mut recompute = false; 
+
+            if let Some(cached_arc) = self.inner.offsets_cache.get(&device_key) {
+                if cached_arc.len() == session_meta_map.len() {
+                    device_level_offsets.insert(device_key.clone(), cached_arc.clone());
+                } else {
+                    recompute = true;
+                }
+            } else {
+                recompute = true;
+            }
+
+            if recompute {
+                let mut new_offsets = HashMap::new();
+
+                let mut sorted_sessions: Vec<_> = session_meta_map.iter().map(|entry| (*entry.key(), entry.value().clone())).collect();
+                sorted_sessions.sort_by_key(|(_id, meta)| meta.first_instant);
+
+                println!("[Offsets] Calculating for device {}:{} with sorted sessions:", device_key.port_url, device_key.device_route);
+                for (id, meta) in &sorted_sessions {
+                    println!("  - Session ID: {}, First Device Time: {:.4}, First Instant: {:?}", id, meta.first_device_time, meta.first_instant);
+                }
+
+                let mut last_session_unified_end_time: UnifiedTime = 0.0;
+                let mut last_meta: Option<SessionMeta> = None;
+
+                for (session_id, current_meta) in sorted_sessions {
+                    let new_offset = if let Some(prev_meta) = last_meta.as_ref() {
+                        let gap = current_meta.first_instant.duration_since(prev_meta.last_instant);
+                        last_session_unified_end_time + gap.as_secs_f64() - current_meta.first_device_time
+                    } else {
+                        0.0
+                    };
+
+                    new_offsets.insert(session_id, new_offset);
+                    last_session_unified_end_time = current_meta.last_device_time + new_offset;
+                    last_meta = Some(current_meta);
+                }
+                let final_offsets_arc = Arc::new(new_offsets);
+                self.inner.offsets_cache.insert(device_key.clone(), final_offsets_arc.clone());
+                device_level_offsets.insert(device_key, final_offsets_arc);
+            }
+        }
+
         keys.iter()
-            .map(|key| {
-                let Some(session_map) = self.inner.buffers.get(key) else { return vec![]; };
-                let Some(meta_map) = self.inner.session_meta.get(key) else { return vec![]; };
-
-                let mut session_ids: Vec<_> = session_map.iter().map(|r| *r.key()).collect();
-                session_ids.sort_unstable_by(|a, b| b.cmp(a));
-
-                let mut offsets = std::collections::HashMap::new();
-                let mut current_offset = 0.0;
-
-                for i in 0..session_ids.len() {
-                    let session_id = session_ids[i];
-                    offsets.insert(session_id, current_offset);
-
-                    if i + 1 < session_ids.len() {
-                        let next_session_id = session_ids[i + 1];
-                        if let (Some(current_meta), Some(next_meta)) =
-                            (meta_map.get(&session_id), meta_map.get(&next_session_id))
-                        {
-                            let wall_clock_gap = current_meta
-                                .first_wall_time
-                                .duration_since(next_meta.last_wall_time)
-                                .unwrap_or(std::time::Duration::ZERO);
-
-                            let unified_current_start = current_meta.first_device_time + current_offset;
-
-                            let next_offset = unified_current_start
-                                - wall_clock_gap.as_secs_f64()
-                                - next_meta.last_device_time;
-
-                            current_offset = next_offset;
-                        }
-                    }
-                }
-
-                let mut result_points = Vec::new();
-                session_ids.reverse();
-
-                for session_id in session_ids {
-                    let offset = offsets.get(&session_id).copied().unwrap_or(0.0);
-                    let Some(buffer) = session_map.get(&session_id) else { continue };
-
-                    let session_min_time = min_time - offset;
-                    let session_max_time = max_time - offset;
-
-                    for (&t_bits, &y) in buffer
-                        .data
-                        .range(session_min_time.to_bits()..=session_max_time.to_bits())
-                    {
-                        let device_time = f64::from_bits(t_bits);
-                        let unified_time = device_time + offset;
-
-                        if unified_time >= min_time && unified_time <= max_time {
-                            result_points.push(Point::new(unified_time, y));
-                        }
-                    }
-                }
-                result_points
+            .filter_map(|col_key| {
+                device_level_offsets
+                    .get(&col_key.device_key())
+                    .map(|offsets| (col_key.clone(), offsets.clone()))
             })
             .collect()
     }
 
-
-    fn process_and_merge_series(
+    fn _process_and_merge_series(
         &self,
-        mut aligned_series: Vec<Vec<Point>>,
+        mut continuous_series: Vec<Vec<Point>>,
         min_time: f64,
         max_time: f64,
         num_points: Option<usize>,
@@ -350,10 +407,10 @@ impl CaptureState {
     ) -> PlotData {
         if let (Some(n_points), Some(method)) = (num_points, decimation) {
             if method == DecimationMethod::MinMax && n_points > 0 {
-                let mut decimated_series_data = Vec::with_capacity(aligned_series.len());
+                let mut decimated_series_data = Vec::with_capacity(continuous_series.len());
                 let mut final_timestamps = Vec::new();
 
-                for (i, series) in aligned_series.iter_mut().enumerate() {
+                for (i, series) in continuous_series.iter_mut().enumerate() {
                     if series.len() > n_points {
                         *series = min_max_bucket(series, n_points, min_time, max_time);
                     }
@@ -370,7 +427,7 @@ impl CaptureState {
             }
             
             if !matches!(method, DecimationMethod::None) {
-                for series in &mut aligned_series {
+                for series in &mut continuous_series {
                     if series.len() > n_points && n_points > 0 {
                         *series = match method {
                             DecimationMethod::Fpcs => {
@@ -386,7 +443,7 @@ impl CaptureState {
         }
 
         // K-Way Merge Logic
-        let mut series_iters: Vec<_> = aligned_series.iter().map(|s| s.iter().peekable()).collect();
+        let mut series_iters: Vec<_> = continuous_series.iter().map(|s| s.iter().peekable()).collect();
         if series_iters.is_empty() { return PlotData::empty(); }
 
         let num_series = series_iters.len();
@@ -446,71 +503,4 @@ impl CaptureState {
     }
 
 
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::shared::PlotData;
-
-    fn test_merge(series_data: Vec<Vec<Point>>) -> PlotData {
-        let mut series_iters: Vec<_> = series_data
-            .iter()
-            .map(|series| series.iter().peekable())
-            .collect();
-        
-        let mut plot_data = PlotData::with_series_capacity(series_data.len());
-
-        loop {
-            let next_ts = series_iters
-                .iter_mut()
-                .filter_map(|it| it.peek().map(|p| p.x))
-                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-            if let Some(ts) = next_ts {
-                plot_data.timestamps.push(ts);
-                for i in 0..series_iters.len() {
-                    let y_val = if let Some(p) = series_iters[i].peek() {
-                        if p.x == ts {
-                            let y = p.y;
-                            series_iters[i].next();
-                            y
-                        } else {
-                            f64::NAN
-                        }
-                    } else {
-                        f64::NAN
-                    };
-                    plot_data.series_data[i].push(y_val);
-                }
-            } else {
-                break;
-            }
-        }
-        plot_data
-    }
-
-    #[test]
-    fn test_k_way_merge_inserts_nan() {
-        // Two series, downsampled independently. They have different timestamps.
-        let series1 = vec![Point { x: 1.0, y: 10.0 }, Point { x: 3.0, y: 12.0 }];
-        let series2 = vec![Point { x: 2.0, y: 100.0 }, Point { x: 4.0, y: 120.0 }];
-
-        let result = test_merge(vec![series1, series2]);
-
-        // Expected unified timestamps: [1.0, 2.0, 3.0, 4.0]
-        assert_eq!(result.timestamps, vec![1.0, 2.0, 3.0, 4.0]);
-
-        // Expected data for series 1: [10.0, NaN, 12.0, NaN]
-        assert_eq!(result.series_data[0][0], 10.0);
-        assert!(result.series_data[0][1].is_nan());
-        assert_eq!(result.series_data[0][2], 12.0);
-        assert!(result.series_data[0][3].is_nan());
-
-        // Expected data for series 2: [NaN, 100.0, NaN, 120.0]
-        assert!(result.series_data[1][0].is_nan());
-        assert_eq!(result.series_data[1][1], 100.0);
-        assert!(result.series_data[1][2].is_nan());
-        assert_eq!(result.series_data[1][3], 120.0);
-    }
 }

@@ -1,12 +1,12 @@
-use crate::state::capture::{CaptureCommand, CaptureState, DataColumnId, Point};
-use crate::shared::{ColumnMeta, DeviceMeta, PortState, RpcError, RpcMeta, UiDevice, UiStream};
+use crate::state::capture::{CaptureCommand, CaptureState};
+use crate::shared::{ColumnMeta, DeviceMeta, PortState, RpcError, RpcMeta, UiDevice, UiStream,  DataColumnId, Point};
 use crate::state::proxy_register::ProxyRegister;
 use crate::util::{self, parse_arg_type_and_size, parse_permissions_string};
 use std::panic::AssertUnwindSafe;
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex, RwLock},
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, Instant},
     thread,
     panic,
 };
@@ -503,7 +503,6 @@ impl PortManager {
                 let device_arc_clone = device_entry.clone();
                 let self_clone = self.clone();
                 
-                // Use spawn_blocking for synchronous, blocking I/O
                 async_runtime::spawn_blocking(move || {
                     println!("[{}] Spawning background task to refresh metadata for route '{}'", self_clone.url, route);
 
@@ -601,7 +600,7 @@ impl PortManager {
     }
 
     fn update_capture_state_with_sample(&self, route: &DeviceRoute, sample: &twinleaf::data::Sample) {
-        let wall_time = SystemTime::now();
+        let instant = Instant::now();
         for column in &sample.columns {
             let value_f64 = match column.value {
                 twinleaf::data::ColumnData::Int(i) => Some(i as f64),
@@ -623,7 +622,7 @@ impl PortManager {
                     key: stream_key, 
                     data: point, 
                     session_id: sample.device.session_id,
-                    wall_time,
+                    instant,
                 }; 
                 if self.capture_tx.send(command).is_ok() {
                     self.counters.points_inserted.fetch_add(1, Ordering::Relaxed);
