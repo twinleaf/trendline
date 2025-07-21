@@ -4,15 +4,18 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import type { PlotConfig } from '$lib/states/chartState.svelte';
 	import type { PlotData } from '$lib/bindings/PlotData';
+	import type { PortState } from '$lib/bindings/PortState';
 	import CustomLegend from '$lib/components/chart-area/legend/CustomLegend.svelte';
 
 	// --- Props ---
 	let {
 		plot,
-		latestTimestamp = $bindable()
+		latestTimestamp = $bindable(),
+		connectionState = 'Streaming'
 	}: {
 		plot: PlotConfig;
 		latestTimestamp?: number;
+		connectionState?: PortState | null;
 	} = $props();
 
 	// --- Derived Values ---
@@ -20,6 +23,7 @@
 	const seriesDataKeys = $derived(plot.series.map((s) => s.dataKey));
 	const isFFT = $derived(plot.viewType === 'fft');
 	const isPaused = $derived(plot.isPaused);
+	const isStreaming = $derived(connectionState === 'Streaming');
 
 	// --- Component State ---
 	let chartContainer: HTMLDivElement;
@@ -71,8 +75,6 @@
 		}
 	});
 
-	$inspect(plot.maxSamplingRate);
-
 	// --- Loop Controller Effect ---
 	$effect(() => {
 		const isReady = seriesDataKeys.length > 0 && !!uplot && uplotDataBuffers.length > 0;
@@ -81,6 +83,8 @@
 			return;
 		}
 		let animationFrameId: number;
+		let isLoopRunning = true;
+    	let isFetching = false;
 		async function fetchData() {
 			try {
 				const command = isFFT ? 'get_latest_fft_data' : 'get_latest_plot_data';
@@ -136,21 +140,25 @@
 				plot.hasData = false;
 			}
 		}
-		function mainLoop() {
-			if (!isPaused) {
-				fetchData();
+		async function mainLoop() {
+			if (isLoopRunning) {
+				if (!isPaused && !isFetching && isStreaming) {
+					isFetching = true;
+					await fetchData();
+					isFetching = false;
+				}
+				animationFrameId = requestAnimationFrame(mainLoop);
 			}
-			animationFrameId = requestAnimationFrame(mainLoop);
 		}
 		mainLoop();
 		return () => {
+			isLoopRunning = false;
 			cancelAnimationFrame(animationFrameId);
 		};
 	});
 
 	// --- Effect to fetch interpolated data for the legend via IPC ---
 	$effect(() => {
-		// This effect runs whenever the relativeTime or latestTimestamp changes.
 		const time =
 			legendState.relativeTime === null ? null : (latestTimestamp ?? 0) + legendState.relativeTime;
 		const keys = seriesDataKeys;

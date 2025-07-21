@@ -54,7 +54,7 @@ export class PlotConfig {
     #isDecimationManual = $state(false);
     windowSeconds = $state<number>(30.0);
     resolutionMultiplier = $state<number>(100);
-    
+
     fftSeconds = $state<number>(10.0);
     fftYAxisPower = $state(4);
     fftDetrendMethod = $state<DetrendMethod>('None');
@@ -62,6 +62,8 @@ export class PlotConfig {
     hasData = $state(false);
     latestTimestamp = $state(0);
     isPaused = $state(false);
+
+    manuallyResized = $state(false);
 
     get decimationMethod(): DecimationMethod {
         if (this.#isDecimationManual) {
@@ -280,6 +282,8 @@ class ChartState {
 
     selectedPlotId = $state<string | null>(null);
 
+    isBalancing = $state(false);
+
     addPlot() {
         const initialExpansion: ExpandedState = {};
         for (const portData of deviceState.devices) {
@@ -290,9 +294,7 @@ class ChartState {
         }
 
         const newPlot = new PlotConfig('New Plot', {}, initialExpansion);
-
-        this.plots.push(newPlot);
-        this.layout[newPlot.id] = DEFAULT_PLOT_HEIGHT;
+		this.plots = [...this.plots, newPlot];
     }
     
     removePlot(plotId: string) {
