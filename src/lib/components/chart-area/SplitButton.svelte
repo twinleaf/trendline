@@ -4,9 +4,10 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Separator } from '$lib/components/ui/separator';
-	import { Plus, ChevronDown, Trash2, AlignVerticalDistributeCenter } from '@lucide/svelte';
+	import { Plus, ChevronUp, Trash2, AlignVerticalDistributeCenter } from '@lucide/svelte';
 
 	let isConfirmDialogOpen = $state(false);
+    let isDropdownOpen = $state(false);
 
 	function confirmDeleteAll() {
 		chartState.deleteAllPlots();
@@ -28,7 +29,7 @@
 	<Separator orientation="vertical" class="h-10" />
 
 	<!-- Dropdown Menu for Secondary Actions -->
-	<DropdownMenu.Root>
+    <DropdownMenu.Root bind:open={isDropdownOpen}>
 		<DropdownMenu.Trigger>
 			<Button
 				variant="default"
@@ -36,7 +37,10 @@
 				class="h-10 w-9 rounded-l-none border-l-0"
 				aria-label="More plot options"
 			>
-				<ChevronDown class="h-4 w-4" />
+				<ChevronUp
+                    class="h-4 w-4 transition-transform duration-200"
+                    style="transform: rotate({isDropdownOpen ? 180 : 0}deg);"
+                />
 			</Button>
 		</DropdownMenu.Trigger>
 		<DropdownMenu.Content align="end" class="w-56">

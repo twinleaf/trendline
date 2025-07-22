@@ -17,7 +17,7 @@
 	import { slide } from 'svelte/transition';
 	import * as ToggleGroup from '$lib/components/ui/toggle-group/index.js';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
-	import { ChevronDown, ChevronUp, FileType2, UserPen } from '@lucide/svelte';
+	import { ChevronUp, FileType2, UserPen } from '@lucide/svelte';
 	import { cn } from '$lib/utils';
 
 	type DataTableProps = {
@@ -90,11 +90,10 @@
 						<Tooltip.Root>
 							<Tooltip.Trigger>
 								<ToggleGroup.Item value="header" aria-label="Toggle Header">
-									{#if isHeaderVisible}
-										<ChevronDown class="size-4" />
-									{:else}
-										<ChevronUp class="size-4" />
-									{/if}
+									 <ChevronUp
+                                        class="size-4 transition-transform duration-200"
+                                        style="transform: rotate({isHeaderVisible ? 180 : 0}deg);"
+                                    />
 								</ToggleGroup.Item>
 							</Tooltip.Trigger>
 							<Tooltip.Content>
