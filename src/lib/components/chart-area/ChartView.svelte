@@ -5,8 +5,7 @@
 	import UPlotComponent from '$lib/components/chart-area/UPlotComponent.svelte';
 	import PlotHeader from '$lib/components/chart-area/PlotHeader.svelte';
 	import * as Resizable from '$lib/components/ui/resizable';
-	import { Button } from '$lib/components/ui/button/';
-	import { Plus } from '@lucide/svelte';
+	import SplitButton from '$lib/components/chart-area/SplitButton.svelte';
 	import type { UiStream } from '$lib/bindings/UiStream';
 	import type { ColumnMeta } from '$lib/bindings/ColumnMeta';
 	import { sortUiDevicesByRoute } from '$lib/utils';
@@ -97,20 +96,6 @@
 		};
 	});
 
-    $effect(() => {
-		const _ = chartState.containerHeight;
-		if (chartState.layoutMode === 'auto') {
-			chartState.redistributePlots();
-		}
-	});
-
-	$effect(() => {
-		if (plots.length === 0 && chartState.layoutMode === 'manual') {
-			chartState.layoutMode = 'auto';
-		}
-	});
-
-
     $inspect(chartState.layoutMode, chartState.containerHeight);
 
 </script>
@@ -127,7 +112,7 @@
                         class="w-full h-full gap-4"
                         onLayoutChange={(percentages) => {
 							if (chartState.layoutMode === 'manual') {
-								chartState.updateLayoutFromPercentages(percentages);
+							    chartState.updateLayoutFromManualResize(percentages);
 							}
 						}}
                     >
@@ -173,12 +158,7 @@
             </div>
         {/if}
 	</div>
-    <!--ADD SPLIT BUTTON (https://m3.material.io/components/split-button/overview)-->
-	<Button
-		class="absolute z-10 right-6 bottom-6 h-14 w-14 rounded-full shadow-lg"
-		onclick={() => chartState.addPlot()}
-		aria-label="Add Plot"
-	>
-		<Plus class="h-7 w-7" />
-	</Button>
+	<div class="absolute z-10 right-6 bottom-6">
+		<SplitButton />
+	</div>
 </div>

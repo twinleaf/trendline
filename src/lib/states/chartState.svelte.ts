@@ -291,22 +291,26 @@ export class PlotConfig {
 const DEFAULT_PLOT_HEIGHT = 400;
 
 class ChartState {
+	// --- CORE STATE ---
 	plots = $state<PlotConfig[]>([]);
-	layout = $state<Record<string, number>>({});
 	layoutMode = $state<'auto' | 'manual'>('auto');
 	containerHeight = $state(0);
 	selectedPlotId = $state<string | null>(null);
+    manualLayout = $state<Record<string, number>>({});
 
-	redistributePlots() {
-		const plots = this.plots;
-		const containerHeight = this.containerHeight;
-
-		if (containerHeight === 0 || plots.length === 0) {
-			this.layout = {};
-			return;
+	layout = $derived.by(() => {
+		if (this.layoutMode === 'manual') {
+			return this.manualLayout;
 		}
 
+		// --- Auto Mode Logic ---
+		const plots = this.plots;
+		const containerHeight = this.containerHeight;
 		const newLayout: Record<string, number> = {};
+
+		if (plots.length === 0 || containerHeight === 0) {
+			return {};
+		}
 
 		if (plots.length <= 4) {
 			const heightPerPlot = containerHeight / plots.length;
@@ -314,19 +318,13 @@ class ChartState {
 				newLayout[plot.id] = heightPerPlot;
 			}
 		} else {
-
 			const heightForFirstFour = containerHeight / 4;
 			for (let i = 0; i < plots.length; i++) {
-				const plot = plots[i];
-				if (i < 4) {
-					newLayout[plot.id] = heightForFirstFour;
-				} else {
-					newLayout[plot.id] = DEFAULT_PLOT_HEIGHT;
-				}
+				newLayout[plots[i].id] = i < 4 ? heightForFirstFour : DEFAULT_PLOT_HEIGHT;
 			}
 		}
-		this.layout = newLayout;
-	}
+		return newLayout;
+	});
 
 	addPlot() {
 		const initialExpansion: ExpandedState = {};
@@ -338,59 +336,55 @@ class ChartState {
 		}
 		const newPlot = new PlotConfig('New Plot', {}, initialExpansion);
 
-		if (this.layoutMode === 'auto') {
-			this.plots = [...this.plots, newPlot];
-			this.redistributePlots();
-		} else {
-			const newLayout = { ...this.layout };
-			newLayout[newPlot.id] = DEFAULT_PLOT_HEIGHT;
-			this.layout = newLayout;
-			this.plots = [...this.plots, newPlot];
+		if (this.layoutMode === 'manual') {
+			this.manualLayout[newPlot.id] = DEFAULT_PLOT_HEIGHT;
 		}
+		this.plots.push(newPlot);
 	}
 
 	removePlot(plotId: string) {
-		const index = this.plots.findIndex((p) => p.id === plotId);
-		if (index === -1) return;
-
-		const newPlots = [...this.plots];
-		newPlots.splice(index, 1);
-		this.plots = newPlots;
-
-		const newLayout = { ...this.layout };
-		delete newLayout[plotId];
-		this.layout = newLayout;
-
-		if (this.layoutMode === 'auto') {
-			this.redistributePlots();
+		if (this.plots.length === 1) {
+			this.deleteAllPlots();
+			return;
 		}
 
-        if (this.plots.length === 0) {
-			this.layoutMode = 'auto';
-		}
+		this.plots = this.plots.filter((p) => p.id !== plotId);
+		delete this.manualLayout[plotId];
 	}
 
-	updateLayoutFromPercentages(percentages: number[]) {
-		const currentPlots = untrack(() => this.plots);
-		if (percentages.length !== currentPlots.length) return;
-
-		const totalPixelHeight = Object.values(untrack(() => this.layout)).reduce((sum, h) => sum + h, 0);
-		if (totalPixelHeight === 0) return;
-
-		const newLayout: Record<string, number> = {};
-		currentPlots.forEach((plot, i) => {
-			const percentage = percentages[i];
-			newLayout[plot.id] = (totalPixelHeight * percentage) / 100;
-		});
-
-		this.layout = newLayout;
+	deleteAllPlots() {
+		this.plots = [];
+		this.manualLayout = {};
+		this.layoutMode = 'auto';
 	}
 
-   switchToManualMode() {
+    rebalancePlots() {
+		this.layoutMode = 'auto';
+	}
+
+
+	switchToManualMode() {
 		if (this.layoutMode === 'manual') return;
+
+		this.manualLayout = untrack(() => this.layout);
 		this.layoutMode = 'manual';
 	}
 
+
+	updateLayoutFromManualResize(percentages: number[]) {
+        const currentPlots = untrack(() => this.plots);
+        if (this.layoutMode !== 'manual' || percentages.length !== currentPlots.length) return;
+
+        const totalPixelHeight = Object.values(untrack(() => this.layout)).reduce((sum, h) => sum + h, 0);
+        if (totalPixelHeight === 0) return;
+
+        const newLayout: Record<string, number> = {};
+        currentPlots.forEach((plot, i) => {
+            newLayout[plot.id] = (totalPixelHeight * percentages[i]) / 100;
+        });
+
+        this.manualLayout = newLayout;
+    }
 
 	togglePause() {
 		if (this.selectedPlotId) {
@@ -399,12 +393,13 @@ class ChartState {
 				plot.isPaused = !plot.isPaused;
 			}
 		} else {
-			const newPausedState = this.plots.some((p) => !p.isPaused);
+			const newPausedState = !this.plots.every(p => p.isPaused);
 			for (const plot of this.plots) {
 				plot.isPaused = newPausedState;
 			}
 		}
 	}
 }
+
 
 export const chartState = new ChartState();
