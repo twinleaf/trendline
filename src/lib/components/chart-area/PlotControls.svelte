@@ -38,7 +38,7 @@ let { plot = $bindable(), treeData }: Props = $props();
 				<Tabs.Trigger value="settings">Plot Settings</Tabs.Trigger>
 			</Tabs.List>
 			<Tabs.Content value="selection">
-				<div class="flex max-h-[50vh] flex-col overflow-y-auto p-2">
+				<div class="flex max-h-[40vh] flex-col overflow-y-auto p-2">
 					<DataTable
 						{columns}
 						data={treeData}
@@ -50,10 +50,12 @@ let { plot = $bindable(), treeData }: Props = $props();
 				</div>
 			</Tabs.Content>
 			<Tabs.Content value="settings">
-				<PlotSettings 
+				<div class="flex max-h-[40vh] flex-col overflow-y-auto p-2">
+					<PlotSettings 
 					bind:plot 
 					bind:scrollTop={plot.scrollTops.settings} 
 				/>
+				</div>
 			</Tabs.Content>
 		</Tabs.Root>
 	</Popover.Content>

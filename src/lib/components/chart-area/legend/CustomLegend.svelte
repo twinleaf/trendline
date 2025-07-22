@@ -45,6 +45,7 @@
 			if (legendRect.width === 0) return;
 
 			const margin = 5;
+            const cursorOffset = 150;
 			const anchor = {
 				left: chartBounds.left + cursorLeft,
 				top: chartBounds.top + cursorTop
@@ -63,14 +64,14 @@
 				left = anchor.left - requiredWidth - margin;
 			}
 			else if (spaceOnRight >= requiredWidth) {
-				left = anchor.left + margin;
+				left = anchor.left + cursorOffset;
 			}
 			else {
-				left =
-					spaceOnLeft > spaceOnRight
-						? anchor.left - requiredWidth - margin
-						: anchor.left + margin;
-			}
+                left =
+                    spaceOnRight > spaceOnLeft
+                        ? anchor.left + cursorOffset
+                        : anchor.left - requiredWidth - margin;
+            }
 
 			style = `top: ${top}px; left: ${left}px;`;
 		}

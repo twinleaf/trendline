@@ -16,7 +16,7 @@
 		collapsedSize={0}
 		onCollapse={() => (isCollapsed = true)}
 		onExpand={() => (isCollapsed = false)}
-		style={`min-width: ${isCollapsed ? 'auto' : '400px'};`}
+		style={`min-width: ${isCollapsed ? 'auto' : '400px'}`}
 	>
 		<div
 			class={cn('h-full p-4 transition-all duration-300 ease-in-out', {

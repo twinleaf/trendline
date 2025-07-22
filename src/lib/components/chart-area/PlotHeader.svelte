@@ -4,7 +4,7 @@
 	import PlotControls from '$lib/components/chart-area/PlotControls.svelte';
 	import { Button } from '$lib/components/ui/button/';
 	import { Toggle } from '$lib/components/ui/toggle/';
-	import { Lock, Unlock, Play, Pause, Trash2, ChartLine, ChartColumn } from '@lucide/svelte';
+	import { Play, Pause, Trash2, ChartLine, ChartColumn } from '@lucide/svelte';
 
 	type Props = {
 		plot: PlotConfig;
@@ -24,21 +24,6 @@
 		bind:value={plot.title}
 	/>
 	<div class="flex items-center gap-2">
-		<Button
-			variant="ghost"
-			size="icon"
-			aria-label={plot.manuallyResized ? 'Unlock plot sizing' : 'Lock plot sizing'}
-			onclick={(e) => {
-				e.stopPropagation();
-				plot.manuallyResized = !plot.manuallyResized;
-			}}
-		>
-			{#if plot.manuallyResized}
-				<Lock class="size-5 text-muted-foreground" />
-			{:else}
-				<Unlock class="size-5 text-primary" />
-			{/if}
-		</Button>
 		<Button
 			variant="ghost"
 			size="icon"
