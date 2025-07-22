@@ -60,7 +60,11 @@
 	}
 </script>
 
-<AlertDialog.Root open={uiState.is('discovery')}>
+<AlertDialog.Root open={uiState.is('discovery')} onOpenChange={(isOpen) => {
+        if (!isOpen) {
+            uiState.close();
+        }
+    }}>
 	<AlertDialog.Content
 		class="fixed left-1/2 top-1/2 z-50 w-[32rem] max-w-[95vw] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-card p-6 shadow-lg"
 	>
@@ -106,7 +110,7 @@
 	</AlertDialog.Content>
 </AlertDialog.Root>
 
-<Dialog.Root open={manualConnectDialogOpen}>
+<Dialog.Root bind:open={manualConnectDialogOpen}>
 	<Dialog.Overlay />
 	<Dialog.Content>
 		<Dialog.Header>
