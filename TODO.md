@@ -11,15 +11,15 @@ This document outlines the current bugs, desired features, and code quality impr
 
 ## Bug Fixes
 
-[ ] Cursor Behavior: Fix the plot cursor to correctly select the nearest non-null data point, instead of just the nearest x-coordinate.
+[x] Cursor Behavior: Fix the plot cursor to correctly select the nearest non-null data point, instead of just the nearest x-coordinate.
 
-[ ] Plot Resizing: Determine why adding a new plot to the view causes all existing plots to shrink slightly.
+[X] Plot Resizing: Determine why adding a new plot to the view causes all existing plots to shrink slightly.
 
-[-] Proxy Reconnect Loop: Fix the bug where a reconnecting proxy spawns a new, independent proxy instance, leading to multiple reconnection timers.
+[X] Proxy Reconnect Loop: Fix the bug where a reconnecting proxy spawns a new, independent proxy instance, leading to multiple reconnection timers.
 
 [ ] Accessibility Behavior: Fix the bug where removing the explicit Chevron button in the Plot Selection means that it is not possible to expand the DataTable using only keyboard navigation
 
-[ ] Plot Control Focus: Fix how plot control's focus is not removed when the PopOver disappears (eg. hitting space bar after closing the popover reopens it). Presumably tied to the button focus.
+[x] Plot Control Focus: Fix how plot control's focus is not removed when the PopOver disappears (eg. hitting space bar after closing the popover reopens it). Presumably tied to the button focus.
 
 # #Features
 
@@ -48,12 +48,6 @@ This document outlines the current bugs, desired features, and code quality impr
 Goal: Transition from a polling-based model to a reactive, event-driven architecture.
 
 Implementation Idea: Instead of a single confirm_selection command, use atomic backend events (connect_stream, disconnect_stream). The frontend plots would subscribe to the relevant data streams, and the backend would push updates. This decouples the UI from managing connection state logic.
-
-[ ] State Management Consolidation:
-
-Goal: Clean up component-level TypeScript logic by moving it into the centralized chartState and deviceState stores.
-
-Implementation Idea: Break down the monolithic chartState into smaller, modular uPlot configuration managers. This will simplify state management and make it easier to integrate with the new plot settings panels.
 
 ## Things to refactor
 

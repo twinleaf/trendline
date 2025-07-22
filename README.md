@@ -17,7 +17,6 @@
 
 ### Known Issues
 
-- Non time aligned data inserts occasional inserts 0s at newest time stamp (min-max bucket algorithm)
 - Multi series plots are notably slower than indiviudal plots of the same series
 - Typing in the RPC filtering slows down over time
-fo
+- Changing sample rates from high sample rate to low sample rate truncates front-end buffers
