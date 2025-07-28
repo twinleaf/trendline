@@ -5,6 +5,7 @@
 	import UPlotComponent from '$lib/components/chart-area/UPlotComponent.svelte';
 	import PlotHeader from '$lib/components/chart-area/PlotHeader.svelte';
 	import * as Resizable from '$lib/components/ui/resizable';
+	import { ScrollArea } from "$lib/components/ui/scroll-area/index.js";
 	import SplitButton from '$lib/components/chart-area/SplitButton.svelte';
 	import type { UiStream } from '$lib/bindings/UiStream';
 	import type { ColumnMeta } from '$lib/bindings/ColumnMeta';
@@ -13,10 +14,11 @@
 	let plots = $derived(chartState.plots);
 	let layout = $derived(chartState.layout);
 
-	const MIN_PANE_HEIGHT_PX = 150;
+	const MIN_PANE_HEIGHT_PX = 250;
 	let totalLayoutHeight = $derived(Object.values(layout).reduce((sum, size) => sum + size, 0));
 
-	let chartAreaContainer: HTMLDivElement;
+	// svelte-ignore non_reactive_update
+	let chartAreaContainer: HTMLDivElement | null = null;
 
 	// --- Event Handlers ---
 
@@ -103,7 +105,7 @@
 <svelte:window onkeydown={handleGlobalKeydown} />
 
 <div class="relative flex h-full w-full flex-col p-4 gap-4">
-	<div class="flex-1 min-h-0 overflow-y-auto" bind:this={chartAreaContainer}>
+	<ScrollArea class="flex-1 min-h-0" orientation="vertical" bind:ref={chartAreaContainer}>
         {#if plots.length > 0}
             <div class="flex-1 min-h-0">
                 <div style={`height: ${totalLayoutHeight}px; min-height: 100%;`}>
@@ -157,7 +159,8 @@
                 <p class="mb-4 mt-2 text-sm">Get started by adding a new plot.</p>
             </div>
         {/if}
-	</div>
+	</ScrollArea>
+
 	<div class="absolute z-10 right-6 bottom-6">
 		<SplitButton />
 	</div>

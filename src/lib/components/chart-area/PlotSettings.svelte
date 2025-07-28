@@ -5,16 +5,13 @@
 	import { Label } from '$lib/components/ui/label';
 	import { RadioGroup, RadioGroupItem } from '$lib/components/ui/radio-group';
 	import { Separator } from '$lib/components/ui/separator/index.js';
-	import { Slider } from "$lib/components/ui/slider/index.js";
-	import { onMount } from 'svelte';
+	import { Slider } from '$lib/components/ui/slider/index.js';
 
 	type Props = {
 		plot: PlotConfig;
-		scrollTop?: number;
 	};
 
-	let { plot = $bindable(), scrollTop = $bindable() }: Props = $props();
-	let scrollableDiv: HTMLDivElement;
+	let { plot = $bindable() }: Props = $props();
 
 	const decimationMethods: { value: DecimationMethod; label: string; description: string }[] = [
 		{ value: 'None', label: 'None', description: 'No downsampling. Raw data is rendered.' },
@@ -61,22 +58,9 @@
 		{ value: 10, label: '10s' },
 		{ value: 20, label: '20s' }
 	];
-	onMount(() => {
-		if (scrollableDiv && scrollTop !== undefined) {
-			scrollableDiv.scrollTop = scrollTop;
-		}
-	});
 </script>
 
-<div
-	class="max-h-[50vh] space-y-6 overflow-y-auto p-4"
-	bind:this={scrollableDiv}
-	onscroll={() => {
-		if (scrollableDiv) {
-			scrollTop = scrollableDiv.scrollTop;
-		}
-	}}
->
+<div class="space-y-6 p-4">
 	<div>
 		<div class="flex items-center justify-between">
 			<h4 class="font-medium leading-none">Timeseries Decimation</h4>
@@ -178,6 +162,7 @@
 			</div>
 		</div>
 	</div>
+	<Separator />
 	<div>
 		<div class="flex items-center justify-between">
 			<h4 class="font-medium leading-none">Plot Resolution</h4>

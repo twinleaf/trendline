@@ -15,7 +15,7 @@
 	import { createSvelteTable, FlexRender } from '$lib/components/ui/data-table/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
 	import type { TreeRow } from '$lib/components/chart-area/data-table/column';
-	import { setContext, onMount } from 'svelte';
+	import { setContext } from 'svelte';
 
 	type DataTableProps<TData, TValue> = {
 		columns: ColumnDef<TData, TValue>[];
@@ -23,7 +23,6 @@
 		getSubRows?: (originalRow: TData) => TData[] | undefined;
 		expanded?: ExpandedState;
 		rowSelection?: RowSelectionState;
-		scrollTop?: number;
 	};
 
 	let {
@@ -32,10 +31,8 @@
 		getSubRows,
 		expanded = $bindable(),
 		rowSelection = $bindable(),
-		scrollTop = $bindable()
 	}: DataTableProps<TData, TValue> = $props();
 
-	let scrollableDiv: HTMLDivElement;
 	let sorting = $state<SortingState>([]);
 	let columnVisibility = $state<VisibilityState>({});
 	let columnFilters = $state<ColumnFiltersState>([]);
@@ -67,29 +64,21 @@
 	}
 
 	function canSelectNode(node: TreeRow, primaryRate: number | null): boolean {
-		// If no primary rate is set yet, everything is selectable.
 		if (primaryRate === null) {
 			return true;
 		}
-
-		// For leaf nodes (columns), check their sampling rate.
 		if (node.type === 'column') {
 			return node.samplingRate != null && Math.abs(node.samplingRate - primaryRate) < 1e-6;
 		}
-
-		// For parent nodes (devices/streams), check if ANY child can be selected.
 		if (node.subRows && node.subRows.length > 0) {
 			return node.subRows.some((child) => canSelectNode(child, primaryRate));
 		}
-
 		return false;
 	}
-
 
 	function handleRowClick(row: Row<TData>, event: MouseEvent) {
 		const { shiftKey, ctrlKey, metaKey } = event;
 
-		// --- A. Handle clicks on EXPANDABLE parent nodes (Device/Stream) ---
 		if (row.getCanExpand()) {
 			if (ctrlKey || metaKey) {
 				row.toggleSelected();
@@ -99,12 +88,10 @@
 			return;
 		}
 
-		// --- B. Handle clicks on non-expandable LEAF nodes (Channel) ---
 		if (!row.getCanSelect()) {
 			return;
 		}
 
-		// Handle Shift-click for range selection
 		if (shiftKey && lastSelectedRowId) {
 			const rows = table.getRowModel().rows;
 			const lastIndex = rows.findIndex((r) => r.id === lastSelectedRowId);
@@ -197,38 +184,18 @@
 		tableContext.primarySamplingRate = selectedRates.length > 0 ? selectedRates[0] : null;
 	});
 
-	onMount(() => {
-		if (scrollableDiv && scrollTop !== undefined) {
-			scrollableDiv.scrollTop = scrollTop;
-		}
-	});
 </script>
 
-<div
-	class="h-full rounded-md border overflow-y-auto"
-	bind:this={scrollableDiv}
-	onscroll={() => {
-		if (scrollableDiv) {
-			scrollTop = scrollableDiv.scrollTop;
-		}
-	}}
->
-	<div class="sticky top-0 bg-background z-10">
+<div class="rounded-md border">
+	<div class="sticky top-0 z-10 bg-background">
 		<Table.Root class="w-full table-fixed">
 			<Table.Header class="h-[40px]">
 				{#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
 					<Table.Row>
 						{#each headerGroup.headers as header (header.id)}
-							<Table.Head
-								class="bg-muted/50"
-								colspan={header.colSpan}
-								style="width: {header.getSize()}px;"
-							>
+							<Table.Head class="bg-muted/50" colspan={header.colSpan} style="width: {header.getSize()}px;">
 								{#if !header.isPlaceholder}
-									<FlexRender
-										content={header.column.columnDef.header}
-										context={header.getContext()}
-									/>
+									<FlexRender content={header.column.columnDef.header} context={header.getContext()} />
 								{/if}
 							</Table.Head>
 						{/each}
@@ -243,16 +210,16 @@
 			{#each table.getRowModel().rows as row (row.id)}
 				<Table.Row
 					data-state={row.getIsSelected() && 'selected'}
-					class={row.getCanExpand() || (!row.getCanExpand() && row.getCanSelect()) ? 'cursor-pointer' : ''}
+					class={row.getCanExpand() || (!row.getCanExpand() && row.getCanSelect())
+						? 'cursor-pointer'
+						: ''}
 					onmousedown={(e) => {
-						// Prevent text selection on shift-click
 						if (e.shiftKey) {
 							e.preventDefault();
 						}
 					}}
 					onclick={(e) => {
 						const target = e.target as HTMLElement;
-						// Prevent row click from firing if the click was on the checkbox itself or other interactive elements.
 						if (target.closest('[role="checkbox"], button, a')) {
 							return;
 						}
@@ -260,22 +227,14 @@
 					}}
 				>
 					{#each row.getVisibleCells() as cell (cell.id)}
-						<Table.Cell
-							class={cell.column.id === 'name' ? 'truncate' : ''}
-							style="width: {cell.column.getSize()}px;"
-						>
-							<FlexRender
-								content={cell.column.columnDef.cell}
-								context={cell.getContext()}
-							/>
+						<Table.Cell class={cell.column.id === 'name' ? 'truncate' : ''} style="width: {cell.column.getSize()}px;">
+							<FlexRender content={cell.column.columnDef.cell} context={cell.getContext()} />
 						</Table.Cell>
 					{/each}
 				</Table.Row>
 			{:else}
 				<Table.Row>
-					<Table.Cell colspan={columns.length} class="h-24 text-center">
-						No results.
-					</Table.Cell>
+					<Table.Cell colspan={columns.length} class="h-24 text-center"> No results. </Table.Cell>
 				</Table.Row>
 			{/each}
 		</Table.Body>
