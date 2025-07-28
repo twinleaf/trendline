@@ -55,11 +55,7 @@ export class PlotConfig {
 	rowSelection = $state<RowSelectionState>({});
 	expansion = $state<ExpandedState>({});
 	activeTab = $state<'selection' | 'settings'>('selection');
-	scrollTops = $state<{ selection: number; settings: number }>({
-		selection: 0,
-		settings: 0
-	});
-
+	
 	#manualDecimationMethod = $state<DecimationMethod>('Fpcs');
 	#isDecimationManual = $state(false);
 	windowSeconds = $state<number>(30.0);
