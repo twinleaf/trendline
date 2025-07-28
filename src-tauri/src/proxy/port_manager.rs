@@ -11,7 +11,7 @@ use std::{
     panic,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::menu::MenuItemKind;
 use tauri::{Emitter, Manager, async_runtime};
 use twinleaf::{
@@ -327,7 +327,7 @@ impl PortManager {
             Ok(count) => count,
             Err(_) => return rpc_metas,
         };
-
+    
         for rpc_id in 0..rpc_count {
             if let Ok((meta_bits, name)) = rpc_device.rpc::<u16, (u16, String)>("rpc.listinfo", rpc_id) {
                 let (arg_type, size) = parse_arg_type_and_size(meta_bits);
@@ -335,18 +335,48 @@ impl PortManager {
                     name: name.clone(),
                     size,
                     permissions: parse_permissions_string(meta_bits),
-                    arg_type,
+                    arg_type: arg_type.clone(),
                     readable: (meta_bits & 0x0100) != 0,
                     writable: (meta_bits & 0x0200) != 0,
                     persistent: (meta_bits & 0x0400) != 0,
                     unknown: meta_bits == 0,
                     value: None,
                 };
-
+    
                 if meta.readable {
-                    let result = panic::catch_unwind(AssertUnwindSafe(|| rpc_device.raw_rpc(&name, &[])));
-                    if let Ok(Ok(reply_bytes)) = result {
-                        meta.value = util::bytes_to_json_value(&reply_bytes, &meta.arg_type);
+                    let rpc_result = panic::catch_unwind(AssertUnwindSafe(|| {
+                        match arg_type.as_str() {
+                            "u8" => rpc_device.get::<u8>(&name).map(|v| json!(v)),
+                            "u16" => rpc_device.get::<u16>(&name).map(|v| json!(v)),
+                            "u32" => rpc_device.get::<u32>(&name).map(|v| json!(v)),
+                            "u64" => rpc_device.get::<u64>(&name).map(|v| json!(v)),
+                            "i8" => rpc_device.get::<i8>(&name).map(|v| json!(v)),
+                            "i16" => rpc_device.get::<i16>(&name).map(|v| json!(v)),
+                            "i32" => rpc_device.get::<i32>(&name).map(|v| json!(v)),
+                            "i64" => rpc_device.get::<i64>(&name).map(|v| json!(v)),
+                            "f32" => rpc_device.get::<f32>(&name).map(|v| json!(v)),
+                            "f64" => rpc_device.get::<f64>(&name).map(|v| json!(v)),
+                            "string" => rpc_device.get::<String>(&name).map(|v| json!(v)),
+                            s if s.starts_with("string<") => rpc_device.get::<String>(&name).map(|v| json!(v)),
+                            _ => {
+                                // Fallback to original method for unhandled types
+                                match rpc_device.raw_rpc(&name, &[]) {
+                                    Ok(reply_bytes) => Ok(util::bytes_to_json_value(&reply_bytes, &arg_type).unwrap_or(Value::Null)),
+                                    Err(e) => Err(e),
+                                }
+                            }
+                        }
+                    }));
+    
+                    if let Ok(call_result) = rpc_result {
+                         match call_result {
+                            Ok(value) => meta.value = Some(value),
+                            Err(proxy::RpcError::TypeError) => {
+                                meta.value = Some(Value::Null);
+                            }
+                            Err(_) => {
+                            }
+                        }
                     }
                 }
                 rpc_metas.push(meta);
