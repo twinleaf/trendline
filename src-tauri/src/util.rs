@@ -121,6 +121,10 @@ where
 }
 
 pub fn bytes_to_json_value(reply_bytes: &[u8], rpc_type: &str) -> Option<Value> {
+    if reply_bytes.is_empty() {
+        return Some(json!(null));
+    }
+
     match rpc_type {
         "u8"   => u8::from_reply(reply_bytes).ok().map(|v| json!(v)),
         "u16"  => u16::from_reply(reply_bytes).ok().map(|v| json!(v)),
@@ -136,6 +140,7 @@ pub fn bytes_to_json_value(reply_bytes: &[u8], rpc_type: &str) -> Option<Value> 
         _ => if rpc_type.starts_with("string<") {
             Some(json!(String::from_utf8_lossy(reply_bytes)))
         } else {
+            eprintln!("[Warning]: Unhandled non-empty reply for RPC type '{}'", rpc_type);
             None
         }
     }
