@@ -3,16 +3,17 @@
 	import type { RpcMeta } from '$lib/bindings/RpcMeta';
 	import { Button } from '$lib/components/ui/button';
 	import { ChevronsUpDown, ArrowUp, ArrowDown } from '@lucide/svelte';
+	import { cn } from '$lib/utils';
 
-	let { column, title }: { column: Column<RpcMeta>; title: string } = $props();
-
+	let { column, title, class: className }: { column: Column<RpcMeta>; title: string; class?: string; } =
+			$props();
 	const sorted = $derived(column.getIsSorted());
 </script>
 
 <Button
 	variant="ghost"
 	onclick={() => column.toggleSorting(sorted === 'asc')}
-	class="w-full h-auto p-1 flex items-center justify-between"
+	class={cn('w-full h-auto p-1 flex items-start', className)}
 >
 	{title}
 	{#if sorted === 'desc'}

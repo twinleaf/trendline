@@ -14,10 +14,15 @@ export type RpcTableMeta = {
 
 export const columns: ColumnDef<RpcMeta>[] = [
   { 
-    accessorKey: 'name', 
+    accessorKey: 'name',
+    id: 'name',
     header: ({ column }) => {
-        return renderComponent(DataTableSortHeader, { title: 'Name', column });
-    },
+        return renderComponent(DataTableSortHeader, {
+          title: 'Name',
+          column,
+          class: 'justify-start'
+        });
+		},
     filterFn: fuzzyFilter,
     sortingFn: fuzzySort,
   },
@@ -45,8 +50,12 @@ export const columns: ColumnDef<RpcMeta>[] = [
   { 
     accessorKey: 'permissions', 
     header: ({ column }) => {
-        return renderComponent(DataTableSortHeader, { title: 'Perms', column });
-    },
+			return renderComponent(DataTableSortHeader, {
+				title: 'Perms',
+				column,
+				class: 'justify-center'
+			});
+		},
     enableHiding: true,
     size: 90,
   }

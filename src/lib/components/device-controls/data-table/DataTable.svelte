@@ -19,6 +19,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { ChevronUp, FileType2, UserPen } from '@lucide/svelte';
 	import { cn } from '$lib/utils';
+	import { ScrollArea } from "$lib/components/ui/scroll-area/index.js";
 
 	type DataTableProps = {
 		columns: ColumnDef<TData, TValue>[];
@@ -70,7 +71,7 @@
 	});
 </script>
 
-<div class="rounded-md border h-full overflow-y-auto">
+<ScrollArea class="h-full rounded-md border">
 	<div class="sticky top-0 z-10 bg-background">
 		<div class="flex items-center p-4 border-b gap-4">
 			<Input
@@ -83,31 +84,44 @@
 			<div class="ml-auto flex flex-nowrap items-center gap-4">
 				<ToggleGroup.Root
 					type="multiple"
-					class="flex items-center gap-1"
+					class="flex items-center gap-2"
 					bind:value={toggleState}
 				>
 					<Tooltip.Provider delayDuration={500}>
+						<div>
 						<Tooltip.Root>
 							<Tooltip.Trigger>
-								<ToggleGroup.Item value="header" aria-label="Toggle Header">
-									 <ChevronUp
-                                        class="size-4 transition-transform duration-200"
-                                        style="transform: rotate({isHeaderVisible ? 180 : 0}deg);"
-                                    />
-								</ToggleGroup.Item>
+   								 {#snippet child({ props })}
+									<ToggleGroup.Item
+										{...props}
+										value="header"
+										aria-label="Toggle Header"
+									>
+										<ChevronUp
+											class="size-4 transition-transform duration-200"
+											style="transform: rotate({isHeaderVisible ? 180 : 0}deg);"
+										/>
+									</ToggleGroup.Item>
+								{/snippet}
 							</Tooltip.Trigger>
 							<Tooltip.Content>
 								<p>Toggle Header</p>
 							</Tooltip.Content>
 						</Tooltip.Root>
-
+						</div>
 						{#if !isSmall}
 							<div transition:slide={{ duration: 200, axis: 'x' }}>
 								<Tooltip.Root>
 									<Tooltip.Trigger>
-										<ToggleGroup.Item value="type" aria-label="Toggle Type Column">
+									{#snippet child({ props })}
+										<ToggleGroup.Item
+											{...props}
+											value="type" 
+											aria-label="Toggle Type Column"
+										>
 											<FileType2 class="size-4" />
 										</ToggleGroup.Item>
+										{/snippet}
 									</Tooltip.Trigger>
 									<Tooltip.Content>
 										<p>Toggle Type Column</p>
@@ -120,12 +134,15 @@
 							<div transition:slide={{ duration: 200, axis: 'x' }}>
 								<Tooltip.Root>
 									<Tooltip.Trigger>
-										<ToggleGroup.Item
-											value="perms"
-											aria-label="Toggle Permissions Column"
-										>
-											<UserPen class="size-4" />
-										</ToggleGroup.Item>
+										{#snippet child({ props })}
+											<ToggleGroup.Item
+												{...props}
+												value="perms"
+												aria-label="Toggle Permissions Column"
+											>
+												<UserPen class="size-4" />
+											</ToggleGroup.Item>
+										{/snippet}
 									</Tooltip.Trigger>
 									<Tooltip.Content>
 										<p>Toggle Permissions Column</p>
@@ -141,7 +158,7 @@
 		</div>
 
 		{#if isHeaderVisible}
-			<Table.Root class="w-full table-fixed">
+			<Table.Root class="table-fixed">
 				<Table.Header>
 					{#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
 						<Table.Row>
@@ -150,7 +167,7 @@
 									<Table.Head
 										class={cn('bg-muted/50', {
 											'text-center':
-												header.column.id === 'arg_type' || header.column.id === 'permissions'
+												header.column.id === 'arg_type' || header.column.id === 'permissions',
 										})}
 										style={`width: ${header.getSize()}px`}
 									>
@@ -170,7 +187,7 @@
 		{/if}
 	</div>
 
-	<Table.Root class="w-full table-fixed">
+	<Table.Root class="table-fixed">
 		<Table.Body>
 			{#if table.getRowModel().rows.length}
 				{#each table.getRowModel().rows as row (row.id)}
@@ -178,17 +195,17 @@
 						{#each row.getVisibleCells() as cell (cell.id)}
 							{#if cell.column.id !== 'name_prefix'}
 								<Table.Cell
-                                    class={cn(
-                                        {
-                                            'text-center':
-                                                cell.column.id === 'arg_type' || cell.column.id === 'permissions',
-                                            'truncate': cell.column.id === 'name'
-                                        }
-                                    )}
-                                    style={`width: ${cell.column.getSize()}px`}
-                                >
-                                    <FlexRender content={cell.column.columnDef.cell} context={cell.getContext()} />
-                                </Table.Cell>
+									class={cn(
+										{
+											'text-center':
+												cell.column.id === 'arg_type' || cell.column.id === 'permissions',
+											'truncate': cell.column.id === 'name'
+										}
+									)}
+									style={`width: ${cell.column.getSize()}px`}
+								>
+									<FlexRender content={cell.column.columnDef.cell} context={cell.getContext()} />
+								</Table.Cell>
 							{/if}
 						{/each}
 					</Table.Row>
@@ -202,4 +219,4 @@
 			{/if}
 		</Table.Body>
 	</Table.Root>
-</div>
+</ScrollArea>
