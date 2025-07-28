@@ -10,7 +10,7 @@
 
 	let accordionContainerEl: HTMLDivElement | undefined = $state(undefined);
 	let contentHeight = $state(0);
-	
+
 	let containerWidth = $state(0);
 	let isSmall = $derived(containerWidth < 460);
 
@@ -63,9 +63,7 @@
 	});
 </script>
 
-<div class="w-full h-full flex flex-col space-y-4 rounded-lg border bg-card text-card-foreground p-4">
-	<h3 class="text-lg font-semibold">Device Controls</h3>
-
+<div class="w-full h-full flex flex-col rounded-lg border bg-card text-card-foreground p-4">
 	<div class="flex-1 min-h-0 min-w-0" bind:this={accordionContainerEl}>
 		{#if selectedDevices.length}
 			<Accordion.Root
@@ -76,7 +74,7 @@
 				{#each selectedDevices as device (device.url + device.route)}
 					<Accordion.Item value={device.url + device.route}>
 						<Accordion.Trigger
-							class="flex w-full flex-1 select-none items-center justify-between py-4 text-sm font-medium transition-all hover:underline [&[data-state=open]>svg]:rotate-180"
+							class="flex w-full flex-1 select-none items-center justify-between py-4 px-2 text-sm font-medium transition-all hover:underline [&[data-state=open]>svg]:rotate-180"
 						>
 							<div class="text-left">
 								<p class="font-semibold">{device.meta.name}</p>
@@ -85,12 +83,10 @@
 						</Accordion.Trigger>
 
 						<Accordion.Content
-							class="overflow-hidden data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
+							class="overflow-hidden data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down p-2"
 						>
 							<div class="h-[var(--radix-accordion-content-height)]">
-								<div class="p-2 h-full">
-									<DataTable {columns} data={device.rpcs} {device} {isSmall} />
-								</div>
+								<DataTable {columns} data={device.rpcs} {device} {isSmall} />
 							</div>
 						</Accordion.Content>
 					</Accordion.Item>
