@@ -7,6 +7,7 @@
 	import { cn } from '$lib/utils';
 	import * as Select from '$lib/components/ui/select/index.js';
 	import { tick } from 'svelte';
+	import { chartState } from '$lib/states/chartState.svelte';
 
 	let isCollapsed = $state(false);
 	type PanelId = 'device-controls' | 'stream-monitor' | 'math-channels';
@@ -16,7 +17,6 @@
 		label: string;
 		hotkey: string;
 	}
-
 
 	const panels: Panel[] = [
 		{ value: 'device-controls', label: 'Device Controls', hotkey: '1' },
@@ -46,9 +46,18 @@
 			panelElements[panel.value]?.focus();
 		}
 	}
+
+	function handleGlobalKeydown(event: KeyboardEvent) {
+		if (event.key === ' ') {
+			if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
+				return;
+			event.preventDefault();
+			chartState.togglePause();
+		}
+	}
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
+<svelte:window on:keydown={handleKeydown} on:keydown={handleGlobalKeydown} />
 
 {#snippet deviceControlsSnippet()}
 	<DeviceControls />
@@ -80,57 +89,55 @@
 	>
 		<div
 			class={cn('h-full p-4 transition-all duration-300 ease-in-out', {
-				'opacity-0 -translate-x-4': isCollapsed
+				'opacity-0 -translate-x-4 pointer-events-none': isCollapsed
 			})}
 		>
-			{#if !isCollapsed}
-				<div class="flex h-full flex-col gap-4">
-					<Select.Root type="single" name="panelSelector" bind:value={selectedPanel}>
-						<Select.Trigger class="w-full text-lg font-semibold h-12">
-							<div class="flex items-center justify-between w-full">
-								<span>{triggerContent}</span>
-								<div class="flex items-center gap-2">
-									<kbd
-										class="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100"
-									>
-										{panels.find((p) => p.value === selectedPanel)?.hotkey}
-									</kbd>
-								</div>
+			<div class="flex h-full flex-col gap-4">
+				<Select.Root type="single" name="panelSelector" bind:value={selectedPanel}>
+					<Select.Trigger class="w-full text-lg font-semibold h-12">
+						<div class="flex items-center justify-between w-full">
+							<span>{triggerContent}</span>
+							<div class="flex items-center gap-2">
+								<kbd
+									class="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100"
+								>
+									{panels.find((p) => p.value === selectedPanel)?.hotkey}
+								</kbd>
 							</div>
-						</Select.Trigger>
-						<Select.Content>
-							<Select.Group>
-								<Select.Label>Panels</Select.Label>
-								{#each panels as panel (panel.value)}
-									<Select.Item value={panel.value} label={panel.label}>
-										<div class="flex items-center justify-between w-full">
-											<span>{panel.label}</span>
-											<kbd
-												class="ml-auto inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground"
-											>
-												{panel.hotkey}
-											</kbd>
-										</div>
-									</Select.Item>
-								{/each}
-							</Select.Group>
-						</Select.Content>
-					</Select.Root>
+						</div>
+					</Select.Trigger>
+					<Select.Content>
+						<Select.Group>
+							<Select.Label>Panels</Select.Label>
+							{#each panels as panel (panel.value)}
+								<Select.Item value={panel.value} label={panel.label}>
+									<div class="flex items-center justify-between w-full">
+										<span>{panel.label}</span>
+										<kbd
+											class="ml-auto inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground"
+										>
+											{panel.hotkey}
+										</kbd>
+									</div>
+								</Select.Item>
+							{/each}
+						</Select.Group>
+					</Select.Content>
+				</Select.Root>
 
-					<div class="flex-1 min-h-0 relative">
-						{#each panels as panel (panel.value)}
-							<div
-								bind:this={panelElements[panel.value]}
-								tabindex="-1"
-								class="absolute inset-0 rounded-lg focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
-								style:display={selectedPanel === panel.value ? 'block' : 'none'}
-							>
-								{@render panelContent[panel.value]()}
-							</div>
-						{/each}
-					</div>
+				<div class="flex-1 min-h-0 relative">
+					{#each panels as panel (panel.value)}
+						<div
+							bind:this={panelElements[panel.value]}
+							tabindex="-1"
+							class="absolute inset-0 rounded-lg focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+							style:display={selectedPanel === panel.value ? 'block' : 'none'}
+						>
+							{@render panelContent[panel.value]()}
+						</div>
+					{/each}
 				</div>
-			{/if}
+			</div>
 		</div>
 	</Resizable.Pane>
 	<Resizable.Handle withHandle />
