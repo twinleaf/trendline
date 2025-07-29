@@ -1,10 +1,10 @@
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Instant};
 use crate::state::decimation::{lerp, fpcs, min_max_bucket};
-use crate::shared::{DataColumnId, Point};
+use crate::shared::{DataColumnId, Point, StatisticSet};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use std::thread;
 
@@ -59,11 +59,72 @@ pub struct SessionMeta {
     pub last_device_time: DeviceTime,
 }
 
+#[derive(Clone, Debug)]
+pub struct PersistentStat {
+    pub count: u64,
+    pub mean: f64,
+    m2: f64,
+    sum_of_squares: f64,
+    pub min: f64,
+    pub max: f64,
+}
+
+impl PersistentStat {
+    fn new(first_value: f64) -> Self {
+        Self {
+            count: 1,
+            mean: first_value,
+            m2: 0.0,
+            sum_of_squares: first_value.powi(2),
+            min: first_value,
+            max: first_value,
+        }
+    }
+
+    fn update(&mut self, new_value: f64) {
+        self.count += 1;
+        let delta = new_value - self.mean;
+        self.mean += delta / self.count as f64;
+        let delta2 = new_value - self.mean;
+        self.m2 += delta * delta2;
+        self.sum_of_squares += new_value.powi(2);
+
+        if new_value < self.min { self.min = new_value; }
+        if new_value > self.max { self.max = new_value; }
+    }
+
+    pub fn variance(&self) -> f64 {
+        if self.count < 2 { 0.0 } else { self.m2 / (self.count - 1) as f64 }
+    }
+
+    pub fn stdev(&self) -> f64 {
+        self.variance().sqrt()
+    }
+
+    pub fn rms(&self) -> f64 {
+        if self.count == 0 { 0.0 } else { (self.sum_of_squares / self.count as f64).sqrt() }
+    }
+}
+
+impl From<&PersistentStat> for StatisticSet {
+    fn from(stat: &PersistentStat) -> Self {
+        Self {
+            count: stat.count,
+            mean: stat.mean,
+            min: stat.min,
+            max: stat.max,
+            stdev: stat.stdev(),
+            rms: stat.rms(),
+        }
+    }
+}
+
 // The shared data that needs to be accessed by multiple threads.
 pub struct Inner {
     pub buffers: DashMap<DataColumnId, DashMap<SessionId, Buffer>>,
     pub session_meta: DashMap<DataColumnId, DashMap<SessionId, SessionMeta>>,
     pub offsets_cache: DashMap<DataColumnId, Arc<HashMap<SessionId, TimeOffset>>>,
+    pub persistent_stats: DashMap<DataColumnId, Mutex<PersistentStat>>,
     pub active: DashMap<DataColumnId, ()>,
     pub effective_sampling_rates: DashMap<DataColumnId, f64>,
     pub command_tx: Sender<CaptureCommand>,
@@ -99,6 +160,7 @@ impl CaptureState {
             offsets_cache: DashMap::new(),
             active: DashMap::new(),
             effective_sampling_rates: DashMap::new(),
+            persistent_stats: DashMap::new(),
             command_tx,
         });
 
@@ -270,6 +332,13 @@ impl CaptureState {
             match command {
                 CaptureCommand::Insert { key, data, session_id, instant } => {
                     if !inner.active.contains_key(&key) { continue; }
+
+                    inner.persistent_stats
+                        .entry(key.clone())
+                        .or_insert_with(|| Mutex::new(PersistentStat::new(data.y)))
+                        .lock()
+                        .unwrap()
+                        .update(data.y);
 
                     let device_key = key.device_key();
                     let meta_map = inner.session_meta.entry(device_key).or_default();

@@ -1,9 +1,11 @@
 use crate::state::capture::{CaptureState};
-use crate::shared::{DecimationMethod, DetrendMethod, PlotData, PortState, DataColumnId, Point};
+use crate::shared::{DataColumnId, DecimationMethod, DetrendMethod, PlotData, Point, PortState, StatisticSet, StreamStatistics};
 use crate::state::detrend::{remove_quadratic_trend, remove_linear_trend};
+use crate::util::calculate_batch_stats;
 use welch_sde::{Build, SpectralDensity};
 use tauri::State;
 use twinleaf::tio::proto::DeviceRoute;
+use std::collections::HashMap;
 use std::sync::Arc;
 use crate::state::proxy_register::ProxyRegister;
 
@@ -156,6 +158,57 @@ pub fn get_interpolated_values_at_time(
     capture: State<CaptureState>,
 ) -> Vec<Option<f64>> {
     capture.get_interpolated_values_at_time(&keys, time)
+}
+
+#[tauri::command]
+pub fn get_stream_statistics(
+    keys: Vec<DataColumnId>,
+    window_seconds: f64,
+    capture: State<CaptureState>,
+) -> Result<HashMap<String, StreamStatistics>, String> {
+    if keys.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let Some(max_time) = capture.get_latest_unified_timestamp(&keys) else {
+        return Ok(HashMap::new());
+    };
+    let min_time = max_time - window_seconds;
+
+    let mut stats_map = HashMap::new();
+
+    for key in keys {
+        let stitched_series_vec = capture.get_data_across_sessions_for_keys(&[key.clone()], min_time, max_time);
+
+        let (window_stats, latest_value) = if let Some(points) = stitched_series_vec.get(0) {
+            if points.is_empty() {
+                (StatisticSet::default(), 0.0)
+            } else {
+                (calculate_batch_stats(points), points.last().unwrap().y)
+            }
+        } else {
+            (StatisticSet::default(), 0.0)
+        };
+
+        let persistent_stats = if let Some(stat_mutex) = capture.inner.persistent_stats.get(&key) {
+            let stat = stat_mutex.lock().unwrap();
+            StatisticSet::from(&*stat)
+        } else {
+            StatisticSet::default()
+        };
+
+        let stats = StreamStatistics {
+            latest_value,
+            persistent: persistent_stats,
+            window: window_stats,
+        };
+
+        let key_str = serde_json::to_string(&key).map_err(|e| format!("Failed to serialize DataColumnId: {}", e))?;
+
+        stats_map.insert(key_str, stats);
+    }
+
+    Ok(stats_map)
 }
 
 #[tauri::command]

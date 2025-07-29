@@ -7,7 +7,19 @@ use ts_rs::TS;
 use num_enum::{FromPrimitive, IntoPrimitive};
 use crate::util;
 
-// ─────────────────────────── 1. Port state ──────────────────────────────
+use twinleaf::tio::proto::meta::{
+    ColumnMetadata as LibColumnMeta, DeviceMetadata as LibDeviceMeta,
+    StreamMetadata as LibStreamMeta, SegmentMetadata as LibSegmentMeta,
+    MetadataEpoch as LibMetadataEpoch, MetadataFilter as LibMetadataFilter,
+};
+
+use twinleaf::tio::proto::rpc::{
+    RpcErrorCode as LibRpcErrorCode, RpcErrorPayload as LibRpcErrorPayload
+};
+
+use twinleaf::tio::proxy::{PortError, RpcError as LibProxyError};
+
+// FSM States -------------------------------------------------------------
 
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
@@ -20,21 +32,6 @@ pub enum PortState {
     Disconnected,
     Error(String),
 }
-
-// ───────────────────── 2.  Metadata mirror structs ──────────────────────
-//
-
-use twinleaf::tio::proto::meta::{
-    ColumnMetadata as LibColumnMeta, DeviceMetadata as LibDeviceMeta,
-    StreamMetadata as LibStreamMeta, SegmentMetadata as LibSegmentMeta,
-    MetadataEpoch as LibMetadataEpoch, MetadataFilter as LibMetadataFilter,
-};
-
-use twinleaf::tio::proto::rpc::{
-    RpcErrorCode as LibRpcErrorCode, RpcErrorPayload as LibRpcErrorPayload
-};
-
-use twinleaf::tio::proxy::{PortError, RpcError as LibProxyError};
 
 // Device -----------------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq, Default)]
@@ -281,7 +278,7 @@ impl From<LibProxyError> for RpcError {
     }
 }
 
-// --- Enums ---
+// Misc. Metadata -------------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub enum MetadataEpoch {
@@ -319,8 +316,7 @@ impl From<LibMetadataFilter> for MetadataFilter {
 
 
 
-// ───────────────────── 3.  UI view-model structs ────────────────────────
-
+// Frontend structs ----------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct UiStream {
@@ -341,9 +337,28 @@ pub struct UiDevice {
     pub rpcs: Vec<RpcMeta>,
 }
 
-// ───────────────────────── 4.  PlotData slice ───────────────────────────
+#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum DecimationMethod {
+    #[default]
+    None,
+    Fpcs,
+    MinMax,
+}
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, TS)]
+#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum DetrendMethod {
+    #[default]
+    None,      // Only remove the mean (DC offset)
+    Linear,    // Remove a linear trend (y = mt + c)
+    Quadratic, // Remove a quadratic trend (y = at^2 + bt + c)
+}
+
+
+
+// Plot Structs -----------------------------------------------------------------
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct DataColumnId {
     pub port_url: String,
@@ -402,22 +417,21 @@ impl Point {
     }
 }
 
-
-#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
+#[derive(Clone, Debug, Serialize, TS, Default, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
-pub enum DecimationMethod {
-    #[default]
-    None,
-    Fpcs,
-    MinMax,
+pub struct StatisticSet {
+    pub count: u64,
+    pub mean: f64,
+    pub min: f64,
+    pub max: f64,
+    pub stdev: f64,
+    pub rms: f64,
 }
 
-
-#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
+#[derive(Clone, Debug, Serialize, TS, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
-pub enum DetrendMethod {
-    #[default]
-    None,      // Only remove the mean (DC offset)
-    Linear,    // Remove a linear trend (y = mt + c)
-    Quadratic, // Remove a quadratic trend (y = at^2 + bt + c)
+pub struct StreamStatistics {
+    pub latest_value: f64,
+    pub persistent: StatisticSet,
+    pub window: StatisticSet,
 }

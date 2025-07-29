@@ -6,6 +6,8 @@ use twinleaf::tio::proto::DeviceRoute;
 use twinleaf::tio::util::TioRpcReplyable;
 use serde_json::{json, Value};
 
+use crate::shared::{Point, StatisticSet};
+
 pub fn is_process_running(exe_name: &str) -> bool {
     let mut sys = System::new_all();
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
@@ -208,4 +210,42 @@ pub fn parse_permissions_string(meta_bits: u16) -> String {
         if (meta_bits & 0x0200) != 0 { "W" } else { "-" }, // writable
         if (meta_bits & 0x0400) != 0 { "P" } else { "-" }  // persistent
     )
+}
+
+pub fn calculate_batch_stats(points: &[Point]) -> StatisticSet {
+    if points.is_empty() {
+        return StatisticSet::default();
+    }
+
+    let count = points.len() as u64;
+    let values: Vec<f64> = points.iter().map(|p| p.y).collect();
+
+    let sum: f64 = values.iter().sum();
+    let mean = sum / count as f64;
+
+    let mut min = values[0];
+    let mut max = values[0];
+    for &value in values.iter() {
+        if value < min { min = value; }
+        if value > max { max = value; }
+    }
+
+    let variance = if count > 1 {
+        values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / ((count - 1) as f64)
+    } else {
+        0.0
+    };
+    let stdev = variance.sqrt();
+
+    let sum_sq: f64 = values.iter().map(|v| v.powi(2)).sum();
+    let rms = (sum_sq / count as f64).sqrt();
+
+    StatisticSet {
+        count,
+        mean,
+        min,
+        max,
+        stdev,
+        rms,
+    }
 }
