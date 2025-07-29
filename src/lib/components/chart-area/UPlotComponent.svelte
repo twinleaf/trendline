@@ -2,6 +2,7 @@
 	import uPlot from 'uplot';
 	import 'uplot/dist/uPlot.min.css';
 	import { invoke } from '@tauri-apps/api/core';
+	import { chartState } from '$lib/states/chartState.svelte';
 	import type { PlotConfig } from '$lib/states/chartState.svelte';
 	import type { PlotData } from '$lib/bindings/PlotData';
 	import type { PortState } from '$lib/bindings/PortState';
@@ -22,7 +23,7 @@
 	const options = $derived(plot.uPlotOptions);
 	const seriesDataKeys = $derived(plot.series.map((s) => s.dataKey));
 	const isFFT = $derived(plot.viewType === 'fft');
-	const isPaused = $derived(plot.isPaused);
+	const isEffectivelyPaused = $derived(chartState.isPaused || plot.isPaused);
 	const isStreaming = $derived(connectionState === 'Streaming');
 
 	// --- Component State ---
@@ -142,7 +143,7 @@
 		}
 		async function mainLoop() {
 			if (isLoopRunning) {
-				if (!isPaused && !isFetching && isStreaming) {
+				if (!isEffectivelyPaused && !isFetching && isStreaming) {
 					isFetching = true;
 					await fetchData();
 					isFetching = false;

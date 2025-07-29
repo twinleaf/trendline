@@ -159,7 +159,54 @@
 			columnFilters = typeof updater === 'function' ? updater(columnFilters) : updater;
 		},
 		onRowSelectionChange: (updater) => {
-			rowSelection = typeof updater === 'function' ? updater(rowSelection ?? {}) : updater;
+			const newSelection = typeof updater === 'function' ? updater(rowSelection ?? {}) : updater;
+			const rowsById = table.getCoreRowModel().rowsById;
+
+			const selectedLeafNodes = Object.keys(newSelection)
+				.map((id) => rowsById[id])
+				.filter((row) => row && !row.getCanExpand())
+				.map((row) => row.original as TreeRow);
+
+			if (selectedLeafNodes.length === 0) {
+				rowSelection = {};
+				return;
+			}
+
+			const firstLeafWithRate = selectedLeafNodes.find((node) => node.samplingRate != null);
+			const constrainingRate = firstLeafWithRate?.samplingRate ?? null;
+
+			if (constrainingRate === null) {
+				rowSelection = {};
+				return;
+			}
+
+			const validLeafIds = new Set<string>(
+				selectedLeafNodes
+					.filter(
+						(node) =>
+							node.samplingRate != null &&
+							Math.abs(node.samplingRate - constrainingRate) < 1e-6
+					)
+					.map((node) => node.id)
+			);
+
+			const consistentSelection: RowSelectionState = {};
+			const parentIdsToSelect = new Set<string>();
+
+			validLeafIds.forEach((leafId) => {
+				consistentSelection[leafId] = true;
+				let parent = rowsById[leafId]?.getParentRow();
+				while (parent) {
+					parentIdsToSelect.add(parent.id);
+					parent = parent.getParentRow();
+				}
+			});
+
+			parentIdsToSelect.forEach((parentId) => {
+				consistentSelection[parentId] = true;
+			});
+
+			rowSelection = consistentSelection;
 		},
 		onSortingChange: (updater) => {
 			sorting = typeof updater === 'function' ? updater(sorting) : updater;

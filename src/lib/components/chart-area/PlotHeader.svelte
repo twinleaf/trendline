@@ -5,6 +5,7 @@
 	import { Button } from '$lib/components/ui/button/';
 	import { Toggle } from '$lib/components/ui/toggle/';
 	import { Play, Pause, Trash2, ChartLine, ChartColumn } from '@lucide/svelte';
+	import { chartState } from '$lib/states/chartState.svelte';
 
 	type Props = {
 		plot: PlotConfig;
@@ -13,6 +14,8 @@
 	};
 
 	let { plot = $bindable(), treeData, onRemove }: Props = $props();
+
+	const isEffectivelyPaused = $derived(chartState.isPaused || plot.isPaused);
 </script>
 
 <div class="flex justify-between items-center">
@@ -27,13 +30,13 @@
 		<Button
 			variant="ghost"
 			size="icon"
-			aria-label={plot.isPaused ? 'Play chart' : 'Pause chart'}
+			aria-label={isEffectivelyPaused ? 'Play chart' : 'Pause chart'}
 			onclick={(e) => {
 				e.stopPropagation();
 				plot.isPaused = !plot.isPaused;
 			}}
 		>
-			{#if plot.isPaused}
+			{#if isEffectivelyPaused}
 				<Play class="size-5" />
 			{:else}
 				<Pause class="size-5" />

@@ -41,7 +41,7 @@ export const columns: ColumnDef<TreeRow>[] = [
 		id: 'name',
 		header: 'Name',
 		cell: ({ row }) => renderComponent(TreeNodeCell, { row }),
-		size: 350
+		size: 200
 	},
 	{
 		accessorKey: 'units',
