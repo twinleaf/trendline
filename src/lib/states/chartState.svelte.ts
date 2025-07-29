@@ -6,7 +6,6 @@ import type { RowSelectionState } from '@tanstack/table-core';
 import type { ExpandedState } from '@tanstack/table-core';
 import { untrack } from 'svelte';
 
-
 export type ChartLayout = 'carousel' | 'vertical' | 'horizontal';
 export type StreamLayout = 'grouped' | 'vertical' | 'horizontal';
 
@@ -55,7 +54,7 @@ export class PlotConfig {
 	rowSelection = $state<RowSelectionState>({});
 	expansion = $state<ExpandedState>({});
 	activeTab = $state<'selection' | 'settings'>('selection');
-	
+
 	#manualDecimationMethod = $state<DecimationMethod>('Fpcs');
 	#isDecimationManual = $state(false);
 	windowSeconds = $state<number>(30.0);
@@ -292,7 +291,8 @@ class ChartState {
 	layoutMode = $state<'auto' | 'manual'>('auto');
 	containerHeight = $state(0);
 	selectedPlotId = $state<string | null>(null);
-    manualLayout = $state<Record<string, number>>({});
+	manualLayout = $state<Record<string, number>>({});
+	isPaused = $state(false);
 
 	layout = $derived.by(() => {
 		if (this.layoutMode === 'manual') {
@@ -338,6 +338,29 @@ class ChartState {
 		this.plots.push(newPlot);
 	}
 
+	addPlotFromStream(dataKey: DataColumnId, streamName: string) {
+		const selectionKey = JSON.stringify(dataKey);
+
+		const deviceId = `${dataKey.port_url}:${dataKey.device_route}`;
+		const streamId = `${deviceId}:${dataKey.stream_id}`;
+		const initialExpansion: ExpandedState = {
+			[deviceId]: true,
+			[streamId]: true
+		};
+
+		const newPlot = new PlotConfig(
+			`${streamName} Timeseries`,
+			{ [selectionKey]: true },
+			initialExpansion
+		);
+
+		if (this.layoutMode === 'manual') {
+			this.manualLayout[newPlot.id] = DEFAULT_PLOT_HEIGHT;
+		}
+
+		this.plots.push(newPlot);
+	}
+
 	removePlot(plotId: string) {
 		if (this.plots.length === 1) {
 			this.deleteAllPlots();
@@ -354,10 +377,9 @@ class ChartState {
 		this.layoutMode = 'auto';
 	}
 
-    rebalancePlots() {
+	rebalancePlots() {
 		this.layoutMode = 'auto';
 	}
-
 
 	switchToManualMode() {
 		if (this.layoutMode === 'manual') return;
@@ -366,36 +388,24 @@ class ChartState {
 		this.layoutMode = 'manual';
 	}
 
-
 	updateLayoutFromManualResize(percentages: number[]) {
-        const currentPlots = untrack(() => this.plots);
-        if (this.layoutMode !== 'manual' || percentages.length !== currentPlots.length) return;
+		const currentPlots = untrack(() => this.plots);
+		if (this.layoutMode !== 'manual' || percentages.length !== currentPlots.length) return;
 
-        const totalPixelHeight = Object.values(untrack(() => this.layout)).reduce((sum, h) => sum + h, 0);
-        if (totalPixelHeight === 0) return;
+		const totalPixelHeight = Object.values(untrack(() => this.layout)).reduce((sum, h) => sum + h, 0);
+		if (totalPixelHeight === 0) return;
 
-        const newLayout: Record<string, number> = {};
-        currentPlots.forEach((plot, i) => {
-            newLayout[plot.id] = (totalPixelHeight * percentages[i]) / 100;
-        });
+		const newLayout: Record<string, number> = {};
+		currentPlots.forEach((plot, i) => {
+			newLayout[plot.id] = (totalPixelHeight * percentages[i]) / 100;
+		});
 
-        this.manualLayout = newLayout;
-    }
-
+		this.manualLayout = newLayout;
+	}
+	
 	togglePause() {
-		if (this.selectedPlotId) {
-			const plot = this.plots.find((p) => p.id === this.selectedPlotId);
-			if (plot) {
-				plot.isPaused = !plot.isPaused;
-			}
-		} else {
-			const newPausedState = !this.plots.every(p => p.isPaused);
-			for (const plot of this.plots) {
-				plot.isPaused = newPausedState;
-			}
-		}
+		this.isPaused = !this.isPaused;
 	}
 }
-
 
 export const chartState = new ChartState();

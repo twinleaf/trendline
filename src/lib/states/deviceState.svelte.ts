@@ -3,6 +3,7 @@ import type { PortState } from '$lib/bindings/PortState';
 import type { UiDevice } from '$lib/bindings/UiDevice';
 import { SvelteMap } from 'svelte/reactivity';
 import { invoke } from '@tauri-apps/api/core';
+import { sortUiDevicesByRoute } from '$lib/utils';
 
 type DeviceTreeItem = UiDevice & { children: UiDevice[] };
 
@@ -22,8 +23,6 @@ class DeviceState {
 
 		listen<[string, PortState]>('port-state-changed', ({ payload: [url, newState] }) => {
 			this.#setPortState(url, newState);
-
-			// If a port becomes Streaming, set its default child selections.
 			if (newState === 'Streaming') {
 				this.#setDefaultChildrenForPort(url);
 			}
@@ -37,73 +36,65 @@ class DeviceState {
 
 			const entry = this.#devicesMap.get(url) ?? { state: new_devices[0].state, devices: [] };
 
+			new_devices.sort(sortUiDevicesByRoute);
+
 			const updatedEntry = { ...entry, devices: new_devices };
 			this.#devicesMap.set(url, updatedEntry);
-
 		});
-		
+
 		listen<string>('device-removed', ({ payload: url }) => this.#removeDevice(url));
 
 		listen<UiDevice>('device-metadata-updated', ({ payload: updatedDevice }) => {
-			console.log(`[DeviceState] Metadata updated for device: ${updatedDevice.meta.name} on route ${updatedDevice.route}`);
+			console.log(
+				`[DeviceState] Metadata updated for device: ${updatedDevice.meta.name} on route ${updatedDevice.route}`
+			);
 			const portUrl = updatedDevice.url;
 			const portEntry = this.#devicesMap.get(portUrl);
 
-			if (!portEntry) {
-				console.warn(`[DeviceState] Received metadata update for a device on an unknown port: ${portUrl}`);
-				return;
+			if (!portEntry) return;
+
+			const deviceIndex = portEntry.devices.findIndex((d) => d.route === updatedDevice.route);
+
+			if (deviceIndex > -1) {
+				portEntry.devices[deviceIndex] = updatedDevice;
+				this.#devicesMap.set(portUrl, { ...portEntry });
 			}
-            
-			const deviceIndex = portEntry.devices.findIndex(d => d.route === updatedDevice.route);
-
-            if (deviceIndex > -1) {
-                portEntry.devices[deviceIndex] = updatedDevice;
-
-                this.#devicesMap.set(portUrl, { ...portEntry });
-            } else {
-                console.warn(`[DeviceState] Could not find device with route ${updatedDevice.route} to update.`);
-            }
 		});
 	}
 
 	 async #initializeState() {
-        try {
-            const allCurrentDevices = await invoke<UiDevice[]>('get_all_devices');
-            if (allCurrentDevices.length === 0) {
-                console.log(`[DeviceState] Initial fetch found no connected devices.`);
-                return;
-            }
-            console.log(`[DeviceState] Initializing with ${allCurrentDevices.length} total devices.`);
+		try {
+			const allCurrentDevices = await invoke<UiDevice[]>('get_all_devices');
+			if (allCurrentDevices.length === 0) return;
 
-            const groupedByPort = new Map<string, UiDevice[]>();
-            for (const device of allCurrentDevices) {
-                if (!groupedByPort.has(device.url)) {
-                    groupedByPort.set(device.url, []);
-                }
-                groupedByPort.get(device.url)!.push(device);
-            }
+			const groupedByPort = new Map<string, UiDevice[]>();
+			for (const device of allCurrentDevices) {
+				if (!groupedByPort.has(device.url)) {
+					groupedByPort.set(device.url, []);
+				}
+				groupedByPort.get(device.url)!.push(device);
+			}
 
-            for (const [url, devicesForPort] of groupedByPort.entries()) {
-                try {
-                    const currentState = await invoke<PortState>('get_port_state', { portUrl: url });
+			for (const [url, devicesForPort] of groupedByPort.entries()) {
+				try {
+					const currentState = await invoke<PortState>('get_port_state', { portUrl: url });
 
-                    this.#devicesMap.set(url, { state: currentState, devices: devicesForPort });
-                    console.log(`[DeviceState] Hydrated port ${url} with state: ${JSON.stringify(currentState)}`);
+					devicesForPort.sort(sortUiDevicesByRoute);
+
+					this.#devicesMap.set(url, { state: currentState, devices: devicesForPort });
 					if (currentState === 'Streaming') {
 						this.#setDefaultChildrenForPort(url);
 					}
-
-                } catch (e) {
-                    console.error(`[DeviceState] Failed to get real-time state for port ${url}. Using fallback.`, e);
-                    const fallbackState = devicesForPort[0]?.state ?? 'Disconnected';
-                    this.#devicesMap.set(url, { state: fallbackState, devices: devicesForPort });
-                }
-            }
-        } catch (e) {
-            console.error('Failed to get initial device list from backend:', e);
-        }
-    }
-
+				} catch (e) {
+					const fallbackState = devicesForPort[0]?.state ?? 'Disconnected';
+					devicesForPort.sort(sortUiDevicesByRoute);
+					this.#devicesMap.set(url, { state: fallbackState, devices: devicesForPort });
+				}
+			}
+		} catch (e) {
+			console.error('Failed to get initial device list from backend:', e);
+		}
+	}
 
 	#setPortState(url: string, state: PortState) {
 		const entry = this.#devicesMap.get(url) ?? { state, devices: [] };
@@ -174,31 +165,12 @@ class DeviceState {
 				out.push(placeholderDevice);
 			}
 			else if (parent) {
-                const children = devices
-                    .filter((d) => d.route !== '/' && d.route !== '')
-                    .sort((a, b) => {
-                        const segmentsA = a.route.split('/').map(s => parseInt(s, 10));
-                        const segmentsB = b.route.split('/').map(s => parseInt(s, 10));
-
-                        if (segmentsA.some(isNaN) || segmentsB.some(isNaN)) {
-                            return a.route.localeCompare(b.route);
-                        }
-
-                        const minLength = Math.min(segmentsA.length, segmentsB.length);
-                        for (let i = 0; i < minLength; i++) {
-                            const diff = segmentsA[i] - segmentsB[i];
-                            if (diff !== 0) {
-                                return diff;
-                            }
-                        }
-
-                        return segmentsA.length - segmentsB.length;
-                    });
-                out.push({ ...parent, children });
-            }
-        }
-        return out.sort((a, b) => a.url.localeCompare(b.url));
-    });
+				const children = devices.filter((d) => d.route !== '/' && d.route !== '');
+				out.push({ ...parent, children });
+			}
+		}
+		return out.sort((a, b) => a.url.localeCompare(b.url));
+	});
 
 	getPort(url: string) {
 		return this.#devicesMap.get(url);
@@ -212,32 +184,20 @@ class DeviceState {
     }
 
     selectedDevices = $derived.by(() => {
-        const sel = this.selection;
-        if (!sel) return [];
+		const sel = this.selection;
+		if (!sel) return [];
 
-        const portData = this.#devicesMap.get(sel.portUrl);
-        if (!portData) return [];
+		const portData = this.#devicesMap.get(sel.portUrl);
+		if (!portData) return [];
 
-        const filteredDevices = portData.devices.filter(d => {
-            const isParent = d.route === '/' || d.route === '';
-            const isSelectedChild = sel.childrenRoutes.includes(d.route);
-            return isParent || isSelectedChild;
-        });
+		const filteredDevices = portData.devices.filter((d) => {
+			const isParent = d.route === '/' || d.route === '';
+			const isSelectedChild = sel.childrenRoutes.includes(d.route);
+			return isParent || isSelectedChild;
+		});
 
-        return filteredDevices.sort((a, b) => {
-            const routeA = a.route;
-            const routeB = b.route;
-
-            const isRootA = routeA === '/' || routeA === '';
-            if (isRootA) return -1;
-            const isRootB = routeB === '/' || routeB === '';
-            if (isRootB) return 1;
-
-            const numA = parseInt(routeA.slice(1), 10);
-            const numB = parseInt(routeB.slice(1), 10);
-            return numA - numB;
-        });
-    });
+		return filteredDevices;
+	});
 
 	selectedPortState = $derived.by((): PortState | null => {
 		const sel = this.selection;
