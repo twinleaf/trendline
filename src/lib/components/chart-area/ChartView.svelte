@@ -97,9 +97,6 @@
 			resizeObserver.disconnect();
 		};
 	});
-
-    $inspect(chartState.layoutMode, chartState.containerHeight);
-
 </script>
 
 <svelte:window onkeydown={handleGlobalKeydown} />

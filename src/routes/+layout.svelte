@@ -14,7 +14,6 @@
 	onMount(() => {
         uiState.open('discovery');
 	});
-	$inspect(uiState.dialog);
 </script>
 
 <div class="flex h-screen flex-col gap-1 p-4 bg-[#0c1c0d]">
