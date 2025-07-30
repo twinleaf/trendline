@@ -28,8 +28,9 @@
 
 	// --- Component State ---
 	let chartContainer: HTMLDivElement;
-	let uplot: uPlot | undefined;
-	let plotDimensions = $state({ width: 0, height: 0 });
+	let uplot = $state.raw<uPlot | undefined>(undefined);
+	let plotDimensions = $state.raw({ width: 0, height: 0 });
+	let latestPlotData = $state.raw<PlotData | null>(null); // Shared state for loops
 
 	// --- State for the custom legend ---
 	let legendState = $state({
@@ -76,20 +77,25 @@
 		}
 	});
 
-	// --- Loop Controller Effect ---
+	// --- Polling Effect (fetches data on an interval) ---
 	$effect(() => {
-		const isReady = seriesDataKeys.length > 0 && !!uplot && uplotDataBuffers.length > 0;
-		if (!isReady) {
-			uplot?.setData([[]]);
-			return;
-		}
-		let animationFrameId: number;
-		let isLoopRunning = true;
-    	let isFetching = false;
-		async function fetchData() {
+		const isReadyToPoll = seriesDataKeys.length > 0;
+		if (!isReadyToPoll) return;
+
+		let isFetching = false;
+		const POLLING_INTERVAL_MS = 16; // 10 Hz, adjust as needed
+
+		const intervalId = setInterval(async () => {
+			if (isEffectivelyPaused || !isStreaming || isFetching) {
+				return;
+			}
+
+			isFetching = true;
 			try {
 				const command = isFFT ? 'get_latest_fft_data' : 'get_latest_plot_data';
-				const requiredPoints = Math.round(plotDimensions.width * (plot.resolutionMultiplier / 100.0));
+				const requiredPoints = Math.round(
+					plotDimensions.width * (plot.resolutionMultiplier / 100.0)
+				);
 				const args = isFFT
 					? {
 							keys: seriesDataKeys,
@@ -102,60 +108,60 @@
 							numPoints: requiredPoints,
 							decimation: plot.decimationMethod
 						};
-				const result = await invoke<PlotData>(command, args);
-				plot.hasData = result.timestamps.length > 0;
-				if (result.timestamps.length > 0) {
-					if (uplotDataBuffers[0].length < result.timestamps.length) {
-						console.warn('Buffer too small, skipping frame.');
-						return;
-					}
-					const absoluteTimestamps = isFFT ? result.timestamps.slice(1) : result.timestamps;
-					const finalDataLength = absoluteTimestamps.length;
-					const latestAbsTimestamp = absoluteTimestamps[finalDataLength - 1];
-					latestTimestamp = latestAbsTimestamp;
-					if (!isFFT) {
-						uplot!.setScale('x', {
-							min: -plot.windowSeconds,
-							max: 0
-						});
-						const relativeXValues = uplotDataBuffers[0];
-						for (let i = 0; i < finalDataLength; i++) {
-							relativeXValues[i] = absoluteTimestamps[i] - latestAbsTimestamp;
-						}
-					} else {
-						uplotDataBuffers[0].set(absoluteTimestamps);
-					}
-					result.series_data.forEach((series, i) => {
-						if (uplotDataBuffers[i + 1]) {
-							const finalSeries = isFFT ? series.slice(1) : series;
-							uplotDataBuffers[i + 1].set(finalSeries);
-						}
-					});
-					const finalDataViews = uplotDataBuffers.map((buffer) =>
-						buffer.subarray(0, finalDataLength)
-					);
-					uplot!.setData(finalDataViews, isFFT);
-				}
+				latestPlotData = await invoke<PlotData>(command, args);
 			} catch (e) {
 				console.error(`Failed to fetch plot data for ${plot.viewType} view:`, e);
-				plot.hasData = false;
+			} finally {
+				isFetching = false;
 			}
+		}, POLLING_INTERVAL_MS);
+
+		return () => clearInterval(intervalId);
+	});
+
+	// --- Data-Driven Render Trigger ---
+	$effect(() => {
+		const dataToRender = latestPlotData;
+		if (!dataToRender || dataToRender.timestamps.length === 0 || !uplot) {
+			return;
 		}
-		async function mainLoop() {
-			if (isLoopRunning) {
-				if (!isEffectivelyPaused && !isFetching && isStreaming) {
-					isFetching = true;
-					await fetchData();
-					isFetching = false;
-				}
-				animationFrameId = requestAnimationFrame(mainLoop);
+
+		latestPlotData = null;
+		plot.hasData = true;
+
+		if (uplotDataBuffers.length === 0 || uplotDataBuffers[0].length < dataToRender.timestamps.length) {
+			console.warn('Buffer not ready or too small, skipping frame.');
+			return;
+		}
+
+		const absoluteTimestamps = isFFT
+			? dataToRender.timestamps.slice(1)
+			: dataToRender.timestamps;
+		const finalDataLength = absoluteTimestamps.length;
+		const latestAbsTimestamp = absoluteTimestamps[finalDataLength - 1];
+		latestTimestamp = latestAbsTimestamp;
+
+		if (!isFFT) {
+			uplot.setScale('x', { min: -plot.windowSeconds, max: 0 });
+			const relativeXValues = uplotDataBuffers[0];
+			for (let i = 0; i < finalDataLength; i++) {
+				relativeXValues[i] = absoluteTimestamps[i] - latestAbsTimestamp;
 			}
+		} else {
+			uplotDataBuffers[0].set(absoluteTimestamps);
 		}
-		mainLoop();
-		return () => {
-			isLoopRunning = false;
-			cancelAnimationFrame(animationFrameId);
-		};
+
+		dataToRender.series_data.forEach((series, i) => {
+			if (uplotDataBuffers[i + 1]) {
+				const finalSeries = isFFT ? series.slice(1) : series;
+				uplotDataBuffers[i + 1].set(finalSeries);
+			}
+		});
+
+		const finalDataViews = uplotDataBuffers.map((buffer) =>
+			buffer.subarray(0, finalDataLength)
+		);
+		uplot.setData(finalDataViews, isFFT);
 	});
 
 	// --- Effect to fetch interpolated data for the legend via IPC ---
@@ -206,7 +212,7 @@
 
 					if (isFFT) {
 						legendState.frequency = u.data[0][idx];
-   						legendState.values = u.data.slice(1).map(seriesData => seriesData[idx] ?? null);
+						legendState.values = u.data.slice(1).map((seriesData) => seriesData[idx] ?? null);
 						legendState.relativeTime = null;
 					} else {
 						legendState.relativeTime = u.posToVal(left, 'x');
