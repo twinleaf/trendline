@@ -23,7 +23,7 @@ This document outlines the current bugs, desired features, and code quality impr
 
 # #Features
 
-[ ] Scalar Data Viewer: Implement exponential moving average and a boxed display for scalar values
+[x] Scalar Data Viewer: Implement exponential moving average and a boxed display for scalar values
 
 [ ] Device Selector UI: Implement the pop-up modal for device selection, triggered from the "Change Device" menu item.
 
