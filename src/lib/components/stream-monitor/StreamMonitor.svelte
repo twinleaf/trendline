@@ -224,7 +224,7 @@
 					</Button>
 				{/snippet}
 			</Popover.Trigger>
-			<Popover.Content class="w-[400px] p-0" side="bottom" align="end">
+			<Popover.Content class="w-[500px] p-0" side="bottom" align="end">
 				<div class="p-2">
 					<h3 class="mb-2 px-2 font-semibold">Channel Selection</h3>
 					<ScrollArea class="h-full">

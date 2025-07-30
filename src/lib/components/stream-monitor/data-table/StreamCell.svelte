@@ -3,7 +3,6 @@
 	import type { StreamStatistics } from '$lib/bindings/StreamStatistics';
 	import { chartState } from '$lib/states/chartState.svelte';
 	import { invoke } from '@tauri-apps/api/core';
-	import { untrack } from 'svelte';
 	import * as Collapsible from '$lib/components/ui/collapsible/index.js';
 	import { ChevronDown, Eraser } from '@lucide/svelte';
 	import NameCell from './NameCell.svelte';
@@ -35,6 +34,10 @@
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
+		if (event.key === ' ') {
+			event.preventDefault();
+			return;
+		}
 		if (event.key === 'ArrowRight') {
 			if (document.activeElement === addButtonEl) {
 				event.preventDefault();
@@ -66,11 +69,11 @@
 	}
 
 	$effect(() => {
-		const isPaused = chartState.isPaused;
+		if (chartState.isPaused) {
+			return;
+		}
 
 		const poll = async () => {
-			if (untrack(() => chartState.isPaused)) return;
-
 			try {
 				const result = await invoke<Record<string, StreamStatistics>>('get_stream_statistics', {
 					keys: [dataKey],
@@ -91,8 +94,9 @@
 			}
 		};
 
-		if (!isPaused) poll();
+		poll();
 		const intervalId = setInterval(poll, POLLING_RATE_MS);
+
 		return () => clearInterval(intervalId);
 	});
 </script>
