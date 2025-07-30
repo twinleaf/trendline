@@ -24,7 +24,7 @@
 		{ value: 'math-channels', label: 'Math Channels', hotkey: '3' }
 	];
 
-	let panelElements: Record<string, HTMLDivElement> = {};
+	let panelElements = $state<Record<string, HTMLDivElement>>({});
 	let selectedPanel = $state(panels[0].value);
 
 	const triggerContent = $derived(
@@ -32,32 +32,39 @@
 	);
 
 	async function handleKeydown(event: KeyboardEvent) {
-		if (event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) {
-			return;
-		}
-		if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
-			return;
-		}
-		const panel = panels.find((p) => p.hotkey === event.key);
-		if (panel) {
-			event.preventDefault();
-			selectedPanel = panel.value;
-			await tick();
-			panelElements[panel.value]?.focus();
-		}
-	}
+        if (
+            event.ctrlKey ||
+            event.altKey ||
+            event.shiftKey ||
+            event.metaKey ||
+            event.target instanceof HTMLInputElement ||
+            event.target instanceof HTMLTextAreaElement
+        ) {
+            return;
+        }
 
-	function handleGlobalKeydown(event: KeyboardEvent) {
-		if (event.key === ' ') {
-			if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
-				return;
-			event.preventDefault();
-			chartState.togglePause();
-		}
-	}
+        switch (event.key) {
+            case ' ':
+                event.preventDefault();
+                chartState.togglePause();
+                break;
+
+            case '1':
+            case '2':
+            case '3':
+                const panel = panels.find((p) => p.hotkey === event.key);
+                if (panel) {
+                    event.preventDefault();
+                    selectedPanel = panel.value;
+                    await tick();
+                    panelElements[panel.value]?.focus();
+                }
+                break;
+        }
+    }
 </script>
 
-<svelte:window on:keydown={handleKeydown} on:keydown={handleGlobalKeydown} />
+<svelte:window on:keydown={handleKeydown} />
 
 {#snippet deviceControlsSnippet()}
 	<DeviceControls />

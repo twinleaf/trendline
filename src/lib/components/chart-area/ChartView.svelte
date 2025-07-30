@@ -20,16 +20,6 @@
 	// svelte-ignore non_reactive_update
 	let chartAreaContainer: HTMLDivElement | null = null;
 
-	// --- Event Handlers ---
-
-	function handleGlobalKeydown(event: KeyboardEvent) {
-		if (event.key === ' ') {
-			if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
-				return;
-			event.preventDefault();
-			chartState.togglePause();
-		}
-	}
 	// --- Data Transformation ---
 
 	let treeData = $derived.by((): TreeRow[] => {
@@ -98,8 +88,6 @@
 		};
 	});
 </script>
-
-<svelte:window onkeydown={handleGlobalKeydown} />
 
 <div class="relative flex h-full w-full flex-col p-4 gap-4">
 	<ScrollArea class="flex-1 min-h-0" orientation="vertical" bind:ref={chartAreaContainer}>
