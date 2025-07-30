@@ -61,7 +61,7 @@ export class PlotConfig {
 	resolutionMultiplier = $state<number>(100);
 
 	fftSeconds = $state<number>(10.0);
-	fftYAxisPower = $state(4);
+	fftYAxisDecades = $state(4);
 	fftDetrendMethod = $state<DetrendMethod>('None');
 
 	hasData = $state(false);
@@ -142,38 +142,77 @@ export class PlotConfig {
 
 		const uniqueUnits = new Set(this.series.map((s) => s.uPlotSeries.scale));
 
+
 		const scalesConfig: Record<string, uPlot.Scale> = {};
 		for (const unit of uniqueUnits) {
 			if (unit) {
 				if (this.viewType === 'fft') {
 					scalesConfig[unit] = {
 						auto: true,
-						range: (u, dataMin, dataMax) => {
-							const HYSTERESIS_FACTOR = 0.1;
+						range: (u, dataMin, dataMax): [number | null, number | null] => {
+							if (dataMin <= 0 || !isFinite(dataMin)) {
+								return [1e-4, 1];
+							}
+							
+							// Part 1: Make the range "sticky" by reading the current state
+							const currentViewMin = u.scales[unit]?.min ?? null;
+							const currentViewMax = u.scales[unit]?.max ?? null;
 
-							if (dataMin <= 0 || dataMax <= 0) {
-								return [10 ** -this.fftYAxisPower, 10 ** this.fftYAxisPower];
+							let shouldResize = false;
+
+							if (currentViewMin === null || currentViewMax === null) {
+								shouldResize = true;
+							} else {
+								// Must resize if data goes out of the current view
+								if (dataMin < currentViewMin || dataMax > currentViewMax) {
+									shouldResize = true;
+								} else {
+									// Hysteresis: Only shrink the view if it's significantly larger than the data
+									const viewDecades = Math.log10(currentViewMax) - Math.log10(currentViewMin);
+									const dataDecades = Math.log10(dataMax) - Math.log10(dataMin);
+									
+									// Shrink only if view is >2 decades larger than what's needed
+									const SHRINK_HYSTERESIS_DECADES = 2.0; 
+									if (viewDecades > dataDecades + SHRINK_HYSTERESIS_DECADES) {
+										shouldResize = true;
+									}
+								}
 							}
 
-							const maxMagnitude = Math.max(
-								Math.abs(Math.log10(dataMin)),
-								Math.abs(Math.log10(dataMax))
-							);
-							const currentPower = this.fftYAxisPower;
-
-							if (maxMagnitude > currentPower) {
-								this.fftYAxisPower = Math.ceil(maxMagnitude);
-							} else if (maxMagnitude < currentPower - 1 - HYSTERESIS_FACTOR) {
-								this.fftYAxisPower = Math.ceil(maxMagnitude);
+							if (!shouldResize) {
+								// If no resize is triggered, persist the current range to prevent jumping.
+								return [currentViewMin, currentViewMax];
 							}
-							return [10 ** -this.fftYAxisPower, 10 ** this.fftYAxisPower];
-						}
+
+							// Part 2: If a resize is needed, use the clean, symmetric calculation
+							if (dataMin === dataMax) {
+								const logVal = Math.log10(dataMin);
+								return [10 ** (logVal - 1), 10 ** (logVal + 1)];
+							}
+
+							const logMin = Math.log10(dataMin);
+							const logMax = Math.log10(dataMax);
+							const logCenter = (logMin + logMax) / 2;
+							const logHalfSpan = (logMax - logMin) / 2;
+
+							const PADDING_DECADES = 0.5;
+							const paddedHalfSpan = logHalfSpan + PADDING_DECADES;
+
+							const finalLogMin = logCenter - paddedHalfSpan;
+							const finalLogMax = logCenter + paddedHalfSpan;
+
+							return [
+								10 ** Math.floor(finalLogMin), 
+								10 ** Math.ceil(finalLogMax)
+							];
+}
 					};
 				} else {
 					scalesConfig[unit] = { auto: true };
 				}
 			}
 		}
+
 		const axesConfig: uPlot.Axis[] = [{}];
 
 		if (this.viewType === 'fft') {
@@ -267,7 +306,10 @@ export class PlotConfig {
 			cursor: {
 				drag: { setScale: false },
 				show: true,
-				points: { show: false }
+				points: { show: false },
+				move: (u, top, left) => {
+					return [top, left];
+				}
 			}
 		};
 	});
@@ -404,7 +446,12 @@ class ChartState {
 	}
 	
 	togglePause() {
-		this.isPaused = !this.isPaused;
+		const newPausedState = !this.isPaused;
+		this.isPaused = newPausedState;
+
+		for (const plot of this.plots) {
+			plot.isPaused = newPausedState;
+		}
 	}
 }
 
