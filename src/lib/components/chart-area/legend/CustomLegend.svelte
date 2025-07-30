@@ -36,7 +36,7 @@
 	function formatValue(value: number | null, vType: 'timeseries' | 'fft'): string {
 		if (value === null || !isFinite(value)) return '---';
 		if (vType === 'fft') return value.toExponential(2);
-		return value.toFixed(3);
+		return value.toExponential(3);
 	}
 
 	$effect(() => {
