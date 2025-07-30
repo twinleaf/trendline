@@ -35,6 +35,7 @@
 						selected.delete(prefix);
 					}
 				}}
+				closeOnSelect={false}
 			>
 				{prefix}
 			</DropdownMenu.CheckboxItem>
