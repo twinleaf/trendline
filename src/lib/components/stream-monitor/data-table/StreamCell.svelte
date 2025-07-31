@@ -1,8 +1,7 @@
 <script lang="ts">
 	import type { DataColumnId } from '$lib/bindings/DataColumnId';
-	import type { StreamStatistics } from '$lib/bindings/StreamStatistics';
 	import { chartState } from '$lib/states/chartState.svelte';
-	import { invoke } from '@tauri-apps/api/core';
+	import { streamMonitorState } from '$lib/states/streamMonitorState.svelte'; // <-- Import the state manager
 	import * as Collapsible from '$lib/components/ui/collapsible/index.js';
 	import { ChevronDown, Eraser } from '@lucide/svelte';
 	import NameCell from './NameCell.svelte';
@@ -16,15 +15,34 @@
 	};
 	let { dataKey, name, units }: Props = $props();
 
-	let stats = $state<StreamStatistics | undefined>(undefined);
+	// --- LOCAL UI STATE ---
 	let smoothedValue = $state<number | undefined>(undefined);
 	let addButtonEl: HTMLButtonElement;
 	let toggleButtonEl: any;
 
-	const POLLING_RATE_MS = 100;
-	const STATS_WINDOW_SECONDS = 2.0;
 	const SMOOTHING_FACTOR = 0.1;
 
+	// --- DERIVED STATE (from the global store) ---
+	const key = $derived(JSON.stringify(dataKey));
+	const stats = $derived(streamMonitorState.statisticsData.get(key));
+
+	// --- EFFECT for LOCAL UI (smoothing) ---
+	$effect(() => {
+		if (chartState.isPaused) {
+			return;
+		}
+		const currentStats = stats;
+		if (currentStats) {
+			const latestValue = currentStats.latest_value;
+			if (smoothedValue === undefined) {
+				smoothedValue = latestValue;
+			} else {
+				smoothedValue = SMOOTHING_FACTOR * latestValue + (1 - SMOOTHING_FACTOR) * smoothedValue;
+			}
+		}
+	});
+
+	// --- HELPER FUNCTIONS ---
 	function format(value: number | undefined): string {
 		if (value === undefined || !isFinite(value)) return '---';
 		const absValue = Math.abs(value);
@@ -52,59 +70,14 @@
 	}
 
 	async function resetPersistentStats() {
-		if (!stats) return;
-		try {
-			await invoke('reset_stream_statistics', { keys: [dataKey] });
-			stats.persistent = {
-				mean: NaN,
-				stdev: NaN,
-				min: NaN,
-				max: NaN,
-				rms: NaN,
-				count: 0n
-			};
-		} catch (e) {
-			console.error(`Failed to reset persistent stats for ${name}:`, e);
-		}
+		await streamMonitorState.resetStatistics(dataKey);
 	}
-
-	$effect(() => {
-		if (chartState.isPaused) {
-			return;
-		}
-
-		const poll = async () => {
-			try {
-				const result = await invoke<Record<string, StreamStatistics>>('get_stream_statistics', {
-					keys: [dataKey],
-					windowSeconds: STATS_WINDOW_SECONDS
-				});
-				const newStats = Object.values(result)[0];
-				if (newStats) {
-					stats = newStats;
-					const currentValue = newStats.latest_value;
-					if (smoothedValue === undefined) {
-						smoothedValue = currentValue;
-					} else {
-						smoothedValue = SMOOTHING_FACTOR * currentValue + (1 - SMOOTHING_FACTOR) * smoothedValue;
-					}
-				}
-			} catch (e) {
-				console.error(`Polling failed for ${name}:`, e);
-			}
-		};
-
-		poll();
-		const intervalId = setInterval(poll, POLLING_RATE_MS);
-
-		return () => clearInterval(intervalId);
-	});
 </script>
 
-<Collapsible.Root class="w-full group">
+<Collapsible.Root class="group w-full">
 	<div class="flex flex-col">
-		<div class="text-sm text-muted-foreground pl-1 pb-1">
-			<NameCell name={name} depth={0} />
+		<div class="pl-1 pb-1 text-sm text-muted-foreground">
+			<NameCell {name} depth={0} />
 		</div>
 		<div
 			class="flex h-16 w-full items-stretch overflow-hidden rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2"

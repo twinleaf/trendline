@@ -7,6 +7,7 @@
 	import type { TreeRow } from '$lib/components/chart-area/data-table/column';
 	import type { DataColumnId } from '$lib/bindings/DataColumnId';
 	import { invoke } from '@tauri-apps/api/core';
+	import { onMount } from 'svelte';
 
 	import { columns } from '$lib/components/stream-monitor/data-table/column';
 	import DataTable from '$lib/components/stream-monitor/data-table/DataTable.svelte';
@@ -21,6 +22,22 @@
 	let isInitialSelectionDone = false;
 	let isWipeDialogOpen = $state(false);
 
+	// --- COMPONENT LIFECYCLE MANAGEMENT ---
+	onMount(() => {
+		streamMonitorState.initPolling();
+		return () => {
+			streamMonitorState.destroy();
+		};
+	});
+
+	// Reactive effect to update pipelines when selection changes
+	$effect(() => {
+		if (isInitialSelectionDone) {
+			streamMonitorState.updatePipelineSelection();
+		}
+	});
+
+	// --- Derived Data (no changes here) ---
 	interface MonitorItem {
 		id: string;
 		name: string;
@@ -82,7 +99,6 @@
 	let selectedItems = $derived.by(() => {
 		const items: MonitorItem[] = [];
 		const selectedKeys = Object.keys(streamMonitorState.rowSelection);
-
 		const leafNodeKeys = selectedKeys.filter((key) => key.startsWith('{'));
 
 		for (const key of leafNodeKeys) {
@@ -116,21 +132,18 @@
 			},
 			{} as Record<string, MonitorItem[]>
 		);
-
 		return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
 	});
 
+	// --- Helper Functions ---
 	function getAllSelectableIds(nodes: TreeRow[]): { selection: string[]; expansion: string[] } {
 		const selection: string[] = [];
 		const expansion: string[] = [];
-
 		function recurse(items: TreeRow[]) {
 			for (const item of items) {
 				const subRows = item.subRows;
-
 				if (subRows && subRows.length > 0) {
 					selection.push(item.id);
-
 					expansion.push(item.id);
 					recurse(subRows);
 				} else if (item.type === 'column') {
@@ -146,12 +159,8 @@
 		const keys: DataColumnId[] = [];
 		function recurse(items: TreeRow[]) {
 			for (const item of items) {
-				if (item.type === 'column' && item.dataKey) {
-					keys.push(item.dataKey);
-				}
-				if (item.subRows) {
-					recurse(item.subRows);
-				}
+				if (item.type === 'column' && item.dataKey) keys.push(item.dataKey);
+				if (item.subRows) recurse(item.subRows);
 			}
 		}
 		recurse(nodes);
@@ -161,11 +170,7 @@
 	async function handleWipeAllStatistics() {
 		const allKeys = getAllDataKeys(treeData);
 		if (allKeys.length > 0) {
-			try {
-				await invoke('reset_stream_statistics', { keys: allKeys });
-			} catch (e) {
-				console.error('Failed to wipe all stream statistics:', e);
-			}
+			await invoke('reset_stream_statistics', { keys: allKeys });
 		}
 		isWipeDialogOpen = false;
 	}
@@ -175,15 +180,11 @@
 			const { selection, expansion } = getAllSelectableIds(treeData);
 
 			const initialSelection: RowSelectionState = {};
-			for (const id of selection) {
-				initialSelection[id] = true;
-			}
+			for (const id of selection) initialSelection[id] = true;
 			streamMonitorState.rowSelection = initialSelection;
 
 			const initialExpansion: ExpandedState = {};
-			for (const id of expansion) {
-				initialExpansion[id] = true;
-			}
+			for (const id of expansion) initialExpansion[id] = true;
 			streamMonitorState.expansion = initialExpansion;
 
 			isInitialSelectionDone = true;
@@ -205,8 +206,8 @@
 				<AlertDialog.Header>
 					<AlertDialog.Title>Are you absolutely sure?</AlertDialog.Title>
 					<AlertDialog.Description>
-						This action will permanently wipe the persistent statistics for all streams. This
-						cannot be undone.
+						This action will permanently wipe the persistent statistics for all streams. This cannot
+						be undone.
 					</AlertDialog.Description>
 				</AlertDialog.Header>
 				<AlertDialog.Footer>
@@ -243,11 +244,11 @@
 		</Popover.Root>
 	</div>
 	<ScrollArea class="min-h-0 flex-1">
-		<div class="p-2 space-y-4">
+		<div class="space-y-4 p-2">
 			{#if selectedItems.length > 0}
 				{#each selectedItems as [groupName, items] (groupName)}
 					<div>
-						<h4 class="text-base font-semibold border-b pb-1 mb-2">{groupName}</h4>
+						<h4 class="mb-2 border-b pb-1 text-base font-semibold">{groupName}</h4>
 						<div class="space-y-2">
 							{#each items as item (item.id)}
 								<div>

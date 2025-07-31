@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 use num_enum::{FromPrimitive, IntoPrimitive};
+use uuid::Uuid;
 use crate::util;
 
 use twinleaf::tio::proto::meta::{
@@ -343,7 +344,6 @@ pub enum DecimationMethod {
     #[default]
     None,
     Fpcs,
-    MinMax,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
@@ -383,7 +383,11 @@ impl DataColumnId {
     }
 }
 
-#[derive(Serialize, Clone, Debug, TS, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, TS, PartialEq, Eq, Hash)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct PipelineId(pub Uuid);
+
+#[derive(Serialize, Clone, Debug, Default, TS, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct PlotData {
     pub timestamps: Vec<f64>,
@@ -428,7 +432,7 @@ pub struct StatisticSet {
     pub rms: f64,
 }
 
-#[derive(Clone, Debug, Serialize, TS, PartialEq)]
+#[derive(Clone, Debug, Serialize, TS, Default, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct StreamStatistics {
     pub latest_value: f64,

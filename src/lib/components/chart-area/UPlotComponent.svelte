@@ -4,11 +4,12 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { chartState } from '$lib/states/chartState.svelte';
 	import type { PlotConfig } from '$lib/states/chartState.svelte';
-	import type { PlotData } from '$lib/bindings/PlotData';
 	import type { PortState } from '$lib/bindings/PortState';
+	import type { PipelineId } from '$lib/bindings/PipelineId';
 	import CustomLegend from '$lib/components/chart-area/legend/CustomLegend.svelte';
+	import { untrack } from 'svelte';
 
-	// --- Props ---
+	// --- Props (Unchanged) ---
 	let {
 		plot,
 		latestTimestamp = $bindable(),
@@ -19,18 +20,15 @@
 		connectionState?: PortState | null;
 	} = $props();
 
-	// --- Derived Values ---
+	// --- DERIVED STATE (from global chartState) ---
 	const options = $derived(plot.uPlotOptions);
-	const seriesDataKeys = $derived(plot.series.map((s) => s.dataKey));
 	const isFFT = $derived(plot.viewType === 'fft');
 	const isEffectivelyPaused = $derived(chartState.isPaused || plot.isPaused);
-	const isStreaming = $derived(connectionState === 'Streaming');
+	const plotData = $derived(chartState.plotsData.get(plot.id));
 
 	// --- Component State ---
 	let chartContainer: HTMLDivElement;
 	let uplot = $state.raw<uPlot | undefined>(undefined);
-	let plotDimensions = $state.raw({ width: 0, height: 0 });
-	let latestPlotData = $state.raw<PlotData | null>(null); // Shared state for loops
 
 	// --- State for the custom legend ---
 	let legendState = $state({
@@ -43,104 +41,55 @@
 		chartBounds: null as DOMRect | null
 	});
 
-	// --- GC-FRIENDLY BUFFERS ---
+	// --- GC-FRIENDLY BUFFERS & Allocation (Unchanged) ---
 	let uplotDataBuffers = $state.raw<Float64Array[]>([]);
-
-	// --- Buffer Allocation Effect ---
 	$effect(() => {
-		const numSeries = seriesDataKeys.length;
+		const numSeries = plot.series.length;
 		const maxRate = plot.maxSamplingRate;
 		const winSecs = plot.windowSeconds;
 
 		if (numSeries === 0 || maxRate <= 0 || winSecs <= 0) {
-			if (uplotDataBuffers.length > 0) {
-				uplotDataBuffers = [];
-			}
+			if (uplotDataBuffers.length > 0) uplotDataBuffers = [];
 			return;
 		}
 
 		const requiredPoints = Math.ceil(maxRate * winSecs * 2);
-
 		const needsReallocation =
 			uplotDataBuffers.length !== numSeries + 1 ||
 			(uplotDataBuffers.length > 0 && uplotDataBuffers[0].length < requiredPoints);
 
 		if (needsReallocation) {
-			console.log(
-				`Reallocating plot buffers: ${numSeries} series, ${requiredPoints} points (max rate: ${maxRate.toFixed(2)} Hz)`
-			);
 			const newBuffers = [new Float64Array(requiredPoints)];
-			for (let i = 0; i < numSeries; i++) {
-				newBuffers.push(new Float64Array(requiredPoints));
-			}
+			for (let i = 0; i < numSeries; i++) newBuffers.push(new Float64Array(requiredPoints));
 			uplotDataBuffers = newBuffers;
 		}
 	});
 
-	// --- Polling Effect (fetches data on an interval) ---
+	// --- Data-Driven Render Trigger (Reacts to global state) ---
 	$effect(() => {
-		const isReadyToPoll = seriesDataKeys.length > 0;
-		if (!isReadyToPoll) return;
+		const dataToRender = plotData;
+		if (!uplot || isEffectivelyPaused) return;
 
-		let isFetching = false;
-		const POLLING_INTERVAL_MS = 16; // 10 Hz, adjust as needed
-
-		const intervalId = setInterval(async () => {
-			if (isEffectivelyPaused || !isStreaming || isFetching) {
-				return;
-			}
-
-			isFetching = true;
-			try {
-				const command = isFFT ? 'get_latest_fft_data' : 'get_latest_plot_data';
-				const requiredPoints = Math.round(
-					plotDimensions.width * (plot.resolutionMultiplier / 100.0)
-				);
-				const args = isFFT
-					? {
-							keys: seriesDataKeys,
-							windowSeconds: plot.fftSeconds,
-							detrend: plot.fftDetrendMethod
-						}
-					: {
-							keys: seriesDataKeys,
-							windowSeconds: plot.windowSeconds,
-							numPoints: requiredPoints,
-							decimation: plot.decimationMethod
-						};
-				latestPlotData = await invoke<PlotData>(command, args);
-			} catch (e) {
-				console.error(`Failed to fetch plot data for ${plot.viewType} view:`, e);
-			} finally {
-				isFetching = false;
-			}
-		}, POLLING_INTERVAL_MS);
-
-		return () => clearInterval(intervalId);
-	});
-
-	// --- Data-Driven Render Trigger ---
-	$effect(() => {
-		const dataToRender = latestPlotData;
-		if (!dataToRender || dataToRender.timestamps.length === 0 || !uplot) {
+		// Handle cases where data is not available (e.g., initial render, error)
+		if (!dataToRender || dataToRender.timestamps.length === 0) {
+			if (plot.hasData) uplot.setData([[]], false); // Clear the plot if it had data
+			plot.hasData = false;
 			return;
 		}
 
-		latestPlotData = null;
 		plot.hasData = true;
 
 		if (uplotDataBuffers.length === 0 || uplotDataBuffers[0].length < dataToRender.timestamps.length) {
-			console.warn('Buffer not ready or too small, skipping frame.');
+			console.warn('Buffer not ready or too small for plot, skipping frame.');
 			return;
 		}
 
-		const absoluteTimestamps = isFFT
-			? dataToRender.timestamps.slice(1)
-			: dataToRender.timestamps;
+		const absoluteTimestamps = dataToRender.timestamps;
 		const finalDataLength = absoluteTimestamps.length;
 		const latestAbsTimestamp = absoluteTimestamps[finalDataLength - 1];
-		latestTimestamp = latestAbsTimestamp;
+		latestTimestamp = latestAbsTimestamp; // Bind the latest timestamp out
 
+		// The rest of the rendering logic is the same, just using the new data source
 		if (!isFFT) {
 			uplot.setScale('x', { min: -plot.windowSeconds, max: 0 });
 			const relativeXValues = uplotDataBuffers[0];
@@ -153,45 +102,44 @@
 
 		dataToRender.series_data.forEach((series, i) => {
 			if (uplotDataBuffers[i + 1]) {
-				const finalSeries = isFFT ? series.slice(1) : series;
-				uplotDataBuffers[i + 1].set(finalSeries);
+				uplotDataBuffers[i + 1].set(series);
 			}
 		});
 
-		const finalDataViews = uplotDataBuffers.map((buffer) =>
-			buffer.subarray(0, finalDataLength)
-		);
+		const finalDataViews = uplotDataBuffers.map((buffer) => buffer.subarray(0, finalDataLength));
 		uplot.setData(finalDataViews, isFFT);
 	});
 
-	// --- Effect to fetch interpolated data for the legend via IPC ---
+	// --- Effect to fetch interpolated data for the legend (Updated) ---
 	$effect(() => {
 		const time =
 			legendState.relativeTime === null ? null : (latestTimestamp ?? 0) + legendState.relativeTime;
-		const keys = seriesDataKeys;
-
-		if (time === null || keys.length === 0 || isFFT || !legendState.isActive) {
+		if (time === null || isFFT || !legendState.isActive) {
 			legendState.values = [];
 			return;
 		}
 
-		async function fetchLegendValues() {
-			try {
-				const interpolatedValues = await invoke<(number | null)[]>(
-					'get_interpolated_values_at_time',
-					{ keys, time }
-				);
-				legendState.values = interpolatedValues;
-			} catch (e) {
-				console.error('Failed to fetch interpolated values for legend:', e);
-				legendState.values = keys.map(() => null);
-			}
-		}
+		// KEY CHANGE #2: Use pipeline IDs from the PlotConfig's map
+		const pipelineIds = untrack(() =>
+			plot.series
+				.map((s) => plot.pipelineMap.get(JSON.stringify(s.dataKey))?.timeseriesId)
+				.filter((id): id is PipelineId => !!id)
+		);
 
-		fetchLegendValues();
+		if (pipelineIds.length === 0) return;
+
+		// Use the correct command for getting interpolated values from pipelines
+		invoke<(number | null)[]>('get_interpolated_values', { pipelineIds, time })
+			.then((interpolatedValues) => {
+				legendState.values = interpolatedValues;
+			})
+			.catch((e) => {
+				console.error('Failed to fetch interpolated values for legend:', e);
+				legendState.values = pipelineIds.map(() => null);
+			});
 	});
 
-	// --- uPlot Instance Lifecycle Effect ---
+	// --- uPlot Instance Lifecycle Effect (Unchanged) ---
 	$effect(() => {
 		if (!chartContainer) return;
 
@@ -199,27 +147,24 @@
 			hooks: {
 				setCursor: (u: uPlot) => {
 					const { left, top, idx } = u.cursor;
-
 					if (left === undefined || left < 0 || idx === undefined || idx === null) {
 						legendState.isActive = false;
 						return;
 					}
-
 					legendState.isActive = true;
 					legendState.cursorLeft = left ?? null;
 					legendState.cursorTop = top ?? null;
 					legendState.chartBounds = chartContainer.getBoundingClientRect();
-
 					if (isFFT) {
 						legendState.frequency = u.data[0][idx];
-						legendState.values = u.data.slice(1).map((seriesData) => seriesData[idx] ?? null);
+						legendState.values = u.data.slice(1).map((d) => d[idx] ?? null);
 						legendState.relativeTime = null;
 					} else {
 						legendState.relativeTime = u.posToVal(left, 'x');
 						legendState.frequency = null;
 					}
 				},
-				setSeries: (u: uPlot, seriesIdx: number | null) => {
+				setSeries: (_, seriesIdx: number | null) => {
 					if (seriesIdx === null) {
 						legendState.isActive = false;
 						legendState.relativeTime = null;
@@ -228,18 +173,13 @@
 			}
 		};
 
-		const finalOptions: uPlot.Options = {
-			...options,
-			plugins: [...(options.plugins || []), legendPlugin]
-		};
-
+		const finalOptions: uPlot.Options = { ...options, plugins: [...(options.plugins || []), legendPlugin] };
 		const newUplotInstance = new uPlot(finalOptions, [[]], chartContainer);
 		uplot = newUplotInstance;
 
 		const resizeObserver = new ResizeObserver((entries) => {
 			if (!entries.length) return;
 			const { width, height } = entries[0].contentRect;
-			plotDimensions = { width, height };
 			newUplotInstance.setSize({ width, height });
 		});
 		resizeObserver.observe(chartContainer);
@@ -247,26 +187,23 @@
 		return () => {
 			resizeObserver.disconnect();
 			newUplotInstance.destroy();
-			if (uplot === newUplotInstance) {
-				uplot = undefined;
-			}
+			if (uplot === newUplotInstance) uplot = undefined;
 		};
 	});
 
-	// --- View Type Change Effect ---
+	// --- View Type Change Effect (Unchanged) ---
 	$effect(() => {
 		const _ = plot.viewType;
 		if (uplot) {
 			uplot.setData([[]]);
+			plot.hasData = false;
 		}
-		if (uplotDataBuffers.length > 0) {
-			uplotDataBuffers.forEach((buffer) => buffer.fill(0));
-		}
+		if (uplotDataBuffers.length > 0) uplotDataBuffers.forEach((buffer) => buffer.fill(0));
 	});
 </script>
 
 <div class="relative h-full w-full">
-	<div bind:this={chartContainer} class="h-full w-full min-h-0"></div>
+	<div bind:this={chartContainer} class="min-h-0 h-full w-full"></div>
 </div>
 
 {#if legendState.isActive && legendState.chartBounds}

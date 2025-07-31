@@ -1,10 +1,9 @@
 use tauri::{State};
-use std::sync::Arc;
+use std::sync::{Arc};
 use serde_json::Value;
 
-use crate::state::capture::CaptureState;
 use crate::state::proxy_register::ProxyRegister;
-use crate::shared::{ DataColumnId, PortState, UiDevice };
+use crate::shared::{ PortState, UiDevice };
 use crate::shared::RpcError;
 
 
@@ -79,15 +78,4 @@ pub async fn execute_rpc(
         .ok_or_else(|| RpcError::AppLogic(format!("Port '{}' not found.", port_url)))?;
 
     port_manager.execute_rpc(&device_route, &name, args).await
-}
-
-#[tauri::command]
-pub fn reset_stream_statistics(
-    keys: Vec<DataColumnId>, 
-    capture: State<CaptureState>,
-) -> Result<(), String> {
-    for key in keys {
-        capture.inner.persistent_stats.remove(&key);
-    }
-    Ok(())
 }

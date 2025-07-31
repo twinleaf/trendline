@@ -30,7 +30,6 @@ pub struct DebugCounters {
     pub points_inserted: AtomicUsize,
 }
 
-// Commands that can be sent from other parts of the application into the PortManager's thread.
 #[derive(Debug)]
 pub enum PortCommand {
     Shutdown,
@@ -124,7 +123,14 @@ impl PortManager {
                                         if let Some(keys) = registry.active_selections.get(&self_.url) {
                                             println!("[{}] Re-applying cached selection of {} columns.", self_.url, keys.len());
                                             let capture_state = self_.app.state::<CaptureState>();
-                                            capture_state.set_active_columns_for_port(&self_.url, keys.value().clone());
+                                             let command = crate::state::capture::CaptureCommand::SetActiveColumns {
+                                                port_url: self_.url.clone(),
+                                                keys_for_port: keys.value().clone(),
+                                            };
+
+                                            if let Err(e) = capture_state.inner.command_tx.send(command) {
+                                                eprintln!("[{}] Failed to send SetActiveColumns command: {}", self_.url, e);
+                                            }
                                         }
                                         self_.set_state(PortState::Streaming);
                                     } else {
@@ -225,7 +231,6 @@ impl PortManager {
                     }
                 }
 
-                // --- Final Shutdown Cleanup ---
                 println!("[{}] Port manager thread cleaning up and shutting down.", self_.url);
                 if let Some(proxy) = self_.proxy.lock().unwrap().take() {
                     drop(proxy);

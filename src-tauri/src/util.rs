@@ -6,7 +6,7 @@ use twinleaf::tio::proto::DeviceRoute;
 use twinleaf::tio::util::TioRpcReplyable;
 use serde_json::{json, Value};
 
-use crate::shared::{Point, StatisticSet};
+use crate::shared::{PlotData, Point, StatisticSet};
 
 pub fn is_process_running(exe_name: &str) -> bool {
     let mut sys = System::new_all();
@@ -248,4 +248,63 @@ pub fn calculate_batch_stats(points: &[Point]) -> StatisticSet {
         stdev,
         rms,
     }
+}
+
+pub fn lerp(p1: &Point, p2: &Point, x: f64) -> f64 {
+    if (p2.x - p1.x).abs() < 1e-9 { return p1.y; }
+    p1.y + (p2.y - p1.y) * (x - p1.x) / (p2.x - p1.x)
+}
+
+pub fn k_way_merge_plot_data(all_series_data: Vec<PlotData>) -> PlotData {
+    if all_series_data.is_empty() {
+        return PlotData::empty();
+    }
+
+    let continuous_series: Vec<Vec<Point>> = all_series_data.iter()
+        .filter_map(|plot_data| {
+            if !plot_data.timestamps.is_empty() && plot_data.series_data.len() == 1 {
+                Some(
+                    plot_data.timestamps.iter()
+                        .zip(plot_data.series_data[0].iter())
+                        .map(|(&x, &y)| Point { x, y })
+                        .collect()
+                )
+            } else {
+                None 
+            }
+        }).collect();
+
+    let mut series_iters: Vec<_> = continuous_series.iter().map(|s| s.iter().peekable()).collect();
+    if series_iters.is_empty() {
+        return PlotData::empty();
+    }
+    let num_series = series_iters.len();
+    let mut merged_plot_data = PlotData::with_series_capacity(num_series);
+    let mut last_points: Vec<Option<Point>> = vec![None; num_series];
+
+    loop {
+        let next_ts = series_iters
+            .iter_mut()
+            .filter_map(|it| it.peek().map(|p| p.x))
+            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        
+        if let Some(ts) = next_ts {
+            merged_plot_data.timestamps.push(ts);
+            for i in 0..num_series {
+                let iter = &mut series_iters[i];
+                let mut y_val = f64::NAN; // Use NaN for gaps
+                if iter.peek().map_or(false, |p| (p.x - ts).abs() < 1e-9) {
+                    let p_next = iter.next().unwrap();
+                    last_points[i] = Some(*p_next);
+                    y_val = p_next.y;
+                } else if let (Some(p_next_real), Some(p_last)) = (iter.peek(), last_points[i]) {
+                    y_val = lerp(&p_last, p_next_real, ts);
+                }
+                merged_plot_data.series_data[i].push(y_val);
+            }
+        } else {
+            break; // No more points in any iterator
+        }
+    }
+    merged_plot_data
 }

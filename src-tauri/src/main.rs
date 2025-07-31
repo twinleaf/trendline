@@ -4,11 +4,12 @@
     windows_subsystem = "windows"
 )]
 
-use std::sync::Arc;
+use std::sync::{Arc};
 use tauri::{ AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
-use trendline_lib::{menu, proxy};
+use trendline_lib::pipeline::manager::ProcessingManager;
+use trendline_lib::{commands, menu, proxy};
 use trendline_lib::state::capture::CaptureState;
 use trendline_lib::state::proxy_register::ProxyRegister;
 
@@ -53,26 +54,38 @@ fn main() {
 
             let capture = CaptureState::new();
             let registry = Arc::new(ProxyRegister::new(app.handle().clone(), capture.clone()));
+            let processing_manager = ProcessingManager::new_with_ticker(capture.clone());
 
             app.manage(capture);
             app.manage(registry.clone());
+            app.manage(processing_manager);
 
             proxy::discovery::spawn(registry);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            trendline_lib::commands::capture::confirm_selection,
-            trendline_lib::commands::capture::get_plot_data_in_range,
-            trendline_lib::commands::capture::get_latest_plot_data,
-            trendline_lib::commands::capture::get_latest_fft_data,
-            trendline_lib::commands::capture::get_decimated_delta,
-            trendline_lib::commands::capture::connect_to_port,
-            trendline_lib::commands::capture::get_interpolated_values_at_time,
-            trendline_lib::commands::capture::get_stream_statistics,
-            trendline_lib::commands::settings::get_all_devices,
-            trendline_lib::commands::settings::get_port_state,
-            trendline_lib::commands::settings::execute_rpc,
-            trendline_lib::commands::settings::reset_stream_statistics,
+            // --- Device & Port Management Commands (Unchanged) ---
+            commands::capture::confirm_selection,
+            commands::capture::connect_to_port,
+            commands::capture::get_merged_plot_data,
+            commands::capture::get_statistics_data,
+            commands::capture::get_interpolated_values,
+
+
+            // --- Pipeline Commands ---
+            commands::pipeline::create_fpcs_pipeline,
+            commands::pipeline::create_detrend_pipeline,
+            commands::pipeline::create_passthrough_pipeline,
+            commands::pipeline::create_fft_pipeline_from_source,
+            commands::pipeline::create_statistics_provider,
+            commands::pipeline::destroy_processor,
+            commands::pipeline::reset_statistics_provider,
+
+            // --- Pipeline Management Commands ---
+            commands::settings::get_all_devices,
+            commands::settings::get_port_state,
+            commands::settings::execute_rpc,
+
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

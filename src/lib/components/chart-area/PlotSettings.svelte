@@ -16,11 +16,6 @@
 	const decimationMethods: { value: DecimationMethod; label: string; description: string }[] = [
 		{ value: 'None', label: 'None', description: 'No downsampling. Raw data is rendered.' },
 		{
-			value: 'MinMax',
-			label: 'Min/Max',
-			description: 'Selects min/max values per bucket. Fastest for multiple series.'
-		},
-		{
 			value: 'Fpcs',
 			label: 'FPCS',
 			description: 'Highest visual fidelity. Requires low point resolution for multiple series.'

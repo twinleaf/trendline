@@ -25,7 +25,7 @@ serde_json = "1"
 rand = "0.9.1"
 serialport = "4.5.1"
 crossbeam = "0.8.4"
-ts-rs = "11.0.1"
+ts-rs = { version = "11.0.1", features = ["uuid-impl"] }
 sysinfo = "0.35.2"
 twinleaf-tools = "1.5.1"
 twinleaf = "1.3.3"
@@ -34,8 +34,9 @@ tauri-plugin-dialog = "2"
 rustfft = "6.4.0"
 welch-sde = "0.1.0"
 num_enum = "0.7.4"
-argminmax = { version = "0.6.3", default-features = false, features = ["float"] }
 nalgebra = "0.33.2"
+rayon = "1.10.0"
+uuid = { version = "1.17.0", features = ["v4", "serde"] }
 
 [profile.release]
 debug = true
