@@ -4,14 +4,14 @@
     windows_subsystem = "windows"
 )]
 
-use std::sync::{Arc};
-use tauri::{ AppHandle, Emitter, Manager};
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 use trendline_lib::pipeline::manager::ProcessingManager;
-use trendline_lib::{commands, menu, proxy};
 use trendline_lib::state::capture::CaptureState;
 use trendline_lib::state::proxy_register::ProxyRegister;
+use trendline_lib::{commands, menu, proxy};
 
 fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     let window = app.get_webview_window("main").unwrap();
@@ -26,7 +26,8 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         }
         "save_recording" => {
             // Using the new dialog plugin API
-            app.dialog().file()
+            app.dialog()
+                .file()
                 .add_filter("Trendline Recording", &["json"])
                 .set_file_name("recording.json")
                 .save_file(move |path_buf| {
@@ -42,6 +43,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let menu = menu::create_app_menu(app.handle())?;
@@ -67,7 +69,6 @@ fn main() {
             // --- Device & Port Management Commands ---
             commands::capture::confirm_selection,
             commands::capture::connect_to_port,
-
             // --- Pipeline Commands ---
             commands::pipeline::update_plot_pipeline,
             commands::pipeline::destroy_plot_pipeline,
@@ -76,12 +77,10 @@ fn main() {
             commands::pipeline::listen_to_plot_data,
             commands::pipeline::listen_to_statistics,
             commands::pipeline::reset_statistics_provider,
-
             // --- Pipeline Management Commands ---
             commands::settings::get_all_devices,
             commands::settings::get_port_state,
             commands::settings::execute_rpc,
-
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,4 +1,4 @@
-use crate::shared::{PlotData, PipelineId, StreamStatistics};
+use crate::shared::{PipelineId, PlotData, StreamStatistics};
 use crate::state::capture::CaptureState;
 pub trait Pipeline: Send + Sync {
     fn id(&self) -> PipelineId;
@@ -14,10 +14,10 @@ pub trait StatisticsProvider: Send + Sync {
     fn reset(&mut self, capture_state: &CaptureState);
 }
 
-pub mod manager;
+pub mod buffer;
 pub mod decimation;
 pub mod detrend;
 pub mod fft;
+pub mod manager;
 pub mod passthrough;
 pub mod statistics;
-pub mod buffer;

@@ -13,7 +13,7 @@ impl<T: Default> DoubleBuffer<T> {
             back: T::default(),
         }
     }
-    
+
     /// Provides mutable access to the back buffer for writing.
     /// After the closure returns, the back buffer is swapped with the front.
     pub fn write_with<F>(&mut self, writer: F)

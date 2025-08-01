@@ -245,7 +245,7 @@ class ChartState {
     // --- Private State ---
     #listeningPlots = new Set<string>();
 
-    // --- Layout Logic ---
+    // --- CORE LAYOUT LOGIC ---
     layout = $derived.by(() => {
         if (this.layoutMode === 'manual') {
             return this.manualLayout;
@@ -259,12 +259,13 @@ class ChartState {
             return {};
         }
 
+        // The "auto-fill" behavior for 1-4 plots
         if (plots.length <= 4) {
             const heightPerPlot = containerHeight / plots.length;
             for (const plot of plots) {
                 newLayout[plot.id] = heightPerPlot;
             }
-        } else {
+        } else { // The "scrolling" behavior for >4 plots
             const heightForFirstFour = containerHeight / 4;
             for (let i = 0; i < plots.length; i++) {
                 newLayout[plots[i].id] = i < 4 ? heightForFirstFour : DEFAULT_PLOT_HEIGHT;
@@ -357,14 +358,62 @@ class ChartState {
     
     // --- Public Methods ---
 
+    getPlotIndex(plotId: string): number {
+		return this.plots.findIndex((p) => p.id === plotId);
+	}
+
     addPlot() {
         const initialExpansion: ExpandedState = {};
         for (const portData of deviceState.devices) {
             for (const device of portData.devices) initialExpansion[`${device.url}:${device.route}`] = true;
         }
         const newPlot = new PlotConfig('New Plot', {}, initialExpansion);
-        if (this.layoutMode === 'manual') this.manualLayout[newPlot.id] = DEFAULT_PLOT_HEIGHT;
         this.plots.push(newPlot);
+    }
+
+    addPlotAbove(plotId: string) {
+        const index = this.getPlotIndex(plotId);
+        if (index === -1) return;
+        const initialExpansion: ExpandedState = {};
+        for (const portData of deviceState.devices) {
+            for (const device of portData.devices) initialExpansion[`${device.url}:${device.route}`] = true;
+        }
+        const newPlot = new PlotConfig('New Plot', {}, initialExpansion);
+        this.plots.splice(index, 0, newPlot);
+    }
+
+    addPlotBelow(plotId: string) {
+        const index = this.getPlotIndex(plotId);
+        if (index === -1) return;
+        const initialExpansion: ExpandedState = {};
+        for (const portData of deviceState.devices) {
+            for (const device of portData.devices) initialExpansion[`${device.url}:${device.route}`] = true;
+        }
+        const newPlot = new PlotConfig('New Plot', {}, initialExpansion);
+        this.plots.splice(index + 1, 0, newPlot);
+    }
+
+    movePlot(plotId: string, direction: 'up' | 'down') {
+        const index = this.getPlotIndex(plotId);
+        if (index === -1) return;
+        const newIndex = direction === 'up' ? index - 1 : index + 1;
+        if (newIndex < 0 || newIndex >= this.plots.length) return;
+        const [movedPlot] = this.plots.splice(index, 1);
+        this.plots.splice(newIndex, 0, movedPlot);
+    }
+
+    exportPlotToCsv(plotId: string) {
+        const plot = this.plots.find((p) => p.id === plotId);
+        if (!plot) {
+            console.error(`[Export] Plot with id ${plotId} not found.`);
+            return;
+        }
+        const plotData = this.plotsData.get(plotId);
+        if (!plotData || plotData.timestamps.length === 0) {
+            console.warn(`[Export] No data available for plot "${plot.title}" to export.`);
+            return;
+        }
+        console.log(`[Export] Preparing to export plot "${plot.title}"...`, plotData);
     }
 
     addPlotFromStream(dataKey: DataColumnId, streamName: string) {
@@ -373,19 +422,27 @@ class ChartState {
         const streamId = `${deviceId}:${dataKey.stream_id}`;
         const initialExpansion: ExpandedState = { [deviceId]: true, [streamId]: true };
         const newPlot = new PlotConfig(`${streamName} Timeseries`, { [selectionKey]: true }, initialExpansion);
-        if (this.layoutMode === 'manual') this.manualLayout[newPlot.id] = DEFAULT_PLOT_HEIGHT;
         this.plots.push(newPlot);
     }
 
     removePlot(plotId: string) {
         const plotIndex = this.plots.findIndex((p) => p.id === plotId);
         if (plotIndex === -1) return;
-        const plotToRemove = this.plots[plotIndex];
+
         this.destroyPlotOnBackend(plotId);
         this.plots.splice(plotIndex, 1);
         this.plotsData.delete(plotId);
-        delete this.manualLayout[plotId];
-        if (this.plots.length === 0) this.layoutMode = 'auto';
+        
+        // If we are in manual mode, we must update the layout,
+        // otherwise it will contain a reference to a deleted plot.
+        if (this.layoutMode === 'manual') {
+            delete this.manualLayout[plotId];
+        }
+
+        // If the last plot is removed, reset to auto mode.
+        if (this.plots.length === 0) {
+            this.layoutMode = 'auto';
+        }
     }
 
     deleteAllPlots() {

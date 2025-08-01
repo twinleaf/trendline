@@ -27,11 +27,11 @@ impl Pipeline for FftPipeline {
         self.id
     }
 
-    fn get_output(&self) -> PlotData { 
+    fn get_output(&self) -> PlotData {
         self.output.lock().unwrap().read_with(|data| data.clone())
     }
 
-    fn update(&mut self, capture_state: &CaptureState) { 
+    fn update(&mut self, capture_state: &CaptureState) {
         let source_output = self.source_pipeline.lock().unwrap().get_output();
 
         let y_values = if let Some(data) = source_output.series_data.get(0) {
@@ -40,12 +40,18 @@ impl Pipeline for FftPipeline {
             return;
         };
         if y_values.len() < 16 {
-            self.output.lock().unwrap().write_with(|b| *b = PlotData::empty());
+            self.output
+                .lock()
+                .unwrap()
+                .write_with(|b| *b = PlotData::empty());
             return;
         }
 
         let Some(sampling_rate) = self.get_source_sampling_rate(capture_state) else {
-            self.output.lock().unwrap().write_with(|b| *b = PlotData::empty());
+            self.output
+                .lock()
+                .unwrap()
+                .write_with(|b| *b = PlotData::empty());
             return;
         };
 

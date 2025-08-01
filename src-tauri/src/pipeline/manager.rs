@@ -5,7 +5,10 @@ use super::passthrough::PassthroughPipeline;
 use super::Pipeline;
 use crate::pipeline::statistics::StreamingStatisticsProvider;
 use crate::pipeline::StatisticsProvider;
-use crate::shared::{DataColumnId, DecimationMethod, DetrendMethod, FftConfig, PipelineId, PlotData, SharedPlotConfig, TimeseriesConfig, ViewConfig};
+use crate::shared::{
+    DataColumnId, DecimationMethod, DetrendMethod, FftConfig, PipelineId, PlotData,
+    SharedPlotConfig, TimeseriesConfig, ViewConfig,
+};
 use crate::state::capture::CaptureState;
 use crate::util::k_way_merge_plot_data;
 use rayon::prelude::*;
@@ -17,7 +20,7 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 
 pub struct ManagedPlotPipeline {
     config: SharedPlotConfig,
-    output_pipeline_ids: Vec<PipelineId>, 
+    output_pipeline_ids: Vec<PipelineId>,
     all_component_ids: Vec<PipelineId>,
 }
 
@@ -26,11 +29,10 @@ pub struct ProcessingManager {
     pub pipelines: HashMap<PipelineId, Arc<Mutex<dyn Pipeline>>>,
     pub stat_providers: HashMap<PipelineId, Arc<Mutex<dyn StatisticsProvider>>>,
     pub plot_channels: HashMap<String, Channel>,
-    pub statistics_channels: HashMap<PipelineId, Channel>
+    pub statistics_channels: HashMap<PipelineId, Channel>,
 }
 
 impl ProcessingManager {
-
     pub fn new_with_ticker(capture_state: CaptureState) -> Arc<Mutex<Self>> {
         let manager = Arc::new(Mutex::new(Self {
             managed_plots: HashMap::new(),
@@ -127,7 +129,10 @@ impl ProcessingManager {
         manager
     }
     pub fn register_statistics_channel(&mut self, provider_id: PipelineId, channel: Channel) {
-        println!("[Manager] Registering IPC channel for statistics provider ID: {}", provider_id.0);
+        println!(
+            "[Manager] Registering IPC channel for statistics provider ID: {}",
+            provider_id.0
+        );
         self.statistics_channels.insert(provider_id, channel);
     }
 
@@ -136,7 +141,12 @@ impl ProcessingManager {
         self.plot_channels.insert(plot_id, channel);
     }
 
-    pub fn create_fpcs_pipeline(&mut self, source_key: DataColumnId, ratio: usize, window_seconds: f64) -> PipelineId {
+    pub fn create_fpcs_pipeline(
+        &mut self,
+        source_key: DataColumnId,
+        ratio: usize,
+        window_seconds: f64,
+    ) -> PipelineId {
         let pipeline = StreamingFpcsPipeline::new(source_key, ratio, window_seconds);
         let id = pipeline.id();
         println!("[Pipeline] Creating FPCS pipeline. ID: {:?}", id);
@@ -189,17 +199,27 @@ impl ProcessingManager {
             .insert(new_id, Arc::new(Mutex::new(fft_pipeline)));
         Ok(new_id)
     }
-     pub fn apply_plot_config(&mut self, config: SharedPlotConfig) -> Result<Vec<PipelineId>, String> {
+    pub fn apply_plot_config(
+        &mut self,
+        config: SharedPlotConfig,
+    ) -> Result<Vec<PipelineId>, String> {
         println!("[Manager] Applying config for plot ID: {}", config.plot_id);
 
         if let Some(existing_plot) = self.managed_plots.get(&config.plot_id) {
-            if existing_plot.config.view_config == config.view_config &&
-               existing_plot.config.data_keys == config.data_keys {
-                println!("[Manager] Config for {} is unchanged. No action needed.", config.plot_id);
+            if existing_plot.config.view_config == config.view_config
+                && existing_plot.config.data_keys == config.data_keys
+            {
+                println!(
+                    "[Manager] Config for {} is unchanged. No action needed.",
+                    config.plot_id
+                );
                 return Ok(existing_plot.output_pipeline_ids.clone());
             }
-            
-            println!("[Manager] Config for {} changed. Rebuilding.", config.plot_id);
+
+            println!(
+                "[Manager] Config for {} changed. Rebuilding.",
+                config.plot_id
+            );
             self._destroy_plot_components(&config.plot_id);
         }
 
@@ -209,10 +229,11 @@ impl ProcessingManager {
         for key in &config.data_keys {
             match &config.view_config {
                 ViewConfig::Timeseries(ts_config) => {
-                    let id = self._create_timeseries_for_plot(key, ts_config, config.max_sampling_rate);
+                    let id =
+                        self._create_timeseries_for_plot(key, ts_config, config.max_sampling_rate);
                     output_pipeline_ids.push(id);
                     all_component_ids.push(id);
-                },
+                }
                 ViewConfig::Fft(fft_config) => {
                     let (fft_id, source_id) = self._create_fft_chain_for_plot(key, fft_config)?;
                     output_pipeline_ids.push(fft_id);
@@ -231,32 +252,50 @@ impl ProcessingManager {
 
         Ok(output_pipeline_ids)
     }
-    
+
     pub fn destroy_plot_pipelines(&mut self, plot_id: &str) {
         self._destroy_plot_components(plot_id);
         if self.plot_channels.remove(plot_id).is_some() {
-            println!("[Manager] Completely removed plot and IPC channel for ID: {}", plot_id);
+            println!(
+                "[Manager] Completely removed plot and IPC channel for ID: {}",
+                plot_id
+            );
         }
     }
-    
-    fn _create_timeseries_for_plot(&mut self, source_key: &DataColumnId, config: &TimeseriesConfig, max_sr: f64) -> PipelineId {
+
+    fn _create_timeseries_for_plot(
+        &mut self,
+        source_key: &DataColumnId,
+        config: &TimeseriesConfig,
+        max_sr: f64,
+    ) -> PipelineId {
         match config.decimation_method {
             DecimationMethod::Fpcs => {
                 let total_points_in_window = max_sr * config.window_seconds;
                 let target_points = 10.0 * config.resolution_multiplier as f64;
                 let ratio = (total_points_in_window / target_points).round() as usize;
                 self.create_fpcs_pipeline(source_key.clone(), ratio.max(1), config.window_seconds)
-            },
+            }
             DecimationMethod::None => {
                 self.create_passthrough_pipeline(source_key.clone(), config.window_seconds)
             }
         }
     }
 
-    fn _create_fft_chain_for_plot(&mut self, source_key: &DataColumnId, config: &FftConfig) -> Result<(PipelineId, PipelineId), String> {
+    fn _create_fft_chain_for_plot(
+        &mut self,
+        source_key: &DataColumnId,
+        config: &FftConfig,
+    ) -> Result<(PipelineId, PipelineId), String> {
         let intermediate_id = match config.detrend_method {
-            DetrendMethod::None => self.create_passthrough_pipeline(source_key.clone(), config.window_seconds),
-            _ => self.create_detrend_pipeline(source_key.clone(), config.window_seconds, config.detrend_method.clone()),
+            DetrendMethod::None => {
+                self.create_passthrough_pipeline(source_key.clone(), config.window_seconds)
+            }
+            _ => self.create_detrend_pipeline(
+                source_key.clone(),
+                config.window_seconds,
+                config.detrend_method.clone(),
+            ),
         };
 
         let fft_id = self.create_fft_pipeline_from_source(intermediate_id)?;
@@ -265,7 +304,10 @@ impl ProcessingManager {
 
     fn _destroy_plot_components(&mut self, plot_id: &str) {
         if let Some(plot_to_remove) = self.managed_plots.remove(plot_id) {
-            println!("[Manager] Destroying component pipelines for plot ID: {}", plot_id);
+            println!(
+                "[Manager] Destroying component pipelines for plot ID: {}",
+                plot_id
+            );
             for id in plot_to_remove.all_component_ids {
                 self.destroy(id);
             }

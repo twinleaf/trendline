@@ -21,7 +21,7 @@
 	let addButtonEl: HTMLButtonElement;
 	let toggleButtonEl: any;
 
-	const SMOOTHING_FACTOR = 0.02;
+	const SMOOTHING_FACTOR = 0.1;
 
 	// --- INCOMING DATA FROM GLOBAL STORE ---
 	const key = $derived(JSON.stringify(dataKey));

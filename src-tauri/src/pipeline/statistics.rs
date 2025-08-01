@@ -1,8 +1,8 @@
+use crate::pipeline::buffer::DoubleBuffer;
 use crate::pipeline::StatisticsProvider;
-use crate::shared::{DataColumnId, StatisticSet, StreamStatistics, PipelineId};
+use crate::shared::{DataColumnId, PipelineId, StatisticSet, StreamStatistics};
 use crate::state::capture::CaptureState;
 use crate::util::calculate_batch_stats;
-use crate::pipeline::buffer::DoubleBuffer;
 use std::sync::{Arc, Mutex};
 
 use uuid::Uuid;
@@ -37,18 +37,30 @@ impl PersistentCalculator {
         self.m2 += delta * delta2;
         self.sum_of_squares += new_value.powi(2);
 
-        if new_value < self.min { self.min = new_value; }
-        if new_value > self.max { self.max = new_value; }
+        if new_value < self.min {
+            self.min = new_value;
+        }
+        if new_value > self.max {
+            self.max = new_value;
+        }
     }
-    
+
     fn stdev(&self) -> f64 {
-        if self.count < 2 { 0.0 } else { (self.m2 / (self.count - 1) as f64).sqrt() }
+        if self.count < 2 {
+            0.0
+        } else {
+            (self.m2 / (self.count - 1) as f64).sqrt()
+        }
     }
 
     fn rms(&self) -> f64 {
-        if self.count == 0 { 0.0 } else { (self.sum_of_squares / self.count as f64).sqrt() }
+        if self.count == 0 {
+            0.0
+        } else {
+            (self.sum_of_squares / self.count as f64).sqrt()
+        }
     }
-    
+
     fn to_statistic_set(&self) -> StatisticSet {
         StatisticSet {
             count: self.count,
@@ -92,7 +104,9 @@ impl StatisticsProvider for StreamingStatisticsProvider {
     }
 
     fn update(&mut self, capture_state: &CaptureState) {
-        let Some(latest_time) = capture_state.get_latest_unified_timestamp(&[self.source_key.clone()]) else {
+        let Some(latest_time) =
+            capture_state.get_latest_unified_timestamp(&[self.source_key.clone()])
+        else {
             return;
         };
 
@@ -109,7 +123,7 @@ impl StatisticsProvider for StreamingStatisticsProvider {
                 }
             }
         }
-        
+
         let window_min_time = latest_time - self.window_seconds;
         let window_points_vec = capture_state.get_data_across_sessions_for_keys(
             &[self.source_key.clone()],
@@ -131,11 +145,11 @@ impl StatisticsProvider for StreamingStatisticsProvider {
         if let Some(calc) = &self.persistent_calculator {
             new_stats.persistent = calc.to_statistic_set();
         }
-        
+
         self.output.lock().unwrap().write_with(|stats_back_buffer| {
             *stats_back_buffer = new_stats;
         });
-        
+
         self.last_processed_time = latest_time;
     }
 
@@ -145,11 +159,17 @@ impl StatisticsProvider for StreamingStatisticsProvider {
         let latest_time = capture_state
             .get_latest_unified_timestamp(&[self.source_key.clone()])
             .unwrap_or(0.0);
-            
+
         self.last_processed_time = latest_time;
 
-        self.output.lock().unwrap().write_with(|b| *b = StreamStatistics::default());
-        
-        println!("[Stats Provider {:?}] Reset. New start time: {}", self.id, self.last_processed_time);
+        self.output
+            .lock()
+            .unwrap()
+            .write_with(|b| *b = StreamStatistics::default());
+
+        println!(
+            "[Stats Provider {:?}] Reset. New start time: {}",
+            self.id, self.last_processed_time
+        );
     }
 }

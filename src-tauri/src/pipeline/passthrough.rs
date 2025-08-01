@@ -1,7 +1,7 @@
 use super::Pipeline;
+use crate::pipeline::buffer::DoubleBuffer;
 use crate::shared::{DataColumnId, PipelineId, PlotData};
 use crate::state::capture::CaptureState;
-use crate::pipeline::buffer::DoubleBuffer;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -25,14 +25,18 @@ impl PassthroughPipeline {
 }
 
 impl Pipeline for PassthroughPipeline {
-    fn id(&self) -> PipelineId { self.id }
+    fn id(&self) -> PipelineId {
+        self.id
+    }
 
     fn get_output(&self) -> PlotData {
         self.output.lock().unwrap().read_with(|data| data.clone())
     }
 
     fn update(&mut self, capture_state: &CaptureState) {
-        let Some(latest_time) = capture_state.get_latest_unified_timestamp(&[self.source_key.clone()]) else {
+        let Some(latest_time) =
+            capture_state.get_latest_unified_timestamp(&[self.source_key.clone()])
+        else {
             return;
         };
         let min_time = latest_time - self.window_seconds;
@@ -41,15 +45,18 @@ impl Pipeline for PassthroughPipeline {
             min_time,
             latest_time,
         );
-        
-        self.output.lock().unwrap().write_with(|plot_data_back_buffer| {
-            if let Some(points) = raw_data_vecs.get(0) {
-                plot_data_back_buffer.timestamps = points.iter().map(|p| p.x).collect();
-                plot_data_back_buffer.series_data = vec![points.iter().map(|p| p.y).collect()];
-            } else {
-                *plot_data_back_buffer = PlotData::empty();
-            }
-        });
+
+        self.output
+            .lock()
+            .unwrap()
+            .write_with(|plot_data_back_buffer| {
+                if let Some(points) = raw_data_vecs.get(0) {
+                    plot_data_back_buffer.timestamps = points.iter().map(|p| p.x).collect();
+                    plot_data_back_buffer.series_data = vec![points.iter().map(|p| p.y).collect()];
+                } else {
+                    *plot_data_back_buffer = PlotData::empty();
+                }
+            });
     }
 
     fn get_source_sampling_rate(&self, capture_state: &CaptureState) -> Option<f64> {

@@ -58,7 +58,7 @@ impl StreamingFpcsPipeline {
 
         let mut max_p = self.window_max_point.unwrap();
         let mut min_p = self.window_min_point.unwrap();
-        
+
         self.counter += 1;
 
         if p.y >= max_p.y {
@@ -69,7 +69,9 @@ impl StreamingFpcsPipeline {
 
         if self.counter >= self.ratio {
             if min_p.x < max_p.x {
-                if self.last_retained_flag == FpcsLastRetained::Min && self.potential_point != Some(min_p) {
+                if self.last_retained_flag == FpcsLastRetained::Min
+                    && self.potential_point != Some(min_p)
+                {
                     if let Some(pp) = self.potential_point {
                         self.retain_point(pp);
                     }
@@ -78,10 +80,11 @@ impl StreamingFpcsPipeline {
                 self.potential_point = Some(max_p);
                 min_p = max_p;
                 self.last_retained_flag = FpcsLastRetained::Min;
-            } 
-            else {
-                if self.last_retained_flag == FpcsLastRetained::Max && self.potential_point != Some(max_p) {
-                     if let Some(pp) = self.potential_point {
+            } else {
+                if self.last_retained_flag == FpcsLastRetained::Max
+                    && self.potential_point != Some(max_p)
+                {
+                    if let Some(pp) = self.potential_point {
                         self.retain_point(pp);
                     }
                 }
@@ -97,7 +100,7 @@ impl StreamingFpcsPipeline {
         self.window_max_point = Some(max_p);
         self.window_min_point = Some(min_p);
     }
-    
+
     fn retain_point(&mut self, p: Point) {
         if self.capacity > 0 && self.output.len() >= self.capacity {
             self.output.pop_front();
@@ -146,7 +149,9 @@ impl Pipeline for StreamingFpcsPipeline {
             }
         }
 
-        let Some(latest_time) = capture_state.get_latest_unified_timestamp(&[self.source_key.clone()]) else {
+        let Some(latest_time) =
+            capture_state.get_latest_unified_timestamp(&[self.source_key.clone()])
+        else {
             return;
         };
 
@@ -165,7 +170,7 @@ impl Pipeline for StreamingFpcsPipeline {
                 self.last_processed_time = latest_time;
                 return;
             }
-            
+
             for point in points {
                 self.process_point(*point);
             }

@@ -1,9 +1,11 @@
 use std::sync::{Arc, Mutex};
 
-use crate::{pipeline::manager::ProcessingManager, 
-            shared::{DataColumnId, PipelineId, SharedPlotConfig}, state::capture::CaptureState};
+use crate::{
+    pipeline::manager::ProcessingManager,
+    shared::{DataColumnId, PipelineId, SharedPlotConfig},
+    state::capture::CaptureState,
+};
 use tauri::{ipc::Channel, State};
-
 
 #[tauri::command]
 pub fn update_plot_pipeline(
@@ -29,7 +31,10 @@ pub fn create_statistics_provider(
     window_seconds: f64,
     manager: State<Arc<Mutex<ProcessingManager>>>,
 ) -> Result<PipelineId, String> {
-    Ok(manager.lock().unwrap().create_statistics_provider(source_key, window_seconds))
+    Ok(manager
+        .lock()
+        .unwrap()
+        .create_statistics_provider(source_key, window_seconds))
 }
 
 #[tauri::command]
@@ -38,7 +43,10 @@ pub async fn listen_to_plot_data(
     on_event: Channel,
     manager: tauri::State<'_, Arc<Mutex<ProcessingManager>>>,
 ) -> Result<(), String> {
-    manager.lock().unwrap().register_plot_channel(plot_id, on_event);
+    manager
+        .lock()
+        .unwrap()
+        .register_plot_channel(plot_id, on_event);
     Ok(())
 }
 
@@ -48,16 +56,15 @@ pub async fn listen_to_statistics(
     on_event: Channel,
     manager: tauri::State<'_, Arc<Mutex<ProcessingManager>>>,
 ) -> Result<(), String> {
-    manager.lock().unwrap().register_statistics_channel(id, on_event);
+    manager
+        .lock()
+        .unwrap()
+        .register_statistics_channel(id, on_event);
     Ok(())
 }
 
-
 #[tauri::command]
-pub fn destroy_processor(
-    id: PipelineId,
-    manager: State<Arc<Mutex<ProcessingManager>>>,
-) {
+pub fn destroy_processor(id: PipelineId, manager: State<Arc<Mutex<ProcessingManager>>>) {
     manager.lock().unwrap().destroy(id);
 }
 

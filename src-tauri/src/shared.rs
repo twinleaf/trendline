@@ -1,21 +1,21 @@
 //! trendline_lib/src/shared.rs
 //! Front-end facing data shapes
 
+use crate::util;
+use num_enum::{FromPrimitive, IntoPrimitive};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
-use num_enum::{FromPrimitive, IntoPrimitive};
 use uuid::Uuid;
-use crate::util;
 
 use twinleaf::tio::proto::meta::{
     ColumnMetadata as LibColumnMeta, DeviceMetadata as LibDeviceMeta,
-    StreamMetadata as LibStreamMeta, SegmentMetadata as LibSegmentMeta,
     MetadataEpoch as LibMetadataEpoch, MetadataFilter as LibMetadataFilter,
+    SegmentMetadata as LibSegmentMeta, StreamMetadata as LibStreamMeta,
 };
 
 use twinleaf::tio::proto::rpc::{
-    RpcErrorCode as LibRpcErrorCode, RpcErrorPayload as LibRpcErrorPayload
+    RpcErrorCode as LibRpcErrorCode, RpcErrorPayload as LibRpcErrorPayload,
 };
 
 use twinleaf::tio::proxy::{PortError, RpcError as LibProxyError};
@@ -222,7 +222,7 @@ pub struct RpcErrorPayload {
 }
 
 impl From<LibRpcErrorPayload> for RpcErrorPayload {
-    fn from(s: LibRpcErrorPayload ) -> Self {
+    fn from(s: LibRpcErrorPayload) -> Self {
         Self {
             id: s.id,
             error: s.error.into(),
@@ -235,7 +235,7 @@ impl From<LibRpcErrorPayload> for RpcErrorPayload {
 #[ts(export, export_to = "../../src/lib/bindings/")]
 #[serde(tag = "type", content = "payload")]
 pub enum RpcError {
-    ExecError(RpcErrorPayload), 
+    ExecError(RpcErrorPayload),
     SendFailed(String),
     RecvFailed(String),
     TypeError,
@@ -257,23 +257,33 @@ impl From<LibProxyError> for RpcError {
     fn from(lib_err: LibProxyError) -> Self {
         match lib_err {
             LibProxyError::ExecError(payload) => RpcError::ExecError(payload.into()),
-            
+
             LibProxyError::SendFailed(send_error) => {
                 let msg = match send_error {
-                    twinleaf::tio::proxy::SendError::WouldBlock(_) => "Send would block.".to_string(),
-                    twinleaf::tio::proxy::SendError::ProxyDisconnected(_) => "Proxy disconnected during send.".to_string(),
-                    twinleaf::tio::proxy::SendError::InvalidRoute(_) => "Invalid device route for send.".to_string(),
+                    twinleaf::tio::proxy::SendError::WouldBlock(_) => {
+                        "Send would block.".to_string()
+                    }
+                    twinleaf::tio::proxy::SendError::ProxyDisconnected(_) => {
+                        "Proxy disconnected during send.".to_string()
+                    }
+                    twinleaf::tio::proxy::SendError::InvalidRoute(_) => {
+                        "Invalid device route for send.".to_string()
+                    }
                 };
                 RpcError::SendFailed(msg)
-            },
-            
+            }
+
             LibProxyError::RecvFailed(recv_error) => {
                 let msg = match recv_error {
-                    twinleaf::tio::proxy::RecvError::WouldBlock => "Receive would block.".to_string(),
-                    twinleaf::tio::proxy::RecvError::ProxyDisconnected => "Proxy disconnected during receive.".to_string(),
+                    twinleaf::tio::proxy::RecvError::WouldBlock => {
+                        "Receive would block.".to_string()
+                    }
+                    twinleaf::tio::proxy::RecvError::ProxyDisconnected => {
+                        "Proxy disconnected during receive.".to_string()
+                    }
                 };
                 RpcError::RecvFailed(msg)
-            },
+            }
             LibProxyError::TypeError => RpcError::TypeError,
         }
     }
@@ -283,7 +293,11 @@ impl From<LibProxyError> for RpcError {
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub enum MetadataEpoch {
-    Invalid, Zero, Systime, Unix, Unknown(u8),
+    Invalid,
+    Zero,
+    Systime,
+    Unix,
+    Unknown(u8),
 }
 
 impl From<LibMetadataEpoch> for MetadataEpoch {
@@ -301,7 +315,10 @@ impl From<LibMetadataEpoch> for MetadataEpoch {
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub enum MetadataFilter {
-    Unfiltered, FirstOrderCascade1, FirstOrderCascade2, Unknown(u8),
+    Unfiltered,
+    FirstOrderCascade1,
+    FirstOrderCascade2,
+    Unknown(u8),
 }
 
 impl From<LibMetadataFilter> for MetadataFilter {
@@ -314,8 +331,6 @@ impl From<LibMetadataFilter> for MetadataFilter {
         }
     }
 }
-
-
 
 // Frontend structs ----------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
@@ -350,7 +365,7 @@ pub enum DecimationMethod {
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub enum DetrendMethod {
     #[default]
-    None,      // Only remove the mean (DC offset)
+    None, // Only remove the mean (DC offset)
     Linear,    // Remove a linear trend (y = mt + c)
     Quadratic, // Remove a quadratic trend (y = at^2 + bt + c)
 }
@@ -366,7 +381,7 @@ pub enum ViewConfig {
 pub struct TimeseriesConfig {
     pub decimation_method: DecimationMethod,
     pub window_seconds: f64,
-    pub resolution_multiplier: u32, 
+    pub resolution_multiplier: u32,
 }
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
@@ -382,7 +397,6 @@ pub struct SharedPlotConfig {
     pub max_sampling_rate: f64,
     pub view_config: ViewConfig,
 }
-
 
 // Plot Structs -----------------------------------------------------------------
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
@@ -406,7 +420,10 @@ impl DataColumnId {
     }
 
     pub fn stream_key(&self) -> Self {
-        Self { column_index: 0, ..self.clone() }
+        Self {
+            column_index: 0,
+            ..self.clone()
+        }
     }
 }
 

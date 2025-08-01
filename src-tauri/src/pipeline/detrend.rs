@@ -35,8 +35,10 @@ impl Pipeline for DetrendPipeline {
         self.output.lock().unwrap().read_with(|data| data.clone())
     }
 
-    fn update(&mut self, capture_state: &CaptureState) { 
-        let Some(latest_time) = capture_state.get_latest_unified_timestamp(&[self.source_key.clone()]) else {
+    fn update(&mut self, capture_state: &CaptureState) {
+        let Some(latest_time) =
+            capture_state.get_latest_unified_timestamp(&[self.source_key.clone()])
+        else {
             return;
         };
         let min_time = latest_time - self.window_seconds;
@@ -46,9 +48,14 @@ impl Pipeline for DetrendPipeline {
             latest_time,
         );
 
-        let Some(points) = raw_data_vecs.get(0) else { return };
+        let Some(points) = raw_data_vecs.get(0) else {
+            return;
+        };
         if points.is_empty() {
-            self.output.lock().unwrap().write_with(|b| *b = PlotData::empty());
+            self.output
+                .lock()
+                .unwrap()
+                .write_with(|b| *b = PlotData::empty());
             return;
         }
 
@@ -73,7 +80,6 @@ impl Pipeline for DetrendPipeline {
     }
 }
 
-
 pub fn remove_linear_trend(y: &[f64]) -> Vec<f64> {
     let n = y.len();
     if n == 0 {
@@ -97,16 +103,16 @@ pub fn remove_linear_trend(y: &[f64]) -> Vec<f64> {
 
 pub fn remove_quadratic_trend(y: &[f64]) -> Vec<f64> {
     let n = y.len();
-    if n < 3 { 
+    if n < 3 {
         return remove_linear_trend(y);
     }
 
     let t: Vec<f64> = (0..n).map(|i| i as f64).collect();
 
     let a = DMatrix::from_fn(n, 3, |r, c| match c {
-        0 => 1.0,      
-        1 => t[r],      
-        _ => t[r].powi(2), 
+        0 => 1.0,
+        1 => t[r],
+        _ => t[r].powi(2),
     });
     let b = DVector::from_vec(y.to_vec());
 

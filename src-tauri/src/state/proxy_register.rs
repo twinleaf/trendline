@@ -1,15 +1,15 @@
 // TAKES SERIAL/TCP PORT URL and maps it to a PortManager
 
 use crate::proxy::port_manager::PortManager;
-use crate::state::capture::CaptureState;
 use crate::shared::DataColumnId;
+use crate::state::capture::CaptureState;
 use dashmap::DashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
 pub struct ProxyRegister {
     pub ports: DashMap<String, Arc<PortManager>>,
-    pub active_selections: DashMap<String, Vec<DataColumnId>>, 
+    pub active_selections: DashMap<String, Vec<DataColumnId>>,
     capture: CaptureState,
     app: AppHandle,
 }
@@ -43,7 +43,7 @@ impl ProxyRegister {
             if !url.starts_with("serial://") {
                 return true;
             }
-            
+
             if keep(url) {
                 true
             } else {
