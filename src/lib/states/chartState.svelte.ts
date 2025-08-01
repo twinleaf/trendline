@@ -5,10 +5,11 @@ import type { DetrendMethod } from '$lib/bindings/DetrendMethod';
 import type { RowSelectionState } from '@tanstack/table-core';
 import type { ExpandedState } from '@tanstack/table-core';
 import { untrack } from 'svelte';
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import type { PipelineId } from '$lib/bindings/PipelineId';
 import type { PlotData } from '$lib/bindings/PlotData';
 import { SvelteMap } from 'svelte/reactivity';
+import type { SharedPlotConfig } from '$lib/bindings/SharedPlotConfig';
 
 export type ChartLayout = 'carousel' | 'vertical' | 'horizontal';
 export type StreamLayout = 'grouped' | 'vertical' | 'horizontal';
@@ -62,8 +63,9 @@ export class PlotConfig {
     // Updated pipelineMap to track the full chain for FFTs
     pipelineMap = new SvelteMap<string, { 
         timeseriesId: PipelineId | null; 
-        fftSourceId: PipelineId | null; // Intermediate detrend pipeline
+        fftSourceId: PipelineId | null;
         fftId: PipelineId | null; 
+		configSignature: string | null;
     }>();
 
     #manualDecimationMethod = $state<DecimationMethod>('Fpcs');
@@ -197,8 +199,26 @@ export class PlotConfig {
         }
         const uplotSeriesConfig: uPlot.Series[] = [{}, ...this.series.map((s) => s.uPlotSeries)];
         return {
-            width: 800, height: 400, series: uplotSeriesConfig, scales: scalesConfig, axes: axesConfig, pxAlign: 0,
-            legend: { show: false }, cursor: { drag: { setScale: false }, show: true, points: { show: false }, move: (_, t, l) => [t, l] }
+            width: 800, height: 400, 
+            series: uplotSeriesConfig, 
+            scales: scalesConfig, 
+            axes: axesConfig, 
+            pxAlign: 0,
+            legend: { show: false }, 
+            cursor: {
+                drag: {
+                    setScale: false
+                },
+                show: true,
+                points: { show: false },
+                move: (_, t, l) => [t, l],
+
+                bind: {
+                    dblclick: (u) => {
+                        return null;
+                    }   
+                }
+            },
         };
     });
 
@@ -223,7 +243,7 @@ class ChartState {
     manualLayout = $state<Record<string, number>>({});
 
     // --- Private State ---
-    #pollingIntervalId: ReturnType<typeof setInterval> | null = null;
+    #listeningPlots = new Set<string>();
 
     // --- Layout Logic ---
     layout = $derived.by(() => {
@@ -253,188 +273,85 @@ class ChartState {
         return newLayout;
     });
 
-    // --- "Command" Methods to be called by components ---
-
-    initPolling() {
-		if (this.#pollingIntervalId) return;
-		let isFetching = false;
-
-		this.#pollingIntervalId = setInterval(async () => {
-			if (this.isPaused || this.plots.length === 0 || isFetching) return;
-			
-			isFetching = true;
-			try {
-				const fetchPromises = this.plots.map(async (plot) => {
-					if (plot.isPaused || plot.series.length === 0) return;
-
-					const pipelineIds = Array.from(plot.pipelineMap.values())
-						.map((p) => (plot.viewType === 'fft' ? p.fftId : p.timeseriesId))
-						.filter((id): id is PipelineId => !!id);
-					
-					if (pipelineIds.length > 0) {
-						try {
-							const data = await invoke<PlotData>('get_merged_plot_data', { ids: pipelineIds });
-							this.plotsData.set(plot.id, data);
-						} catch (e) {
-
-						}
-					}
-				});
-				await Promise.all(fetchPromises);
-			} finally {
-				isFetching = false;
-			}
-		}, 33);
-	}
-
     destroy() {
-        if (this.#pollingIntervalId) {
-            clearInterval(this.#pollingIntervalId);
-            this.#pollingIntervalId = null;
-        }
-        untrack(() => {
-            for (const plot of this.plots) this._destroyPipelinesForPlot(plot);
-        });
+        this.deleteAllPlots();
     }
 
-    updateAllPlotPipelines() {
-        for (const plot of this.plots) {
-            const currentSeriesKeys = new Set(plot.series.map((s) => JSON.stringify(s.dataKey)));
-            const managedKeys = new Set(plot.pipelineMap.keys());
-            const keysToAdd = [...currentSeriesKeys].filter((k) => !managedKeys.has(k));
-            const keysToRemove = [...managedKeys].filter((k) => !currentSeriesKeys.has(k));
-            const keysToUpdate = [...managedKeys].filter((k) => currentSeriesKeys.has(k));
-
-            for (const keyStr of keysToAdd) {
-                plot.pipelineMap.set(keyStr, { timeseriesId: null, fftSourceId: null, fftId: null });
-                this._createTimeseriesPipeline(plot, keyStr);
+     async syncPlotWithBackend(plot: PlotConfig) {
+        untrack(async () => {
+            if (plot.series.length === 0) {
+                if (this.#listeningPlots.has(plot.id)) {
+                    await this.destroyPlotOnBackend(plot.id);
+                }
+                return;
             }
-            for (const keyStr of keysToRemove) this._destroyPipelinesForKey(plot, keyStr);
-            
-            for (const keyStr of keysToUpdate) {
-                const pipelines = plot.pipelineMap.get(keyStr);
-                if (!pipelines) continue;
 
-                if (plot.viewType === 'fft') {
-                    if (!pipelines.fftId) {
-                        this._createFftChain(plot, keyStr);
+
+            if (!this.#listeningPlots.has(plot.id)) {
+                console.log(`[IPC] Establishing new channel for plot: ${plot.id}`);
+                
+                const plotChannel = new Channel<PlotData>();
+
+                plotChannel.onmessage = (data) => {
+                    if (!this.isPaused && !plot.isPaused) {
+                        this.plotsData.set(plot.id, data);
                     }
-                    // NOTE: This doesn't handle changes to FFT settings (e.g. detrend method) yet.
-                    // That would require a more complex reconciliation.
-                } else { // timeseries view
-                    if (pipelines.fftId) {
-                        this._destroyFftChain(plot, keyStr);
-                    }
-                    // NOTE: This doesn't handle changes to timeseries settings (e.g. decimation method).
+                };
+                
+
+                try {
+                    await invoke('listen_to_plot_data', {
+                        plotId: plot.id,
+                        onEvent: plotChannel 
+                    });
+                    
+                    this.#listeningPlots.add(plot.id);
+                } catch (e) {
+                     console.error(`[IPC] Failed to invoke listener for plot ${plot.id}`, e);
                 }
             }
-        }
-    }
 
-    // --- Private Helpers ---
+            const viewConfig = plot.viewType === 'timeseries' 
+                ? { 
+                    Timeseries: {
+                        decimation_method: plot.decimationMethod,
+                        window_seconds: plot.windowSeconds,
+                        resolution_multiplier: plot.resolutionMultiplier,
+                    }
+                } 
+                : {
+                    Fft: {
+                        window_seconds: plot.fftSeconds,
+                        detrend_method: plot.fftDetrendMethod,
+                    }
+                };
 
-    _createTimeseriesPipeline(plot: PlotConfig, keyStr: string) {
-        try {
-            const dataKey = JSON.parse(keyStr);
-            let promise: Promise<PipelineId>;
+            const configForBackend: SharedPlotConfig = {
+                plot_id: plot.id,
+                data_keys: plot.series.map(s => s.dataKey),
+                max_sampling_rate: plot.maxSamplingRate,
+                view_config: viewConfig
+            };
 
-            if (plot.decimationMethod === 'Fpcs') {
-                const totalPointsInWindow = plot.maxSamplingRate * plot.windowSeconds;
-                const targetPoints = 10 * plot.resolutionMultiplier; // Density factor
-                let ratio = Math.round(totalPointsInWindow / targetPoints);
-                if (ratio < 1) ratio = 1;
-
-                console.log(`[Frontend] Creating FPCS pipeline for ${keyStr} with ratio ${ratio}`);
-                promise = invoke('create_fpcs_pipeline', { 
-                    sourceKey: dataKey, 
-                    ratio, 
-                    windowSeconds: plot.windowSeconds // Add this line
-                });
-
-            } else { // 'None'
-                console.log(`[Frontend] Creating Passthrough pipeline for ${keyStr}`);
-                promise = invoke('create_passthrough_pipeline', { sourceKey: dataKey, windowSeconds: plot.windowSeconds });
+            // 2. Make the single, declarative "upsert" call.
+            try {
+                await invoke('update_plot_pipeline', { config: configForBackend });
+            } catch (e) {
+                console.error(`[Frontend] Failed to sync pipeline for plot ${plot.id}:`, e);
             }
-
-            promise.then((id) => {
-                console.log(`[Frontend] Timeseries pipeline created on backend. ID:`, id);
-                const entry = plot.pipelineMap.get(keyStr);
-                if (entry) entry.timeseriesId = id;
-            }).catch((e) => console.error(`Failed to create timeseries pipeline for ${keyStr}:`, e));
-
-        } catch (e) { console.error(`Error parsing key to create pipeline: ${keyStr}`, e); }
-    }
-
-    async _createFftChain(plot: PlotConfig, keyStr: string) {
-        const pipelines = plot.pipelineMap.get(keyStr);
-        if (!pipelines || !pipelines.timeseriesId) return;
-
-        try {
-            const dataKey = JSON.parse(keyStr);
-            let fftSourceId = pipelines.timeseriesId;
-            let intermediateId: PipelineId | null = null;
-
-            // If detrending is needed, create a new detrend pipeline as the source for the FFT.
-            if (plot.fftDetrendMethod !== 'None') {
-                console.log(`[Frontend] Creating intermediate Detrend pipeline for FFT.`);
-                const detrendId = await invoke<PipelineId>('create_detrend_pipeline', {
-                    sourceKey: dataKey,
-                    windowSeconds: plot.fftSeconds,
-                    method: plot.fftDetrendMethod,
-                });
-                console.log(`[Frontend] Detrend pipeline created. ID:`, detrendId);
-                fftSourceId = detrendId;
-                intermediateId = detrendId;
-            }
-            
-            console.log(`[Frontend] Creating FFT pipeline from source: ${fftSourceId}`);
-            const fftId = await invoke<PipelineId>('create_fft_pipeline_from_source', { 
-                sourcePipelineId: fftSourceId 
-            });
-            console.log(`[Frontend] FFT pipeline created. ID: ${fftId}`);
-
-            const entry = plot.pipelineMap.get(keyStr);
-            if (entry) {
-                entry.fftSourceId = intermediateId;
-                entry.fftId = fftId;
-            }
-
-        } catch (e) {
-            console.error(`Failed to create FFT chain for ${keyStr}:`, e);
-        }
+        });
     }
     
-    _destroyFftChain(plot: PlotConfig, keyStr: string) {
-        const pipelines = plot.pipelineMap.get(keyStr);
-        if (!pipelines) return;
-
-        if (pipelines.fftId) {
-            console.log(`[Frontend] Destroying FFT pipeline on backend. ID:`, pipelines.fftId);
-            invoke('destroy_processor', { id: pipelines.fftId });
-            pipelines.fftId = null;
+     async destroyPlotOnBackend(plotId: string) {
+        if (this.#listeningPlots.has(plotId)) {
+            this.#listeningPlots.delete(plotId);
+            console.log(`[IPC] Stopped tracking channel for plot ${plotId}`);
         }
-        if (pipelines.fftSourceId) {
-            console.log(`[Frontend] Destroying intermediate FFT source pipeline. ID:`, pipelines.fftSourceId);
-            invoke('destroy_processor', { id: pipelines.fftSourceId });
-            pipelines.fftSourceId = null;
-        }
-    }
-
-    _destroyPipelinesForKey(plot: PlotConfig, keyStr: string) {
-        const pipelines = plot.pipelineMap.get(keyStr);
-        if (pipelines) {
-            if (pipelines.timeseriesId) {
-                console.log(`[Frontend] Destroying timeseries pipeline on backend. ID:`, pipelines.timeseriesId);
-                invoke('destroy_processor', { id: pipelines.timeseriesId });
-            }
-            this._destroyFftChain(plot, keyStr); // Also destroy any FFT components
-        }
-        plot.pipelineMap.delete(keyStr);
-    }
-
-    _destroyPipelinesForPlot(plot: PlotConfig) {
-        for (const keyStr of plot.pipelineMap.keys()) {
-            this._destroyPipelinesForKey(plot, keyStr);
+        
+        try {
+            await invoke('destroy_plot_pipeline', { plotId });
+        } catch(e) {
+            console.error(`[Frontend] Failed to destroy backend pipeline for plot ${plotId}:`, e);
         }
     }
     
@@ -464,7 +381,7 @@ class ChartState {
         const plotIndex = this.plots.findIndex((p) => p.id === plotId);
         if (plotIndex === -1) return;
         const plotToRemove = this.plots[plotIndex];
-        this._destroyPipelinesForPlot(plotToRemove);
+        this.destroyPlotOnBackend(plotId);
         this.plots.splice(plotIndex, 1);
         this.plotsData.delete(plotId);
         delete this.manualLayout[plotId];
@@ -473,7 +390,9 @@ class ChartState {
 
     deleteAllPlots() {
         untrack(() => {
-            for (const plot of this.plots) this._destroyPipelinesForPlot(plot);
+            for (const plot of this.plots) {
+                this.destroyPlotOnBackend(plot.id);
+            }
         });
         this.plots = [];
         this.manualLayout = {};

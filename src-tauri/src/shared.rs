@@ -355,6 +355,33 @@ pub enum DetrendMethod {
     Quadratic, // Remove a quadratic trend (y = at^2 + bt + c)
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum ViewConfig {
+    Timeseries(TimeseriesConfig),
+    Fft(FftConfig),
+}
+#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct TimeseriesConfig {
+    pub decimation_method: DecimationMethod,
+    pub window_seconds: f64,
+    pub resolution_multiplier: u32, 
+}
+#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct FftConfig {
+    pub window_seconds: f64,
+    pub detrend_method: DetrendMethod,
+}
+#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct SharedPlotConfig {
+    pub plot_id: String,
+    pub data_keys: Vec<DataColumnId>,
+    pub max_sampling_rate: f64,
+    pub view_config: ViewConfig,
+}
 
 
 // Plot Structs -----------------------------------------------------------------
@@ -387,7 +414,7 @@ impl DataColumnId {
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct PipelineId(pub Uuid);
 
-#[derive(Serialize, Clone, Debug, Default, TS, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, TS, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct PlotData {
     pub timestamps: Vec<f64>,
@@ -406,6 +433,9 @@ impl PlotData {
             timestamps: vec![],
             series_data: vec![Vec::new(); n],
         }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.timestamps.is_empty()
     }
 }
 

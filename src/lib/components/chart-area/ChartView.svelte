@@ -10,7 +10,7 @@
 	import type { UiStream } from '$lib/bindings/UiStream';
 	import type { ColumnMeta } from '$lib/bindings/ColumnMeta';
 	import { sortUiDevicesByRoute } from '$lib/utils';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 
 	let plots = $derived(chartState.plots);
 	let layout = $derived(chartState.layout);
@@ -89,18 +89,9 @@
 		};
 	});
 
-	onMount(() => {
-		chartState.initPolling(); // Starts the single polling loop
-
-		return () => {
-			chartState.destroy(); // Stops polling and cleans up ALL backend pipelines
-		};
+	onDestroy(() => {
+		chartState.destroy();
 	});
-	
-	$effect(() => {
-		chartState.updateAllPlotPipelines();
-	});
-
 
 </script>
 

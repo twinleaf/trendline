@@ -1,98 +1,10 @@
-use crate::pipeline::manager::ProcessingManager;
 use crate::state::capture::{CaptureState};
-use crate::shared::{DataColumnId, PlotData, Point, PortState, StreamStatistics, PipelineId};
+use crate::shared::{DataColumnId, PortState};
 use tauri::State;
 use twinleaf::tio::proto::DeviceRoute;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use crate::state::proxy_register::ProxyRegister;
-use crate::util::{k_way_merge_plot_data, lerp};
 
-#[tauri::command]
-pub fn get_interpolated_values(
-    time: f64,
-    pipeline_ids: Vec<PipelineId>,
-    manager: State<Arc<Mutex<ProcessingManager>>>,
-) -> Result<Vec<Option<f64>>, String> {
-    if pipeline_ids.is_empty() {
-        return Ok(vec![]);
-    }
-
-    let manager = manager.lock().unwrap();
-    let mut results = Vec::with_capacity(pipeline_ids.len());
-
-    for id in pipeline_ids {
-        let value = if let Some(pipeline_mutex) = manager.pipelines.get(&id) {
-            let pipeline = pipeline_mutex.lock().unwrap();
-
-            let plot_data = pipeline.get_output();
-
-            if plot_data.timestamps.is_empty() || plot_data.series_data.is_empty() {
-                None
-            } else {
-                match plot_data.timestamps.binary_search_by(|t| t.partial_cmp(&time).unwrap_or(std::cmp::Ordering::Less)) {
-                    Ok(index) => plot_data.series_data[0].get(index).copied(),
-                    Err(index) => {
-                        if index == 0 {
-                            plot_data.series_data[0].get(0).copied()
-                        } else if index >= plot_data.timestamps.len() {
-                            plot_data.series_data[0].last().copied()
-                        } else {
-                            let p1 = Point {
-                                x: plot_data.timestamps[index - 1],
-                                y: plot_data.series_data[0][index - 1],
-                            };
-                            let p2 = Point {
-                                x: plot_data.timestamps[index],
-                                y: plot_data.series_data[0][index],
-                            };
-                            Some(lerp(&p1, &p2, time))
-                        }
-                    }
-                }
-            }
-        } else {
-            None
-        };
-        results.push(value);
-    }
-
-    Ok(results)
-}
-
-#[tauri::command]
-pub fn get_merged_plot_data(
-    ids: Vec<PipelineId>,
-    manager: State<Arc<Mutex<ProcessingManager>>>,
-    capture: State<CaptureState>,
-) -> Result<PlotData, String> {
-    let manager = manager.lock().unwrap();
-    let mut plot_data_to_merge = Vec::with_capacity(ids.len());
-
-    for id in ids {
-        if let Some(pipeline_mutex) = manager.pipelines.get(&id) {
-            let mut pipeline = pipeline_mutex.lock().unwrap();
-            pipeline.update(&capture);
-            plot_data_to_merge.push(pipeline.get_output().clone());
-        }
-    }
-
-    if plot_data_to_merge.is_empty() {
-        return Ok(PlotData::empty());
-    }
-
-    Ok(k_way_merge_plot_data(plot_data_to_merge))
-}
-
-#[tauri::command]
-pub fn get_statistics_data(
-    id: PipelineId,
-    manager: State<Arc<Mutex<ProcessingManager>>>,
-    capture: State<CaptureState>,
-) -> Result<StreamStatistics, String> {
-    let manager = manager.lock().unwrap();
-    manager.get_statistics_data(id, &capture)
-        .ok_or_else(|| "Statistics provider not found".to_string())
-}
 
 #[tauri::command]
 pub fn confirm_selection(

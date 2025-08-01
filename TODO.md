@@ -21,9 +21,11 @@ This document outlines the current bugs, desired features, and code quality impr
 
 [x] Plot Control Focus: Fix how plot control's focus is not removed when the PopOver disappears (eg. hitting space bar after closing the popover reopens it). Presumably tied to the button focus.
 
-# #Features
+## Features
 
 [x] Scalar Data Viewer: Implement exponential moving average and a boxed display for scalar values
+
+[ ] Data Clipboard: Implement query to copy current window view to CSV format
 
 [ ] Device Selector UI: Implement the pop-up modal for device selection, triggered from the "Change Device" menu item.
 
@@ -43,7 +45,7 @@ This document outlines the current bugs, desired features, and code quality impr
 
 ## Code Quality & Refactoring
 
-[ ] Reactive Data Flow:
+[x] Reactive Data Flow:
 
 Goal: Transition from a polling-based model to a reactive, event-driven architecture.
 

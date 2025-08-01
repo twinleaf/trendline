@@ -117,24 +117,39 @@ impl StatisticsProvider for StreamingStatisticsProvider {
             latest_time,
         );
 
-        self.output.lock().unwrap().write_with(|stats_back_buffer| {
-            if let Some(points) = window_points_vec.get(0) {
+        let mut new_stats = StreamStatistics::default();
+
+        if let Some(points) = window_points_vec.get(0) {
+            if !points.is_empty() {
                 if let Some(last_point) = points.last() {
-                    stats_back_buffer.latest_value = last_point.y;
+                    new_stats.latest_value = last_point.y;
                 }
-                stats_back_buffer.window = calculate_batch_stats(points);
+                new_stats.window = calculate_batch_stats(points);
             }
-            if let Some(calc) = &self.persistent_calculator {
-                stats_back_buffer.persistent = calc.to_statistic_set();
-            }
+        }
+
+        if let Some(calc) = &self.persistent_calculator {
+            new_stats.persistent = calc.to_statistic_set();
+        }
+        
+        self.output.lock().unwrap().write_with(|stats_back_buffer| {
+            *stats_back_buffer = new_stats;
         });
         
         self.last_processed_time = latest_time;
     }
 
-    fn reset(&mut self) {
+    fn reset(&mut self, capture_state: &CaptureState) {
         self.persistent_calculator = None;
-        self.last_processed_time = 0.0;
+
+        let latest_time = capture_state
+            .get_latest_unified_timestamp(&[self.source_key.clone()])
+            .unwrap_or(0.0);
+            
+        self.last_processed_time = latest_time;
+
         self.output.lock().unwrap().write_with(|b| *b = StreamStatistics::default());
+        
+        println!("[Stats Provider {:?}] Reset. New start time: {}", self.id, self.last_processed_time);
     }
 }

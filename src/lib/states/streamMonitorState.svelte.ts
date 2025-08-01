@@ -1,105 +1,101 @@
 import type { RowSelectionState, ExpandedState } from '@tanstack/table-core';
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import type { PipelineId } from '$lib/bindings/PipelineId';
 import type { StreamStatistics } from '$lib/bindings/StreamStatistics';
 import type { DataColumnId } from '$lib/bindings/DataColumnId';
-import { chartState } from './chartState.svelte';
+import { SvelteMap } from 'svelte/reactivity';
+import { untrack } from 'svelte';
 
 class StreamMonitorState {
-	// --- Public State ---
+	// --- Public State (The Single Source of Truth) ---
 	rowSelection = $state<RowSelectionState>({});
 	expansion = $state<ExpandedState>({});
-	statisticsData = $state(new Map<string, StreamStatistics>());
+	statisticsData = new SvelteMap<string, StreamStatistics | null>();
 
 	// --- Private State ---
-	#pipelineIds = new Map<string, PipelineId>();
-	#pollingIntervalId: ReturnType<typeof setInterval> | null = null;
-
-	// --- "Command" Methods ---
+	#pipelineIds = new SvelteMap<string, PipelineId>();
+	#listeningProviders = new Set<string>();
+	#isInitialized = false;
 
 	/**
-	 * Starts the central polling loop for statistics.
-	 * Should be called from the component's onMount.
+	 * Initializes the state manager's reactive loop.
+	 * This should be called once when the feature is mounted.
 	 */
-	initPolling() {
-		if (this.#pollingIntervalId) return; // Already running
+	init() {
+		if (this.#isInitialized) return;
+		this.#isInitialized = true;
 
-		const POLLING_INTERVAL_MS = 100;
-		let isFetching = false;
+		console.log('[StatsState] Initializing reactive effects.');
 
-		this.#pollingIntervalId = setInterval(async () => {
-			if (chartState.isPaused || this.#pipelineIds.size === 0 || isFetching) {
-				return;
-			}
-
-			isFetching = true;
-			try {
-				const promises = Array.from(this.#pipelineIds.entries()).map(async ([key, id]) => {
-					try {
-						const stats = await invoke<StreamStatistics>('get_statistics_data', { id });
-						this.statisticsData.set(key, stats);
-					} catch (e) {
-					}
-				});
-
-				await Promise.all(promises);
-			} finally {
-				isFetching = false;
-			}
-		}, POLLING_INTERVAL_MS);
+		$effect(() => {
+			const currentSelection = this.rowSelection;
+			untrack(() => {
+				this.syncBackendPipelines(currentSelection);
+			});
+		});
 	}
 
-
 	/**
-	 * Creates and destroys backend pipelines based on the current selection.
-	 * Should be called from a component's $effect when rowSelection changes.
+	 * Private method to sync backend state based on the current selection.
+	 * This is triggered automatically by the internal $effect.
 	 */
-	updatePipelineSelection() {
-		const selectedKeys = new Set(Object.keys(this.rowSelection).filter((k) => k.startsWith('{')));
+	private async syncBackendPipelines(currentSelection: RowSelectionState) {
+		const selectedKeys = new Set(Object.keys(currentSelection).filter((k) => k.startsWith('{')));
 		const currentKeys = new Set(this.#pipelineIds.keys());
 
 		const keysToAdd = [...selectedKeys].filter((k) => !currentKeys.has(k));
 		const keysToRemove = [...currentKeys].filter((k) => !selectedKeys.has(k));
 
-		// Create new pipelines
+		if (keysToAdd.length === 0 && keysToRemove.length === 0) {
+			return;
+		}
+		
+		console.log(`[StatsState] Syncing... Add: ${keysToAdd.length}, Remove: ${keysToRemove.length}`);
+
 		for (const keyStr of keysToAdd) {
 			try {
-				const dataKey = JSON.parse(keyStr);
-				invoke<PipelineId>('create_statistics_provider', { sourceKey: dataKey, windowSeconds: 2.0 })
-					.then((pipelineId) => {
-						this.#pipelineIds.set(keyStr, pipelineId);
-					})
-					.catch((e) => console.error(`Failed to create stats provider for ${keyStr}:`, e));
+				const dataKey: DataColumnId = JSON.parse(keyStr);
+				const pipelineId = await invoke<PipelineId>('create_statistics_provider', { sourceKey: dataKey, windowSeconds: 2.0 });
+
+				this.#pipelineIds.set(keyStr, pipelineId);
+				this.statisticsData.set(keyStr, null);
+
+				if (!this.#listeningProviders.has(keyStr)) {
+					const channel = new Channel<StreamStatistics>();
+					channel.onmessage = (stats) => this.statisticsData.set(keyStr, stats);
+					await invoke('listen_to_statistics', { id: pipelineId, onEvent: channel });
+					this.#listeningProviders.add(keyStr);
+				}
 			} catch (e) {
-				console.error(`Error parsing DataColumnId key: ${keyStr}`, e);
+				console.error(`Failed to create provider for ${keyStr}:`, e);
 			}
 		}
 
-		// Destroy old pipelines
 		for (const keyStr of keysToRemove) {
 			const pipelineId = this.#pipelineIds.get(keyStr);
 			if (pipelineId) {
 				invoke('destroy_processor', { id: pipelineId });
 				this.#pipelineIds.delete(keyStr);
 				this.statisticsData.delete(keyStr);
+				this.#listeningProviders.delete(keyStr);
 			}
 		}
 	}
 
 	/**
-	 * Stops the polling loop and destroys all backend processors.
-	 * Should be called from the component's onDestroy.
+	 * Cleans up everything. Called on component unmount.
 	 */
 	destroy() {
-		if (this.#pollingIntervalId) {
-			clearInterval(this.#pollingIntervalId);
-			this.#pollingIntervalId = null;
-		}
+		if (!this.#isInitialized) return;
 		for (const pipelineId of this.#pipelineIds.values()) {
 			invoke('destroy_processor', { id: pipelineId });
 		}
 		this.#pipelineIds.clear();
 		this.statisticsData.clear();
+		this.#listeningProviders.clear();
+		this.rowSelection = {}; // Reset for clean re-initialization
+		this.#isInitialized = false;
+		console.log('[StatsState] Destroyed.');
 	}
 
 	/**
@@ -108,10 +104,33 @@ class StreamMonitorState {
 	async resetStatistics(dataKey: DataColumnId) {
 		const key = JSON.stringify(dataKey);
 		const pipelineId = this.#pipelineIds.get(key);
+		console.log(`[StatsState] Clearing stats provider ${pipelineId}`)
 		if (pipelineId) {
 			await invoke('reset_statistics_provider', { id: pipelineId });
 		}
 	}
+
+    /**
+     * NEW METHOD: Resets the persistent statistics for ALL currently
+     * selected and active stream monitors.
+     */
+    async resetAllStatistics() {
+        console.log(`[StatsState] Resetting all ${this.#pipelineIds.size} active providers.`);
+        
+        // Get all the current pipeline IDs
+        const allIds = Array.from(this.#pipelineIds.values());
+
+        // Create an array of invoke promises
+        const resetPromises = allIds.map(id => 
+            invoke('reset_statistics_provider', { id })
+        );
+
+        // Run all reset commands in parallel and wait for them to complete
+        await Promise.all(resetPromises);
+        
+        console.log('[StatsState] All providers reset.');
+    }
 }
+
 
 export const streamMonitorState = new StreamMonitorState();

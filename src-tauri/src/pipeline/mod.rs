@@ -11,7 +11,7 @@ pub trait StatisticsProvider: Send + Sync {
     fn id(&self) -> PipelineId;
     fn get_output(&self) -> StreamStatistics;
     fn update(&mut self, capture_state: &CaptureState);
-    fn reset(&mut self);
+    fn reset(&mut self, capture_state: &CaptureState);
 }
 
 pub mod manager;

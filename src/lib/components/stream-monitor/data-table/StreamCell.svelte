@@ -1,7 +1,8 @@
 <script lang="ts">
 	import type { DataColumnId } from '$lib/bindings/DataColumnId';
 	import { chartState } from '$lib/states/chartState.svelte';
-	import { streamMonitorState } from '$lib/states/streamMonitorState.svelte'; // <-- Import the state manager
+	import { streamMonitorState } from '$lib/states/streamMonitorState.svelte';
+	import type { StreamStatistics } from '$lib/bindings/StreamStatistics'; // Import the type
 	import * as Collapsible from '$lib/components/ui/collapsible/index.js';
 	import { ChevronDown, Eraser } from '@lucide/svelte';
 	import NameCell from './NameCell.svelte';
@@ -20,25 +21,36 @@
 	let addButtonEl: HTMLButtonElement;
 	let toggleButtonEl: any;
 
-	const SMOOTHING_FACTOR = 0.1;
+	const SMOOTHING_FACTOR = 0.02;
 
-	// --- DERIVED STATE (from the global store) ---
+	// --- INCOMING DATA FROM GLOBAL STORE ---
 	const key = $derived(JSON.stringify(dataKey));
-	const stats = $derived(streamMonitorState.statisticsData.get(key));
+	const incomingStats = $derived(streamMonitorState.statisticsData.get(key));
 
-	// --- EFFECT for LOCAL UI (smoothing) ---
+	// --- LOCAL DISPLAY STATE (The Snapshot) ---
+	let displayStats = $state<StreamStatistics | null | undefined>(undefined);
+
+	// --- EFFECTS ---
+
 	$effect(() => {
 		if (chartState.isPaused) {
 			return;
 		}
-		const currentStats = stats;
-		if (currentStats) {
-			const latestValue = currentStats.latest_value;
+		displayStats = incomingStats;
+	});
+
+
+	$effect(() => {
+		const currentDisplayStats = displayStats;
+		if (currentDisplayStats) {
+			const latestValue = currentDisplayStats.latest_value;
 			if (smoothedValue === undefined) {
 				smoothedValue = latestValue;
 			} else {
 				smoothedValue = SMOOTHING_FACTOR * latestValue + (1 - SMOOTHING_FACTOR) * smoothedValue;
 			}
+		} else {
+			smoothedValue = undefined;
 		}
 	});
 
@@ -101,7 +113,7 @@
 			<div class="w-px bg-border"></div>
 			<Collapsible.Trigger
 				bind:this={toggleButtonEl}
-				disabled={!stats}
+				disabled={!displayStats}
 				aria-label="Toggle details"
 				class="flex basis-12 items-center justify-center hover:bg-muted focus:outline-none data-[state=open]:bg-muted"
 				tabindex={-1}
@@ -114,7 +126,7 @@
 	<Collapsible.Content
 		class="w-full overflow-hidden transition-all data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down"
 	>
-		{#if stats}
+		{#if displayStats}
 			<div class="pt-2 pb-1">
 				<div class="w-full rounded-md border p-2 text-sm">
 					<div class="grid grid-cols-[max-content,1fr,1fr] gap-x-4 gap-y-1 font-mono">
@@ -127,34 +139,31 @@
 								size="icon"
 								class="h-6 w-6"
 								aria-label="Wipe persistent statistics for {name}"
-								disabled={!stats || stats.persistent.count === 0n}
+								disabled={!displayStats || displayStats.persistent.count === 0n}
 								onclick={resetPersistentStats}
 							>
 								<Eraser class="size-3.5" />
 							</Button>
 						</div>
 						<div class="my-1 col-span-3 border-b"></div>
-						<div class="text-muted-foreground">Latest</div>
-						<div class="text-right">{format(stats.latest_value)}</div>
-						<div class="text-right">---</div>
 						<div class="text-muted-foreground">Mean</div>
-						<div class="text-right">{format(stats.window.mean)}</div>
-						<div class="text-right">{format(stats.persistent.mean)}</div>
+						<div class="text-right">{format(displayStats.window.mean)}</div>
+						<div class="text-right">{format(displayStats.persistent.mean)}</div>
 						<div class="text-muted-foreground">StdDev</div>
-						<div class="text-right">{format(stats.window.stdev)}</div>
-						<div class="text-right">{format(stats.persistent.stdev)}</div>
+						<div class="text-right">{format(displayStats.window.stdev)}</div>
+						<div class="text-right">{format(displayStats.persistent.stdev)}</div>
 						<div class="text-muted-foreground">Min</div>
-						<div class="text-right">{format(stats.window.min)}</div>
-						<div class="text-right">{format(stats.persistent.min)}</div>
+						<div class="text-right">{format(displayStats.window.min)}</div>
+						<div class="text-right">{format(displayStats.persistent.min)}</div>
 						<div class="text-muted-foreground">Max</div>
-						<div class="text-right">{format(stats.window.max)}</div>
-						<div class="text-right">{format(stats.persistent.max)}</div>
+						<div class="text-right">{format(displayStats.window.max)}</div>
+						<div class="text-right">{format(displayStats.persistent.max)}</div>
 						<div class="text-muted-foreground">RMS</div>
-						<div class="text-right">{format(stats.window.rms)}</div>
-						<div class="text-right">{format(stats.persistent.rms)}</div>
+						<div class="text-right">{format(displayStats.window.rms)}</div>
+						<div class="text-right">{format(displayStats.persistent.rms)}</div>
 						<div class="text-muted-foreground">Count</div>
-						<div class="text-right">{stats.window.count.toString()}</div>
-						<div class="text-right">{stats.persistent.count.toString()}</div>
+						<div class="text-right">{displayStats.window.count.toString()}</div>
+						<div class="text-right">{displayStats.persistent.count.toString()}</div>
 					</div>
 				</div>
 			</div>

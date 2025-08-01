@@ -163,3 +163,23 @@ export class TimeSeriesRingBuffer {
     return alignedData;
   }
 }
+
+
+export function lerp(x1: number, y1: number, x2: number, y2: number, x: number): number {
+    if (Math.abs(x2 - x1) < 1e-9) return y1; // Avoid division by zero
+    return y1 + (y2 - y1) * (x - x1) / (x2 - x1);
+}
+
+export function findTimestampIndex(timestamps: Float64Array | number[], targetTime: number): number {
+    let low = 0;
+    let high = timestamps.length;
+    while (low < high) {
+        const mid = (low + high) >>> 1; // Unsigned bitwise shift for integer division
+        if (timestamps[mid] < targetTime) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    return low;
+}

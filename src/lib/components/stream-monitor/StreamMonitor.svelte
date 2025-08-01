@@ -6,7 +6,6 @@
 	import type { ColumnMeta } from '$lib/bindings/ColumnMeta';
 	import type { TreeRow } from '$lib/components/chart-area/data-table/column';
 	import type { DataColumnId } from '$lib/bindings/DataColumnId';
-	import { invoke } from '@tauri-apps/api/core';
 	import { onMount } from 'svelte';
 
 	import { columns } from '$lib/components/stream-monitor/data-table/column';
@@ -18,35 +17,34 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import type { ExpandedState, RowSelectionState } from '@tanstack/table-core';
+	import type { UiDevice } from '$lib/bindings/UiDevice';
 
 	let isInitialSelectionDone = false;
 	let isWipeDialogOpen = $state(false);
 
-	// --- COMPONENT LIFECYCLE MANAGEMENT ---
 	onMount(() => {
-		streamMonitorState.initPolling();
+		streamMonitorState.init();
 		return () => {
 			streamMonitorState.destroy();
 		};
 	});
 
-	// Reactive effect to update pipelines when selection changes
-	$effect(() => {
-		if (isInitialSelectionDone) {
-			streamMonitorState.updatePipelineSelection();
-		}
-	});
-
-	// --- Derived Data (no changes here) ---
+	// --- Derived Data ---
 	interface MonitorItem {
 		id: string;
 		name: string;
 		depth: number;
 		units?: string;
 		dataKey: DataColumnId;
-		group: string;
 	}
 
+	interface GroupedMonitorItems {
+		headerName: string;
+		headerRoute: string | null;
+		items: MonitorItem[];
+	}
+
+	// This logic is unchanged
 	let treeData = $derived.by((): TreeRow[] => {
 		const topLevelNodes: TreeRow[] = [];
 		for (const portData of deviceState.devices) {
@@ -96,10 +94,28 @@
 		return topLevelNodes;
 	});
 
-	let selectedItems = $derived.by(() => {
-		const items: MonitorItem[] = [];
+	// --- MODIFIED LOGIC: This block is updated to produce the new structure ---
+	let selectedItems = $derived.by((): GroupedMonitorItems[] => {
 		const selectedKeys = Object.keys(streamMonitorState.rowSelection);
 		const leafNodeKeys = selectedKeys.filter((key) => key.startsWith('{'));
+
+		const selectedDevicesMap = new Map<string, UiDevice>();
+		for (const key of leafNodeKeys) {
+			try {
+				const dataKey = JSON.parse(key) as DataColumnId;
+				const device = deviceState.getDevice(dataKey.port_url, dataKey.device_route);
+				if (device) {
+					selectedDevicesMap.set(device.url + device.route, device);
+				}
+			} catch {}
+		}
+
+		const nameCounts = new Map<string, number>();
+		for (const device of selectedDevicesMap.values()) {
+			nameCounts.set(device.meta.name, (nameCounts.get(device.meta.name) || 0) + 1);
+		}
+
+		const grouped = new Map<string, GroupedMonitorItems>();
 
 		for (const key of leafNodeKeys) {
 			try {
@@ -109,14 +125,24 @@
 				const column = stream?.columns.find((c) => c.index === dataKey.column_index);
 
 				if (device && stream && column) {
+					const deviceKey = device.url + device.route;
+
+					if (!grouped.has(deviceKey)) {
+						const nameIsDuplicated = (nameCounts.get(device.meta.name) || 0) > 1;
+						grouped.set(deviceKey, {
+							headerName: device.meta.name,
+							headerRoute: nameIsDuplicated && device.route ? device.route : null,
+							items: []
+						});
+					}
+
 					const isMultiColumn = stream.columns.length > 1;
-					items.push({
+					grouped.get(deviceKey)!.items.push({
 						id: key,
 						name: isMultiColumn ? column.name : stream.meta.name,
 						depth: isMultiColumn ? 1 : 0,
 						units: column.units,
-						dataKey: dataKey,
-						group: device.meta.name
+						dataKey: dataKey
 					});
 				}
 			} catch (e) {
@@ -124,18 +150,10 @@
 			}
 		}
 
-		const grouped = items.reduce(
-			(acc, item) => {
-				if (!acc[item.group]) acc[item.group] = [];
-				acc[item.group].push(item);
-				return acc;
-			},
-			{} as Record<string, MonitorItem[]>
-		);
-		return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
+		return Array.from(grouped.values()).sort((a, b) => a.headerName.localeCompare(b.headerName));
 	});
 
-	// --- Helper Functions ---
+	// --- Helper Functions and Effects (unchanged) ---
 	function getAllSelectableIds(nodes: TreeRow[]): { selection: string[]; expansion: string[] } {
 		const selection: string[] = [];
 		const expansion: string[] = [];
@@ -155,38 +173,20 @@
 		return { selection, expansion };
 	}
 
-	function getAllDataKeys(nodes: TreeRow[]): DataColumnId[] {
-		const keys: DataColumnId[] = [];
-		function recurse(items: TreeRow[]) {
-			for (const item of items) {
-				if (item.type === 'column' && item.dataKey) keys.push(item.dataKey);
-				if (item.subRows) recurse(item.subRows);
-			}
-		}
-		recurse(nodes);
-		return keys;
-	}
-
 	async function handleWipeAllStatistics() {
-		const allKeys = getAllDataKeys(treeData);
-		if (allKeys.length > 0) {
-			await invoke('reset_stream_statistics', { keys: allKeys });
-		}
+		await streamMonitorState.resetAllStatistics();
 		isWipeDialogOpen = false;
 	}
 
 	$effect(() => {
 		if (treeData.length > 0 && !isInitialSelectionDone) {
 			const { selection, expansion } = getAllSelectableIds(treeData);
-
 			const initialSelection: RowSelectionState = {};
 			for (const id of selection) initialSelection[id] = true;
 			streamMonitorState.rowSelection = initialSelection;
-
 			const initialExpansion: ExpandedState = {};
 			for (const id of expansion) initialExpansion[id] = true;
 			streamMonitorState.expansion = initialExpansion;
-
 			isInitialSelectionDone = true;
 		}
 	});
@@ -202,7 +202,11 @@
 					</Button>
 				{/snippet}
 			</AlertDialog.Trigger>
-			<AlertDialog.Content>
+			<AlertDialog.Content 
+				onCloseAutoFocus={(event) => {
+					event.preventDefault();
+				}}
+			>
 				<AlertDialog.Header>
 					<AlertDialog.Title>Are you absolutely sure?</AlertDialog.Title>
 					<AlertDialog.Description>
@@ -246,11 +250,19 @@
 	<ScrollArea class="min-h-0 flex-1">
 		<div class="space-y-4 p-2">
 			{#if selectedItems.length > 0}
-				{#each selectedItems as [groupName, items] (groupName)}
+				{#each selectedItems as group (group.headerName + group.headerRoute)}
 					<div>
-						<h4 class="mb-2 border-b pb-1 text-base font-semibold">{groupName}</h4>
+						<div class="mb-2 border-b pb-1">
+							<div class="text-left">
+								<p class="font-semibold">{group.headerName}</p>
+								{#if group.headerRoute}
+									<p class="text-xs text-muted-foreground">Route: {group.headerRoute}</p>
+								{/if}
+							</div>
+						</div>
+
 						<div class="space-y-2">
-							{#each items as item (item.id)}
+							{#each group.items as item (item.id)}
 								<div>
 									<StreamCell
 										name={item.name}
@@ -264,9 +276,7 @@
 					</div>
 				{/each}
 			{:else}
-				<div
-					class="flex h-full items-center justify-center pt-12 text-center text-muted-foreground"
-				>
+				<div class="flex h-full items-center justify-center pt-12 text-center text-muted-foreground">
 					<p>
 						No streams selected. Use the <Settings class="inline size-4 -mt-1" /> icon to
 						configure.

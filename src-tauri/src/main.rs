@@ -64,21 +64,17 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // --- Device & Port Management Commands (Unchanged) ---
+            // --- Device & Port Management Commands ---
             commands::capture::confirm_selection,
             commands::capture::connect_to_port,
-            commands::capture::get_merged_plot_data,
-            commands::capture::get_statistics_data,
-            commands::capture::get_interpolated_values,
-
 
             // --- Pipeline Commands ---
-            commands::pipeline::create_fpcs_pipeline,
-            commands::pipeline::create_detrend_pipeline,
-            commands::pipeline::create_passthrough_pipeline,
-            commands::pipeline::create_fft_pipeline_from_source,
+            commands::pipeline::update_plot_pipeline,
+            commands::pipeline::destroy_plot_pipeline,
             commands::pipeline::create_statistics_provider,
             commands::pipeline::destroy_processor,
+            commands::pipeline::listen_to_plot_data,
+            commands::pipeline::listen_to_statistics,
             commands::pipeline::reset_statistics_provider,
 
             // --- Pipeline Management Commands ---
