@@ -32,7 +32,7 @@
 
 			<Tabs.Content value="selection" class="mt-2 flex-1 min-h-0">
 				<ScrollArea class="h-full">
-					<div class="p-2 max-h-[40vh]">
+					<div class="p-2 h-[40vh]">
 						<DataTable
 							{columns}
 							data={treeData}
