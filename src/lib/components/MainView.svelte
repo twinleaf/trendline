@@ -46,7 +46,7 @@
         switch (event.key) {
             case ' ':
                 event.preventDefault();
-                chartState.togglePause();
+                chartState.toggleGlobalPause(); 
                 break;
 
             case '1':

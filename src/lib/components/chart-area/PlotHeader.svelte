@@ -33,7 +33,7 @@
 			aria-label={isEffectivelyPaused ? 'Play chart' : 'Pause chart'}
 			onclick={(e) => {
 				e.stopPropagation();
-				plot.isPaused = !plot.isPaused;
+				chartState.togglePlotPause(plot);
 			}}
 		>
 			{#if isEffectivelyPaused}
