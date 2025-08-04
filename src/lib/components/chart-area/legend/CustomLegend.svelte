@@ -33,10 +33,11 @@
 		return relativeTime === null ? '---' : `${relativeTime.toFixed(3)}s`;
 	});
 
-	function formatValue(value: number | null, vType: 'timeseries' | 'fft'): string {
-		if (value === null || !isFinite(value)) return '---';
-		if (vType === 'fft') return value.toExponential(2);
-		return value.toExponential(3);
+	function formatValue(v: number | null, mode: 'fft' | 'timeseries') {
+	if (v == null || !isFinite(v)) return '---';
+	return mode === 'fft'
+			? v.toExponential(2)     // "1.23e+04"
+			: v.toExponential(3);    // "1.234e+00"
 	}
 
 	$effect(() => {
@@ -96,35 +97,86 @@
 {/if}
 
 <style>
-	.custom-legend {
-		z-index: 100;
-		background-color: rgba(var(--background), 0.85);
-		border-radius: 4px;
-		padding: 8px;
-		font-family: sans-serif;
-		font-size: 12px;
-		border: 1px solid var(--border);
-		white-space: nowrap;
-		pointer-events: none;
-		backdrop-filter: blur(2px);
-	}
+  /* ---------- design-system hooks ---------- */
+  :root {
+    --font-sans: 'Inter', ui-sans-serif, system-ui;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular;
+    --radius: 6px;
 
-	.timestamp {
-		font-weight: bold;
-		margin-bottom: 5px;
-	}
-	.series-item {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-	}
-	.color-dot {
-		width: 10px;
-		height: 10px;
-		border-radius: 50%;
-		display: inline-block;
-	}
-	.value {
-		font-weight: 500;
-	}
+    /* light theme */
+    --panel-border: #e6e8ea;
+    --surface-legend: rgba(255, 255, 255, 0.92);
+
+    /* shadow scale */
+    --shadow-e1: 0 1px 2px rgba(0, 0, 0, .12);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --panel-border: #1a1d20;
+      --surface-legend: rgba(18, 20, 22, 0.92);
+    }
+  }
+
+  /* ---------- legend shell ---------- */
+  .custom-legend {
+    position: fixed;
+    z-index: 100;
+    transform: translate3d(0, 0, 0);
+
+    background: var(--surface-legend);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-e1);
+
+    padding: 8px 10px;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    line-height: 1.3;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  /* ---------- header (time / freq) ---------- */
+  .timestamp {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+
+    text-align: right;
+    min-width: 10ch; 
+    margin-bottom: 4px;
+  }
+
+  /* ---------- series list ---------- */
+  .series-values {
+    display: grid;
+    gap: 4px;
+  }
+
+  .series-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .color-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: 0 0 10px;
+  }
+
+  .label {
+    font-weight: 400;
+  }
+
+  .value {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+
+    text-align: right;
+    min-width: 10ch;          /* matches .timestamp */
+  }
 </style>

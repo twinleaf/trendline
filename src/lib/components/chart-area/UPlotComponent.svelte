@@ -5,8 +5,8 @@
 	import type { PlotConfig } from '$lib/states/chartState.svelte';
 	import CustomLegend from '$lib/components/chart-area/legend/CustomLegend.svelte';
 	import { findTimestampIndex, lerp } from '$lib/utils';
-    
-    // --- Props ---
+
+	// --- Props ---
 	let { plot, latestTimestamp = $bindable() }: { plot: PlotConfig; latestTimestamp?: number } = $props();
 
 	// --- Component State ---
@@ -54,27 +54,26 @@
 	});
 
 	// --- Data Preparation Logic ---
-
 	const preparedData = $derived.by((): { views: Float64Array[]; latestTimestamp: number } | null => {
 		const dataToRender = rawPlotData;
 		const numSeries = plot.series.length;
-		
+
 		if (!dataToRender || dataToRender.timestamps.length === 0 || numSeries === 0) return null;
 
-		const isFFTView = isFFT; 
+		const isFFTView = isFFT;
 		let finalTimestamps = dataToRender.timestamps;
 		let finalSeriesData = dataToRender.series_data;
-		
+
 		if (isFFTView && finalTimestamps.length > 1) {
 			finalTimestamps = finalTimestamps.slice(1);
-			finalSeriesData = finalSeriesData.map(series => series.slice(1));
+			finalSeriesData = finalSeriesData.map((series) => series.slice(1));
 		}
-		
+
 		const finalDataLength = finalTimestamps.length;
-		if (finalDataLength === 0) return null; 
+		if (finalDataLength === 0) return null;
 
 		if (uplotDataBuffers.length !== numSeries + 1 || uplotDataBuffers[0].length < finalDataLength) return null;
-		
+
 		const latestAbsTimestamp = dataToRender.timestamps[dataToRender.timestamps.length - 1];
 
 		if (!isFFTView) {
@@ -87,14 +86,14 @@
 		}
 
 		finalSeriesData.forEach((series, i) => {
-		const buffer = uplotDataBuffers[i + 1];
-		if (buffer) {
-			for (let j = 0; j < series.length; j++) {
-				const value = series[j];
-				buffer[j] = value === null ? NaN : value;
+			const buffer = uplotDataBuffers[i + 1];
+			if (buffer) {
+				for (let j = 0; j < series.length; j++) {
+					const value = series[j];
+					buffer[j] = value === null ? NaN : value;
+				}
 			}
-		}
-	});
+		});
 
 		const finalDataViews = uplotDataBuffers.map((buffer) => buffer.subarray(0, finalDataLength));
 		return { views: finalDataViews, latestTimestamp: latestAbsTimestamp };
@@ -106,25 +105,26 @@
 		const data = rawPlotData;
 
 		if (relTime === null || isFFT || !legendState.isActive || !data || data.timestamps.length === 0) return [];
-		
+
 		const latestAbsTimestamp = data.timestamps[data.timestamps.length - 1];
 		const targetTime = latestAbsTimestamp + relTime;
 		const idx = findTimestampIndex(data.timestamps, targetTime);
-		
+
 		if (idx === 0 || idx >= data.timestamps.length) return plot.series.map(() => null);
-		
+
 		const t1 = data.timestamps[idx - 1];
 		const t2 = data.timestamps[idx];
 
-		return data.series_data.map(series => {
+		return data.series_data.map((series) => {
 			const y1 = series[idx - 1];
 			const y2 = series[idx];
 			return lerp(t1, y1, t2, y2, targetTime);
 		});
 	});
 
-
 	// --- SIDE EFFECTS ---
+
+	// Sync plot configuration with the backend
 	$effect(() => {
 		const _fingerprint = {
 			series: plot.series,
@@ -138,30 +138,7 @@
 		chartState.syncPlotWithBackend(plot);
 	});
 
-	$effect(() => {
-		if (!uplot || isEffectivelyPaused) return;
-
-		const data = preparedData;
-
-		if (data) {
-			plot.hasData = true;
-			latestTimestamp = data.latestTimestamp;
-
-			if (!isFFT) {
-				uplot.setScale('x', { min: -plot.windowSeconds, max: 0 });
-			}
-			
-			uplot.setData(data.views, isFFT);
-
-		} else {
-			if (plot.hasData) {
-				uplot.setData([[]], false);
-			}
-			plot.hasData = false;
-		}
-	});
-	
-	
+	// --- uPlot Instantiation and Lifecycle ---
 	$effect(() => {
 		if (!chartContainer) return;
 
@@ -196,20 +173,48 @@
 		};
 
 		const finalOptions: uPlot.Options = { ...options, plugins: [legendPlugin] };
-		const newUplotInstance = new uPlot(finalOptions, [[]], chartContainer);
-		uplot = newUplotInstance;
+		const uplotInstance = new uPlot(finalOptions, [[]], chartContainer);
 
 		const resizeObserver = new ResizeObserver((entries) => {
 			if (!entries.length) return;
 			const { width, height } = entries[0].contentRect;
-			newUplotInstance.setSize({ width, height });
+			uplotInstance.setSize({ width, height });
 		});
 		resizeObserver.observe(chartContainer);
 
+		let renderFrameId: number | null = null;
+		let latestDataSnapshot: { views: Float64Array[]; latestTimestamp: number } | null = null;
+
+		const stopRenderEffect = $effect.root(() => {
+			$effect(() => {
+				latestDataSnapshot = preparedData;
+				const isPaused = isEffectivelyPaused;
+
+				if (renderFrameId === null && !isPaused) {
+					renderFrameId = requestAnimationFrame(() => {
+						const data = latestDataSnapshot;
+						if (data) {
+							plot.hasData = true;
+							latestTimestamp = data.latestTimestamp;
+							if (!isFFT) {
+								uplotInstance.setScale('x', { min: -plot.windowSeconds, max: 0 });
+							}
+							uplotInstance.setData(data.views, isFFT);
+						} else {
+							if (plot.hasData) uplotInstance.setData([[]], false);
+							plot.hasData = false;
+						}
+						renderFrameId = null;
+					});
+				}
+			});
+		});
+
 		return () => {
+			stopRenderEffect();
+			if (renderFrameId) cancelAnimationFrame(renderFrameId);
 			resizeObserver.disconnect();
-			newUplotInstance.destroy();
-			if (uplot === newUplotInstance) uplot = undefined;
+			uplotInstance.destroy();
 		};
 	});
 </script>
