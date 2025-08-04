@@ -69,6 +69,8 @@ fn main() {
             // --- Device & Port Management Commands ---
             commands::capture::confirm_selection,
             commands::capture::connect_to_port,
+            commands::capture::pause_plot,
+            commands::capture::unpause_plot,
             // --- Pipeline Commands ---
             commands::pipeline::update_plot_pipeline,
             commands::pipeline::destroy_plot_pipeline,
@@ -81,6 +83,9 @@ fn main() {
             commands::settings::get_all_devices,
             commands::settings::get_port_state,
             commands::settings::execute_rpc,
+            // ---  Export Command ---
+            commands::export::export_decimated_view_to_clipboard,
+            commands::export::save_raw_plot_data_to_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
