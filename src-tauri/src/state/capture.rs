@@ -1,4 +1,4 @@
-use crate::shared::{DataColumnId, Point};
+use crate::shared::{DataColumnId, Point, PlotData};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
@@ -67,6 +67,7 @@ pub struct StreamState {
 pub struct Inner {
     pub buffers: DashMap<DataColumnId, DashMap<SessionId, Buffer>>,
     pub streams: DashMap<DataColumnId, StreamState>,
+    pub paused_snapshots: DashMap<String, PlotData>,
     pub active: DashMap<DataColumnId, ()>,
     pub command_tx: Sender<CaptureCommand>,
 }
@@ -86,6 +87,15 @@ pub enum CaptureCommand {
         port_url: String,
         keys_for_port: Vec<DataColumnId>,
     },
+    CreateSnapshot {
+        plot_id: String,
+        keys: Vec<DataColumnId>,
+        start_time: f64,
+        end_time: f64,
+    },
+    ClearSnapshot {
+        plot_id: String,
+    },
 }
 
 #[derive(Clone)]
@@ -102,6 +112,7 @@ impl CaptureState {
         let inner = Arc::new(Inner {
             buffers: DashMap::new(),
             streams: DashMap::new(),
+            paused_snapshots: DashMap::new(),
             active: DashMap::new(),
             command_tx,
         });
@@ -229,6 +240,7 @@ impl CaptureState {
     }
 
     fn run_consumer(inner: Arc<Inner>, rx: Receiver<CaptureCommand>) {
+        let self_instance = CaptureState { inner: inner.clone() };
         while let Ok(command) = rx.recv() {
             match command {
                 CaptureCommand::Insert {
@@ -308,6 +320,28 @@ impl CaptureState {
                         port_url
                     );
                 }
+                CaptureCommand::CreateSnapshot { plot_id, keys, start_time, end_time } => {
+                    let raw_data_vecs = self_instance.get_data_across_sessions_for_keys(&keys, start_time, end_time);
+                    
+                    let mut individual_plot_data = Vec::with_capacity(keys.len());
+                    for points in raw_data_vecs {
+                        individual_plot_data.push(PlotData {
+                            timestamps: points.iter().map(|p| p.x).collect(),
+                            series_data: vec![points.iter().map(|p| p.y).collect()],
+                        });
+                    }
+                    let snapshot_data = crate::util::k_way_merge_plot_data(individual_plot_data);
+
+                    if !snapshot_data.is_empty() {
+                        println!("[Capture] Created snapshot for plot {}", plot_id);
+                        inner.paused_snapshots.insert(plot_id, snapshot_data);
+                    }
+                },
+                CaptureCommand::ClearSnapshot { plot_id } => {
+                    if inner.paused_snapshots.remove(&plot_id).is_some() {
+                        println!("[Capture] Cleared snapshot for plot {}", plot_id);
+                    }
+                },
             }
         }
     }
