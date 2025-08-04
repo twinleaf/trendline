@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::{
     pipeline::manager::ProcessingManager,
-    shared::{DataColumnId, PipelineId, SharedPlotConfig},
+    shared::{DataColumnId, PipelineId, PlotData, SharedPlotConfig, StreamStatistics},
     state::capture::CaptureState,
 };
 use tauri::{ipc::Channel, State};
@@ -40,7 +40,7 @@ pub fn create_statistics_provider(
 #[tauri::command]
 pub async fn listen_to_plot_data(
     plot_id: String,
-    on_event: Channel,
+    on_event: Channel<PlotData>,
     manager: tauri::State<'_, Arc<Mutex<ProcessingManager>>>,
 ) -> Result<(), String> {
     manager
@@ -53,7 +53,7 @@ pub async fn listen_to_plot_data(
 #[tauri::command]
 pub async fn listen_to_statistics(
     id: PipelineId,
-    on_event: Channel,
+    on_event: Channel<StreamStatistics>,
     manager: tauri::State<'_, Arc<Mutex<ProcessingManager>>>,
 ) -> Result<(), String> {
     manager

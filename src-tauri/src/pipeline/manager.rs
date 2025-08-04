@@ -6,8 +6,7 @@ use super::Pipeline;
 use crate::pipeline::statistics::StreamingStatisticsProvider;
 use crate::pipeline::StatisticsProvider;
 use crate::shared::{
-    DataColumnId, DecimationMethod, DetrendMethod, FftConfig, PipelineId, PlotData,
-    SharedPlotConfig, TimeseriesConfig, ViewConfig,
+    DataColumnId, DecimationMethod, DetrendMethod, FftConfig, PipelineId, PlotData, SharedPlotConfig, StreamStatistics, TimeseriesConfig, ViewConfig
 };
 use crate::state::capture::CaptureState;
 use crate::util::k_way_merge_plot_data;
@@ -16,10 +15,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tauri::ipc::{Channel, InvokeResponseBody};
+use tauri::ipc::{Channel};
 
 pub struct ManagedPlotPipeline {
-    config: SharedPlotConfig,
+    pub config: SharedPlotConfig,
     output_pipeline_ids: Vec<PipelineId>,
     all_component_ids: Vec<PipelineId>,
 }
@@ -28,8 +27,8 @@ pub struct ProcessingManager {
     pub managed_plots: HashMap<String, ManagedPlotPipeline>,
     pub pipelines: HashMap<PipelineId, Arc<Mutex<dyn Pipeline>>>,
     pub stat_providers: HashMap<PipelineId, Arc<Mutex<dyn StatisticsProvider>>>,
-    pub plot_channels: HashMap<String, Channel>,
-    pub statistics_channels: HashMap<PipelineId, Channel>,
+    pub plot_channels: HashMap<String, Channel<PlotData>>,
+    pub statistics_channels: HashMap<PipelineId, Channel<StreamStatistics>>,
 }
 
 impl ProcessingManager {
@@ -84,39 +83,22 @@ impl ProcessingManager {
                             let plot_data = mg.get_merged_data_for_plot(&plot_id);
 
                             if !plot_data.is_empty() {
-                                match serde_json::to_string(&plot_data) {
-                                    Ok(json_string) => {
-                                        let response_body = InvokeResponseBody::Json(json_string);
-                                        if let Err(e) = channel.send(response_body) {
-                                            eprintln!("[Ticker] Failed to send on channel for plot {}: {}", plot_id, e);
-                                        }
-                                    },
-                                    Err(e) => {
-                                        eprintln!("[Ticker] CRITICAL: Failed to serialize PlotData for plot {}: {}", plot_id, e);
-                                    }
+                                if let Err(e) = channel.send(plot_data) {
+                                    eprintln!("[Ticker] Failed to send on channel for plot {}: {}", plot_id, e);
                                 }
-                            }
-                            else {
-                                println!("Publishing zero length data...");
                             }
                         }
 
                         let stats_channels_to_push: Vec<_> = mg.statistics_channels.iter()
                             .map(|(id, chan)| (*id, chan.clone()))
                             .collect();
+
                         for (provider_id, channel) in stats_channels_to_push {
-                             if let Some(provider_mutex) = mg.stat_providers.get(&provider_id) {
+                            if let Some(provider_mutex) = mg.stat_providers.get(&provider_id) {
                                 let stats_output = provider_mutex.lock().unwrap().get_output();
-                                match serde_json::to_string(&stats_output) {
-                                    Ok(json_string) => {
-                                        let response_body = InvokeResponseBody::Json(json_string);
-                                        if let Err(e) = channel.send(response_body) {
-                                            eprintln!("[Ticker] Failed to send on channel for stats provider {}: {}", provider_id.0, e);
-                                        }
-                                    },
-                                    Err(e) => {
-                                        eprintln!("[Ticker] CRITICAL: Failed to serialize StreamStatistics for provider {}: {}", provider_id.0, e);
-                                    }
+                                
+                                if let Err(e) = channel.send(stats_output) {
+                                    eprintln!("[Ticker] Failed to send on channel for stats provider {}: {}", provider_id.0, e);
                                 }
                             }
                         }
@@ -128,17 +110,18 @@ impl ProcessingManager {
 
         manager
     }
-    pub fn register_statistics_channel(&mut self, provider_id: PipelineId, channel: Channel) {
+
+    pub fn register_plot_channel(&mut self, plot_id: String, channel: Channel<PlotData>) {
+        println!("[Manager] Registering IPC channel for plot ID: {}", plot_id);
+        self.plot_channels.insert(plot_id, channel);
+    }
+
+    pub fn register_statistics_channel(&mut self, provider_id: PipelineId, channel: Channel<StreamStatistics>) {
         println!(
             "[Manager] Registering IPC channel for statistics provider ID: {}",
             provider_id.0
         );
         self.statistics_channels.insert(provider_id, channel);
-    }
-
-    pub fn register_plot_channel(&mut self, plot_id: String, channel: Channel) {
-        println!("[Manager] Registering IPC channel for plot ID: {}", plot_id);
-        self.plot_channels.insert(plot_id, channel);
     }
 
     pub fn create_fpcs_pipeline(
