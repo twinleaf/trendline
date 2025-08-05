@@ -1,4 +1,4 @@
-use crate::shared::{DataColumnId, Point, PlotData};
+use crate::shared::{DataColumnId, PlotData, Point};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
@@ -240,7 +240,9 @@ impl CaptureState {
     }
 
     fn run_consumer(inner: Arc<Inner>, rx: Receiver<CaptureCommand>) {
-        let self_instance = CaptureState { inner: inner.clone() };
+        let self_instance = CaptureState {
+            inner: inner.clone(),
+        };
         while let Ok(command) = rx.recv() {
             match command {
                 CaptureCommand::Insert {
@@ -320,9 +322,15 @@ impl CaptureState {
                         port_url
                     );
                 }
-                CaptureCommand::CreateSnapshot { plot_id, keys, start_time, end_time } => {
-                    let raw_data_vecs = self_instance.get_data_across_sessions_for_keys(&keys, start_time, end_time);
-                    
+                CaptureCommand::CreateSnapshot {
+                    plot_id,
+                    keys,
+                    start_time,
+                    end_time,
+                } => {
+                    let raw_data_vecs = self_instance
+                        .get_data_across_sessions_for_keys(&keys, start_time, end_time);
+
                     let mut individual_plot_data = Vec::with_capacity(keys.len());
                     for points in raw_data_vecs {
                         individual_plot_data.push(PlotData {
@@ -336,12 +344,12 @@ impl CaptureState {
                         println!("[Capture] Created snapshot for plot {}", plot_id);
                         inner.paused_snapshots.insert(plot_id, snapshot_data);
                     }
-                },
+                }
                 CaptureCommand::ClearSnapshot { plot_id } => {
                     if inner.paused_snapshots.remove(&plot_id).is_some() {
                         println!("[Capture] Cleared snapshot for plot {}", plot_id);
                     }
-                },
+                }
             }
         }
     }

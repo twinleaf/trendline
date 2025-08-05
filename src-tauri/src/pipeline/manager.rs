@@ -6,7 +6,8 @@ use super::Pipeline;
 use crate::pipeline::statistics::StreamingStatisticsProvider;
 use crate::pipeline::StatisticsProvider;
 use crate::shared::{
-    DataColumnId, DecimationMethod, DetrendMethod, FftConfig, PipelineId, PlotData, SharedPlotConfig, StreamStatistics, TimeseriesConfig, ViewConfig
+    DataColumnId, DecimationMethod, DetrendMethod, FftConfig, PipelineId, PlotData,
+    SharedPlotConfig, StreamStatistics, TimeseriesConfig, ViewConfig,
 };
 use crate::state::capture::CaptureState;
 use crate::util::k_way_merge_plot_data;
@@ -15,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tauri::ipc::{Channel};
+use tauri::ipc::Channel;
 
 pub struct ManagedPlotPipeline {
     pub config: SharedPlotConfig,
@@ -45,66 +46,69 @@ impl ProcessingManager {
 
         thread::Builder::new()
             .name("pipeline-ticker".into())
-            .spawn(move || {
-                loop {
-                    let (pipelines_to_update, providers_to_update) = {
-                        let Ok(mg) = manager_clone.lock() else {
-                            eprintln!("[Ticker] Manager lock poisoned, exiting thread.");
-                            break;
-                        };
-                        let p_arcs: Vec<_> = mg.pipelines.values().cloned().collect();
-                        let s_arcs: Vec<_> = mg.stat_providers.values().cloned().collect();
-                        (p_arcs, s_arcs)
+            .spawn(move || loop {
+                let (pipelines_to_update, providers_to_update) = {
+                    let Ok(mg) = manager_clone.lock() else {
+                        eprintln!("[Ticker] Manager lock poisoned, exiting thread.");
+                        break;
                     };
+                    let p_arcs: Vec<_> = mg.pipelines.values().cloned().collect();
+                    let s_arcs: Vec<_> = mg.stat_providers.values().cloned().collect();
+                    (p_arcs, s_arcs)
+                };
 
-                    pipelines_to_update
-                        .par_iter()
-                        .for_each(|pipeline_mutex| {
-                            if let Ok(mut pipeline) = pipeline_mutex.lock() {
-                                pipeline.update(&capture_state);
-                            }
-                        });
-                    
-                    providers_to_update
-                        .par_iter()
-                        .for_each(|provider_mutex| {
-                            if let Ok(mut provider) = provider_mutex.lock() {
-                                provider.update(&capture_state);
-                            }
-                        });
-                    
+                pipelines_to_update.par_iter().for_each(|pipeline_mutex| {
+                    if let Ok(mut pipeline) = pipeline_mutex.lock() {
+                        pipeline.update(&capture_state);
+                    }
+                });
 
-                    if let Ok(mg) = manager_clone.lock() {
-                        let channels_to_push: Vec<_> = mg.plot_channels.iter()
-                            .map(|(id, chan)| (id.clone(), chan.clone()))
-                            .collect();
+                providers_to_update.par_iter().for_each(|provider_mutex| {
+                    if let Ok(mut provider) = provider_mutex.lock() {
+                        provider.update(&capture_state);
+                    }
+                });
 
-                        for (plot_id, channel) in channels_to_push {
-                            let plot_data = mg.get_merged_data_for_plot(&plot_id);
+                if let Ok(mg) = manager_clone.lock() {
+                    let channels_to_push: Vec<_> = mg
+                        .plot_channels
+                        .iter()
+                        .map(|(id, chan)| (id.clone(), chan.clone()))
+                        .collect();
 
-                            if !plot_data.is_empty() {
-                                if let Err(e) = channel.send(plot_data) {
-                                    eprintln!("[Ticker] Failed to send on channel for plot {}: {}", plot_id, e);
-                                }
-                            }
-                        }
+                    for (plot_id, channel) in channels_to_push {
+                        let plot_data = mg.get_merged_data_for_plot(&plot_id);
 
-                        let stats_channels_to_push: Vec<_> = mg.statistics_channels.iter()
-                            .map(|(id, chan)| (*id, chan.clone()))
-                            .collect();
-
-                        for (provider_id, channel) in stats_channels_to_push {
-                            if let Some(provider_mutex) = mg.stat_providers.get(&provider_id) {
-                                let stats_output = provider_mutex.lock().unwrap().get_output();
-                                
-                                if let Err(e) = channel.send(stats_output) {
-                                    eprintln!("[Ticker] Failed to send on channel for stats provider {}: {}", provider_id.0, e);
-                                }
+                        if !plot_data.is_empty() {
+                            if let Err(e) = channel.send(plot_data) {
+                                eprintln!(
+                                    "[Ticker] Failed to send on channel for plot {}: {}",
+                                    plot_id, e
+                                );
                             }
                         }
                     }
-                    thread::sleep(Duration::from_millis(33));
+
+                    let stats_channels_to_push: Vec<_> = mg
+                        .statistics_channels
+                        .iter()
+                        .map(|(id, chan)| (*id, chan.clone()))
+                        .collect();
+
+                    for (provider_id, channel) in stats_channels_to_push {
+                        if let Some(provider_mutex) = mg.stat_providers.get(&provider_id) {
+                            let stats_output = provider_mutex.lock().unwrap().get_output();
+
+                            if let Err(e) = channel.send(stats_output) {
+                                eprintln!(
+                                    "[Ticker] Failed to send on channel for stats provider {}: {}",
+                                    provider_id.0, e
+                                );
+                            }
+                        }
+                    }
                 }
+                thread::sleep(Duration::from_millis(33));
             })
             .expect("Failed to spawn pipeline ticker thread.");
 
@@ -116,7 +120,11 @@ impl ProcessingManager {
         self.plot_channels.insert(plot_id, channel);
     }
 
-    pub fn register_statistics_channel(&mut self, provider_id: PipelineId, channel: Channel<StreamStatistics>) {
+    pub fn register_statistics_channel(
+        &mut self,
+        provider_id: PipelineId,
+        channel: Channel<StreamStatistics>,
+    ) {
         println!(
             "[Manager] Registering IPC channel for statistics provider ID: {}",
             provider_id.0
