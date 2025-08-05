@@ -1,12 +1,10 @@
-use tauri::{State};
-use std::sync::Arc;
 use serde_json::Value;
+use std::sync::Arc;
+use tauri::State;
 
-use crate::state::proxy_register::ProxyRegister;
-use crate::shared::{ UiDevice, PortState };
 use crate::shared::RpcError;
-
-
+use crate::shared::{PortState, UiDevice};
+use crate::state::proxy_register::ProxyRegister;
 
 #[tauri::command]
 pub fn get_all_devices(registry: State<Arc<ProxyRegister>>) -> Vec<UiDevice> {
@@ -14,7 +12,7 @@ pub fn get_all_devices(registry: State<Arc<ProxyRegister>>) -> Vec<UiDevice> {
 
     for entry in registry.ports.iter() {
         let port_manager = entry.value();
-        
+
         let devices_map = match port_manager.devices.read() {
             Ok(guard) => guard,
             Err(e) => {
@@ -26,7 +24,6 @@ pub fn get_all_devices(registry: State<Arc<ProxyRegister>>) -> Vec<UiDevice> {
             }
         };
 
-        
         for device_entry in devices_map.values() {
             let device_tuple = match device_entry.lock() {
                 Ok(guard) => guard,
@@ -43,8 +40,11 @@ pub fn get_all_devices(registry: State<Arc<ProxyRegister>>) -> Vec<UiDevice> {
             all_devices.push(ui_device.clone());
         }
     }
-    
-    println!("[Command] get_all_devices returning {} devices.", all_devices.len());
+
+    println!(
+        "[Command] get_all_devices returning {} devices.",
+        all_devices.len()
+    );
     all_devices
 }
 
@@ -57,8 +57,14 @@ pub fn get_port_state(
         match port_manager.state.lock() {
             Ok(guard) => Ok(guard.clone()),
             Err(_poisoned) => {
-                eprintln!("[{}] State lock was poisoned. Returning last known state.", port_url);
-                Err(format!("Port '{}' is in an inconsistent state (lock poisoned).", port_url))
+                eprintln!(
+                    "[{}] State lock was poisoned. Returning last known state.",
+                    port_url
+                );
+                Err(format!(
+                    "Port '{}' is in an inconsistent state (lock poisoned).",
+                    port_url
+                ))
             }
         }
     } else {
@@ -74,7 +80,8 @@ pub async fn execute_rpc(
     args: Option<Value>,
     registry: State<'_, Arc<ProxyRegister>>,
 ) -> Result<Value, RpcError> {
-    let port_manager = registry.get(&port_url)
+    let port_manager = registry
+        .get(&port_url)
         .ok_or_else(|| RpcError::AppLogic(format!("Port '{}' not found.", port_url)))?;
 
     port_manager.execute_rpc(&device_route, &name, args).await

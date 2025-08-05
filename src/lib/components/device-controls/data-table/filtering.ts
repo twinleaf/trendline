@@ -31,7 +31,7 @@ export const fuzzySort: SortingFn<RpcMeta> = (rowA, rowB, columnId) => {
 };
 
 export const prefixFilter: FilterFn<RpcMeta> = (row, columnId, value: string[]) => {
-	if (!value || value.length === 0) return true;
+	if (!value || value.length === 0) return false;
 
 	// For performance, create a temporary Set from the array.
 	const prefixes = new Set(value);

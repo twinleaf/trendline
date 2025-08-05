@@ -85,22 +85,39 @@ export class TimeSeriesRingBuffer {
     const newTimestamps = newData[0];
     const newPointsCount = newTimestamps.length;
 
-    if (newPointsCount === 0) return;
+    if (newPointsCount === 0 || !newTimestamps) return;
 
-    for (let i = 0; i < newPointsCount; i++) {
-      for (let j = 0; j < this.numSeries + 1; j++) {
-		const value = newData[j]?.[i];
-        this.buffer[j][this.head] = value ?? NaN;
-      }
+    for (let seriesIdx = 0; seriesIdx < this.numSeries + 1; seriesIdx++) {
+      const sourceSeries = newData[seriesIdx];
+      const targetSeries = this.buffer[seriesIdx];
 
-      this.head = (this.head + 1) % this.capacity;
+      if (!sourceSeries) continue;
 
-      if (this.size < this.capacity) {
-        this.size++;
+      const normalizedSource = Float64Array.from(
+        sourceSeries as ArrayLike<number | null | undefined>,
+        v => v ?? NaN
+      );
+
+      const spaceToEnd = this.capacity - this.head;
+
+      if (newPointsCount <= spaceToEnd) {
+        targetSeries.set(normalizedSource, this.head);
+      } else {
+        const part1 = normalizedSource.subarray(0, spaceToEnd);
+        targetSeries.set(part1, this.head);
+
+        const part2 = normalizedSource.subarray(spaceToEnd);
+        targetSeries.set(part2, 0);
       }
     }
 
-    this.lastSeenTimestamp = newTimestamps[newPointsCount - 1];
+    this.head = (this.head + newPointsCount) % this.capacity;
+    this.size = Math.min(this.capacity, this.size + newPointsCount);
+
+    const latestInChunk = newTimestamps[newPointsCount - 1];
+    if (typeof latestInChunk === 'number' && latestInChunk > this.lastSeenTimestamp) {
+      this.lastSeenTimestamp = latestInChunk;
+    }
   }
 
   /**
@@ -126,26 +143,43 @@ export class TimeSeriesRingBuffer {
       return alignedData;
     }
 
-    // If the buffer hasn't wrapped, the data is from index 0 to `size - 1`.
-    // If it has wrapped, the oldest data starts at `head`.
+
     const start = this.size < this.capacity ? 0 : this.head;
     const end = this.head;
 
-    if (start < end) { // No wrap-around yet or buffer not full
+    if (start < end) {
       for (let i = 0; i < this.numSeries + 1; i++) {
         alignedData[i].set(this.buffer[i].subarray(start, end));
       }
-    } else { // Data has wrapped around
+    } else { 
       for (let i = 0; i < this.numSeries + 1; i++) {
-        // Part 1: from the start index to the end of the array
         const tail = this.buffer[i].subarray(start);
         alignedData[i].set(tail, 0);
 
-        // Part 2: from the beginning of the array to the end index (head)
         const headPart = this.buffer[i].subarray(0, end);
         alignedData[i].set(headPart, tail.length);
       }
     }
     return alignedData;
   }
+}
+
+
+export function lerp(x1: number, y1: number, x2: number, y2: number, x: number): number {
+    if (Math.abs(x2 - x1) < 1e-9) return y1; // Avoid division by zero
+    return y1 + (y2 - y1) * (x - x1) / (x2 - x1);
+}
+
+export function findTimestampIndex(timestamps: Float64Array | number[], targetTime: number): number {
+    let low = 0;
+    let high = timestamps.length;
+    while (low < high) {
+        const mid = (low + high) >>> 1; // Unsigned bitwise shift for integer division
+        if (timestamps[mid] < targetTime) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    return low;
 }

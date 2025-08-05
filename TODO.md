@@ -21,15 +21,17 @@ This document outlines the current bugs, desired features, and code quality impr
 
 [x] Plot Control Focus: Fix how plot control's focus is not removed when the PopOver disappears (eg. hitting space bar after closing the popover reopens it). Presumably tied to the button focus.
 
-# #Features
+## Features
 
-[ ] Scalar Data Viewer: Implement exponential moving average and a boxed display for scalar values
+[x] Scalar Data Viewer: Implement exponential moving average and a boxed display for scalar values
+
+[x] Data Clipboard: Implement query to copy current window view to CSV format
 
 [ ] Device Selector UI: Implement the pop-up modal for device selection, triggered from the "Change Device" menu item.
 
 [ ] Channel Search Bar: Implement a search bar in the channel selection interface to allow users to quickly filter available data streams.
 
-[ ] Plot Reordering: Add functionality to allow users to drag and drop plots to reorder their display.
+[X] Plot Reordering: Add functionality to allow users to drag and drop plots to reorder their display.
 
 [ ] Data Logging: Add functionality to record binary data stream and eventually restream data as a headless device
 
@@ -39,11 +41,11 @@ This document outlines the current bugs, desired features, and code quality impr
 
 [ ] Menubar: Both integrating MacOS native and making a Svelte Menubar component
 
-[ ] Context menu: Should be able to right click to add or move plots in the ChartView area
+[X] Context menu: Should be able to right click to add or move plots in the ChartView area
 
 ## Code Quality & Refactoring
 
-[ ] Reactive Data Flow:
+[x] Reactive Data Flow:
 
 Goal: Transition from a polling-based model to a reactive, event-driven architecture.
 

@@ -20,3 +20,5 @@
 - Multi series plots are notably slower than indiviudal plots of the same series
 - Typing in the RPC filtering slows down over time
 - Changing sample rates from high sample rate to low sample rate truncates front-end buffers
+- Stream monitor does not handle Time epoch type correctly and window statistics may fill zeros on non-time aligned data
+- Seems to randomly drop sample packets during acquisition (correlated with responsiveness of front end). Could be cause by IPC back pressure?
