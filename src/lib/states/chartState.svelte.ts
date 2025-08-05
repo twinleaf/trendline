@@ -391,6 +391,17 @@ class ChartState {
 	});
 
 	/**
+	 * Checks if a specific plot has any data associated with it.
+	 * This is used to disable UI elements proactively.
+	 * @param plotId The ID of the plot to check.
+	 * @returns `true` if the plot has data, `false` otherwise.
+	 */
+	plotHasData(plotId: string): boolean {
+		const data = this.plotsData.get(plotId);
+		return data ? data.timestamps.length > 0 : false;
+	}
+
+	/**
 	 * Cleans up all plots and backend resources. Should be called when the component is destroyed.
 	 */
 	destroy() {
@@ -603,9 +614,37 @@ class ChartState {
 		}
 
 		try {
-			await invoke('export_decimated_view_to_clipboard', {
+			await invoke('export_plot_data_to_clipboard', {
 				plotData: decimatedData,
 				dataColumnIds: plot.series.map(s => s.dataKey)
+			});
+		} catch (e) {
+			uiState.showError(e as string);
+		}
+	}
+
+	/**
+	 * Saves the decimated data currently visible in the plot to a CSV file.
+	 * @param plotId The ID of the plot whose data will be saved.
+	 */
+	async savePlotDataAsCsv(plotId: string) {
+		const plot = this.plots.find((p) => p.id === plotId);
+		if (!plot) {
+			uiState.showError('Plot not found.');
+			return;
+		}
+
+		const decimatedData = this.plotsData.get(plotId);
+		if (!decimatedData || decimatedData.timestamps.length === 0) {
+			uiState.showError('No plot data available to save.');
+			return;
+		}
+
+		try {
+			await invoke('save_plot_data_to_file', {
+				plotData: decimatedData,
+				dataColumnIds: plot.series.map((s) => s.dataKey),
+				fileNameSuggestion: `${plot.title.replace(/\s+/g, '_')}_plotted.csv`
 			});
 		} catch (e) {
 			uiState.showError(e as string);
@@ -618,9 +657,12 @@ class ChartState {
 	 * or performs an instant "live snapshot" if the plot is running.
 	 * @param plotId The ID of the plot to move.
 	 */
-	async savePlotRawData(plotId: string) {
+	async saveRawDataAsCsv(plotId: string) {
 		const plot = this.plots.find((p) => p.id === plotId);
-		if (!plot) { uiState.showError('Plot not found.'); return; }
+		if (!plot) { 
+			uiState.showError('Plot not found.'); 
+			return; 
+		}
 
 		const viewData = this.plotsData.get(plotId);
 		if (!viewData || viewData.timestamps.length === 0) {
@@ -639,6 +681,7 @@ class ChartState {
 				startTime,
 				endTime,
 				isPaused: plot.isPaused,
+				fileNameSuggestion: `${plot.title.replace(/\s+/g, '_')}_raw.csv`
 			});
 		} catch (e) {
 			uiState.showError(e as string);
@@ -746,6 +789,16 @@ class ChartState {
 		if (this._isClose(percentage, 33.33)) return '33';
 		if (this._isClose(percentage, 25)) return '25';
 		return undefined;
+	}
+
+	/**
+	 * Gets the current type of plot. Used for validating context menu options.
+	 * @param plotId The ID of the plot to check.
+	 * @returns A string key ('timeseries', 'fft') or undefined if the plot is not found.
+	 */
+	getPlotType(plotId: string): 'timeseries' | 'fft' | undefined {
+		const plot = this.plots.find((p) => p.id === plotId);
+		return plot?.viewType;
 	}
 
 	/**

@@ -43,6 +43,8 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_prevent_default::debug())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -84,7 +86,8 @@ fn main() {
             commands::settings::get_port_state,
             commands::settings::execute_rpc,
             // ---  Export Command ---
-            commands::export::export_decimated_view_to_clipboard,
+            commands::export::export_plot_data_to_clipboard,
+            commands::export::save_plot_data_to_file,
             commands::export::save_raw_plot_data_to_file,
         ])
         .run(tauri::generate_context!())
