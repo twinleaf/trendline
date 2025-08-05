@@ -12,8 +12,18 @@
 	import { sortUiDevicesByRoute } from '$lib/utils';
 	import { onDestroy } from 'svelte';
 	import * as ContextMenu from '$lib/components/ui/context-menu/index.js';
-	import { ArrowUp, ArrowDown, Download, Plus, Trash2, Scaling, ClipboardCopy } from '@lucide/svelte';
-
+	import {
+		ArrowUp,
+		ArrowDown,
+		Download,
+		Plus,
+		Trash2,
+		Scaling,
+		ClipboardCopy,
+		Database,      
+		ChartLine,     
+		ChartColumn    
+	} from '@lucide/svelte';
 	// Svelte 5 state management
 	let plots = $derived(chartState.plots);
 	let layout = $derived(chartState.layout);
@@ -167,8 +177,10 @@
 			<ContextMenu.Content class="w-56">
 				{#if targetedPlotId}
 					{@const plotId = targetedPlotId}
+					{@const plotType = chartState.getPlotType(plotId)}
 					{@const plotIndex = chartState.getPlotIndex(plotId)}
 					{@const plotCount = plots.length}
+					{@const hasData = chartState.plotHasData(plotId)}
 					{@const currentHeightKey = chartState.getPlotHeightPercentageKey(plotId)}
 					<ContextMenu.Item
 						onclick={() => {
@@ -264,9 +276,9 @@
 					 <ContextMenu.Separator />
 
                     <ContextMenu.Item
+						disabled={!hasData}
                         onclick={() => {
                             isMenuOpen = false;
-                            // Calls the "Copy View" function
                             chartState.copyPlotViewToClipboard(plotId);
                         }}
                     >
@@ -274,16 +286,34 @@
                         <span>Copy CSV...</span>
                     </ContextMenu.Item>
 
-                    <ContextMenu.Item
-                        onclick={() => {
-                            isMenuOpen = false;
-                            // Calls the "Save Raw" function
-                            chartState.savePlotRawData(plotId);
-                        }}
-                    >
-                        <Download class="mr-2 h-4 w-4" />
-                        <span>Save as CSV...</span>
-                    </ContextMenu.Item>
+					<ContextMenu.Sub>
+						<ContextMenu.SubTrigger disabled={!hasData}>
+							<Download class="mr-2 h-4 w-4" />
+							Export as CSV...
+						</ContextMenu.SubTrigger>
+						<ContextMenu.SubContent class="w-52">
+							<ContextMenu.Item onclick={() => chartState.savePlotDataAsCsv(plotId)}>
+								{#if plotType === 'timeseries'}
+									<ChartLine class="mr-2 h-4 w-4" />
+								{:else if plotType === 'fft'}
+									<ChartColumn class="mr-2 h-4 w-4" />
+								{/if}
+								Save Plotted Data
+							</ContextMenu.Item>
+							<ContextMenu.Item
+								disabled={plotType !== 'timeseries'}
+								onclick={() => {
+									if (plotType === 'timeseries') {
+										chartState.saveRawDataAsCsv(plotId);
+									}
+								}}
+							>
+								<Database class="mr-2 h-4 w-4" />
+								Save Raw Data
+							</ContextMenu.Item>
+						</ContextMenu.SubContent>
+					</ContextMenu.Sub>
+
 					<ContextMenu.Separator />
 					<ContextMenu.Item
 						onclick={() => {
