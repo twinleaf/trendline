@@ -24,6 +24,9 @@
     }
   },
   "bundle": {
+    "macOS": {
+      "signingIdentity": "Developer ID Application: Twinleaf LLC (ABC123DE45)"
+    },
     "active": true,
     "targets": "all",
     "icon": [

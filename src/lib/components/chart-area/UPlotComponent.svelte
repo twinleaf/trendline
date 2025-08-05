@@ -5,6 +5,7 @@
 	import type { PlotConfig } from '$lib/states/chartState.svelte';
 	import CustomLegend from '$lib/components/chart-area/legend/CustomLegend.svelte';
 	import { findTimestampIndex, lerp } from '$lib/utils';
+    import { untrack } from 'svelte';
 
 	// --- Props ---
 	let { plot, latestTimestamp = $bindable() }: { plot: PlotConfig; latestTimestamp?: number } = $props();
@@ -173,50 +174,54 @@
 		};
 
 		const finalOptions: uPlot.Options = { ...options, plugins: [legendPlugin] };
-		const uplotInstance = new uPlot(finalOptions, [[]], chartContainer);
+        const uplotInstance = new uPlot(finalOptions, [[]], chartContainer);
+        uplot = uplotInstance; // Update the state.raw variable
 
-		const resizeObserver = new ResizeObserver((entries) => {
-			if (!entries.length) return;
-			const { width, height } = entries[0].contentRect;
-			uplotInstance.setSize({ width, height });
-		});
-		resizeObserver.observe(chartContainer);
+        // Setup the resize observer
+        const resizeObserver = new ResizeObserver((entries) => {
+            if (!entries.length) return;
+            const { width, height } = entries[0].contentRect;
+            uplotInstance.setSize({ width, height });
+        });
+        resizeObserver.observe(chartContainer);
 
-		let renderFrameId: number | null = null;
-		let latestDataSnapshot: { views: Float64Array[]; latestTimestamp: number } | null = null;
+        let isLooping = true;
 
-		const stopRenderEffect = $effect.root(() => {
-			$effect(() => {
-				latestDataSnapshot = preparedData;
-				const isPaused = isEffectivelyPaused;
+        const renderLoop = () => {
+            if (!isLooping) return;
 
-				if (renderFrameId === null && !isPaused) {
-					renderFrameId = requestAnimationFrame(() => {
-						const data = latestDataSnapshot;
-						if (data) {
-							plot.hasData = true;
-							latestTimestamp = data.latestTimestamp;
-							if (!isFFT) {
-								uplotInstance.setScale('x', { min: -plot.windowSeconds, max: 0 });
-							}
-							uplotInstance.setData(data.views, isFFT);
-						} else {
-							if (plot.hasData) uplotInstance.setData([[]], false);
-							plot.hasData = false;
-						}
-						renderFrameId = null;
-					});
-				}
-			});
-		});
 
-		return () => {
-			stopRenderEffect();
-			if (renderFrameId) cancelAnimationFrame(renderFrameId);
-			resizeObserver.disconnect();
-			uplotInstance.destroy();
-		};
-	});
+            const data = untrack(() => preparedData);
+            const isPaused = untrack(() => isEffectivelyPaused);
+            const currentWindow = untrack(() => plot.windowSeconds);
+            const isCurrentlyFFT = untrack(() => isFFT);
+
+            if (data && !isPaused) {
+                plot.hasData = true;
+                latestTimestamp = data.latestTimestamp;
+
+                if (!isCurrentlyFFT) {
+                    uplotInstance.setScale('x', { min: -currentWindow, max: 0 });
+                }
+                uplotInstance.setData(data.views, isCurrentlyFFT);
+
+            } else if (untrack(() => plot.hasData)) {
+                uplotInstance.setData([[]], false);
+                plot.hasData = false;
+            }
+
+            requestAnimationFrame(renderLoop);
+        };
+
+        requestAnimationFrame(renderLoop);
+
+
+        return () => {
+            isLooping = false;
+            resizeObserver.disconnect();
+            uplotInstance.destroy();
+        };
+    });
 </script>
 
 <div class="relative h-full w-full">

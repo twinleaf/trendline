@@ -1,5 +1,5 @@
 use crate::shared::{DataColumnId, PlotData, Point};
-use crossbeam::channel::{unbounded, Receiver, Sender};
+use crossbeam::channel::{bounded, Receiver, Sender};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use rayon::prelude::*;
@@ -73,9 +73,9 @@ pub struct Inner {
 }
 #[derive(Debug)]
 pub enum CaptureCommand {
-    Insert {
+    InsertBatch {
         key: DataColumnId,
-        data: Point,
+        points: Vec<Point>,
         session_id: SessionId,
         instant: Instant,
     },
@@ -108,7 +108,7 @@ impl CaptureState {
     const DEFAULT_SAMPLING_RATE: f64 = 1000.0;
 
     pub fn new() -> Self {
-        let (command_tx, command_rx) = unbounded();
+        let (command_tx, command_rx) = bounded::<CaptureCommand>(8_192);
         let inner = Arc::new(Inner {
             buffers: DashMap::new(),
             streams: DashMap::new(),
@@ -245,44 +245,42 @@ impl CaptureState {
         };
         while let Ok(command) = rx.recv() {
             match command {
-                CaptureCommand::Insert {
-                    key,
-                    data,
-                    session_id,
-                    instant,
-                } => {
+                CaptureCommand::InsertBatch { key, points, session_id, instant } => {
                     if !inner.active.contains_key(&key) {
                         continue;
                     }
 
-                    let stream_key = key.stream_key();
+                    let stream_key  = key.stream_key();
                     let stream_state = inner.streams.entry(stream_key).or_default();
+
                     match stream_state.session_meta.entry(session_id) {
-                        Entry::Occupied(mut entry) => {
-                            let meta = entry.get_mut();
-                            meta.last_instant = instant;
-                            meta.last_device_time = data.x;
+                        Entry::Occupied(mut e) => {
+                            let meta = e.get_mut();
+                            meta.last_instant      = instant;
+                            meta.last_device_time  = points.last().map(|p| p.x).unwrap_or(meta.last_device_time);
                         }
-                        Entry::Vacant(entry) => {
+                        Entry::Vacant(e) => {
                             *stream_state.offsets_cache.lock().unwrap() = None;
-                            entry.insert(SessionMeta {
+                            let first_x = points.first().map(|p| p.x).unwrap_or_default();
+                            let last_x  = points.last().map(|p| p.x).unwrap_or(first_x);
+                            e.insert(SessionMeta {
                                 first_instant: instant,
-                                last_instant: instant,
-                                first_device_time: data.x,
-                                last_device_time: data.x,
+                                last_instant:  instant,
+                                first_device_time: first_x,
+                                last_device_time:  last_x,
                             });
                         }
                     }
 
                     let session_map = inner.buffers.entry(key.clone()).or_default();
                     let mut buffer = session_map.entry(session_id).or_insert_with(|| {
-                        let rate = stream_state
-                            .effective_sampling_rate
+                        let rate = stream_state.effective_sampling_rate
                             .max(Self::DEFAULT_SAMPLING_RATE);
-                        let cap = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
+                        let cap  = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
                         Buffer::new(cap)
                     });
-                    buffer.push(data);
+
+                    for p in points { buffer.push(p); }
                 }
                 CaptureCommand::UpdateSampleRate { key, rate } => {
                     let stream_key = key.stream_key();

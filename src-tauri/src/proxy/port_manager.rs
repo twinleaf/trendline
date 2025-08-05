@@ -1,7 +1,7 @@
 use crate::shared::{
     ColumnMeta, DataColumnId, DeviceMeta, Point, PortState, RpcError, RpcMeta, UiDevice, UiStream,
 };
-use crate::state::capture::{CaptureCommand, CaptureState};
+use crate::state::capture::{CaptureCommand, CaptureState, SessionId};
 use crate::state::proxy_register::ProxyRegister;
 use crate::util::{self, parse_arg_type_and_size, parse_permissions_string};
 use crossbeam::channel::Sender;
@@ -56,7 +56,7 @@ impl PortManager {
         app: tauri::AppHandle,
         capture_tx: Sender<CaptureCommand>,
     ) -> Arc<Self> {
-        let (command_tx, command_rx) = crossbeam::channel::unbounded();
+        let (command_tx, command_rx) = crossbeam::channel::unbounded::<PortCommand>();
 
         let pm = Arc::new(Self {
             url,
@@ -504,42 +504,47 @@ impl PortManager {
 
     fn poll_device_data(self: &Arc<Self>) {
         self.counters.polls.fetch_add(1, Ordering::Relaxed);
+        let poll_instant = Instant::now();
 
         let mut refresh_needed = HashSet::new();
-        let mut reinit_needed = HashSet::new();
+        let mut reinit_needed  = HashSet::new();
 
-        // {
-        //     let devices_map = self.devices.read().unwrap();
-        //     for (route, entry) in devices_map.iter() {
-        //         let mut tuple = entry.lock().unwrap();
-        //         let (device, _) = &mut *tuple;
-        //         if let Ok(samples) = device.drain() {
-        //             for sample in samples {
-        //                 self.process_sample_data(route, &sample);
-        //                 if sample.meta_changed || sample.segment_changed {
-        //                     refresh_needed.insert(route.clone());
-        //                 }
-        //             }
-        //         } else {
-        //             eprintln!("[{}] Error draining device '{}'. Connection may be lost.", self.url, route);
-        //             // HELP
-        //             return;
-        //         }
-        //     }
-        // }
+        let mut batched: HashMap<(DataColumnId, SessionId), Vec<Point>> = HashMap::new();
+
         {
             let devices_map = self.devices.read().unwrap();
             for (route, entry) in devices_map.iter() {
-                let mut tuple = entry.lock().unwrap();
+                let mut tuple   = entry.lock().unwrap();
                 let (device, _) = &mut *tuple;
 
-                // Use catch_unwind to handle the potential panic in drain()
-                let result = panic::catch_unwind(panic::AssertUnwindSafe(|| device.drain()));
+                let result = panic::catch_unwind(AssertUnwindSafe(|| device.drain()));
 
                 match result {
                     Ok(samples) => {
                         for sample in samples {
-                            self.update_capture_state_with_sample(route, &sample);
+                            let sid = sample.device.session_id;
+
+                            for col in &sample.columns {
+                                let val = match col.value {
+                                    twinleaf::data::ColumnData::Int(i)   => i as f64,
+                                    twinleaf::data::ColumnData::UInt(u)  => u as f64,
+                                    twinleaf::data::ColumnData::Float(f) => f,
+                                    _ => continue,
+                                };
+
+                                let key = DataColumnId {
+                                    port_url:     self.url.clone(),
+                                    device_route: route.clone(),
+                                    stream_id:    sample.stream.stream_id,
+                                    column_index: col.desc.index,
+                                };
+
+                                batched
+                                    .entry((key, sid))
+                                    .or_insert_with(Vec::new)
+                                    .push(Point { x: sample.timestamp_end(), y: val });
+                            }
+
                             if sample.meta_changed || sample.segment_changed {
                                 refresh_needed.insert(route.clone());
                             }
@@ -553,6 +558,24 @@ impl PortManager {
                         reinit_needed.insert(route.clone());
                     }
                 }
+            }
+        }
+
+        for ((key, sid), points) in batched {
+            let len = points.len();
+            if self
+                .capture_tx
+                .send(CaptureCommand::InsertBatch {
+                    key,
+                    points,
+                    session_id: sid,
+                    instant: poll_instant,
+                })
+                .is_ok()
+            {
+                self.counters
+                    .points_inserted
+                    .fetch_add(len, Ordering::Relaxed);
             }
         }
 
@@ -580,7 +603,7 @@ impl PortManager {
         for route in refresh_needed {
             if let Some(device_entry) = devices_map.get(&route) {
                 let device_arc_clone = device_entry.clone();
-                let self_clone = self.clone();
+                let self_clone       = self.clone();
 
                 async_runtime::spawn_blocking(move || {
                     println!(
@@ -588,14 +611,14 @@ impl PortManager {
                         self_clone.url, route
                     );
 
-                    let mut device_tuple = device_arc_clone.lock().unwrap();
-                    let (data_device, ui_device) = &mut *device_tuple;
+                    let mut device_tuple           = device_arc_clone.lock().unwrap();
+                    let (data_device, ui_device)   = &mut *device_tuple;
+                    let (new_meta, new_streams)    = self_clone.fetch_metadata(data_device);
 
-                    let (new_meta, new_streams) = self_clone.fetch_metadata(data_device);
+                    self_clone
+                        .update_capture_state_with_stream_metadata(&route, &new_streams);
 
-                    self_clone.update_capture_state_with_stream_metadata(&route, &new_streams);
-
-                    ui_device.meta = new_meta;
+                    ui_device.meta    = new_meta;
                     ui_device.streams = new_streams;
 
                     self_clone
@@ -701,52 +724,6 @@ impl PortManager {
         }
 
         Ok(rpc_result)
-    }
-
-    fn update_capture_state_with_sample(
-        &self,
-        route: &DeviceRoute,
-        sample: &twinleaf::data::Sample,
-    ) {
-        let instant = Instant::now();
-        for column in &sample.columns {
-            let value_f64 = match column.value {
-                twinleaf::data::ColumnData::Int(i) => Some(i as f64),
-                twinleaf::data::ColumnData::UInt(u) => Some(u as f64),
-                twinleaf::data::ColumnData::Float(f) => Some(f),
-                _ => None,
-            };
-
-            if let Some(value) = value_f64 {
-                let stream_key = DataColumnId {
-                    port_url: self.url.clone(),
-                    device_route: route.clone(),
-                    stream_id: sample.stream.stream_id,
-                    column_index: column.desc.index,
-                };
-                let point = Point {
-                    x: sample.timestamp_end(),
-                    y: value,
-                };
-
-                let command = CaptureCommand::Insert {
-                    key: stream_key,
-                    data: point,
-                    session_id: sample.device.session_id,
-                    instant,
-                };
-                if self.capture_tx.send(command).is_ok() {
-                    self.counters
-                        .points_inserted
-                        .fetch_add(1, Ordering::Relaxed);
-                } else {
-                    eprintln!(
-                        "[{}] Failed to send data to capture thread. It may have panicked.",
-                        self.url
-                    );
-                }
-            }
-        }
     }
 
     fn update_capture_state_with_stream_metadata(&self, route: &DeviceRoute, streams: &[UiStream]) {
