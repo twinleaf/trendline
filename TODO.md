@@ -21,6 +21,8 @@ This document outlines the current bugs, desired features, and code quality impr
 
 [x] Plot Control Focus: Fix how plot control's focus is not removed when the PopOver disappears (eg. hitting space bar after closing the popover reopens it). Presumably tied to the button focus.
 
+[ ] App Icon: Build app-icon using 1024x1024 and replace only icon.icns with smaller image (otherwise MacOS icon is oversized). 
+
 ## Features
 
 [x] Scalar Data Viewer: Implement exponential moving average and a boxed display for scalar values
