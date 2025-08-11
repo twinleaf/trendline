@@ -333,6 +333,12 @@ class ChartState {
 	#isActionLocked = false;
 	/** The timeout ID for the action lock, used to release the lock after a cooldown. */
 	#actionLockTimeout: number | undefined;
+	/** A non-reactive cache to store the most recent data for each plot, avoiding immediate reactive triggers. */
+	#latestDataCache = new Map<string, PlotData>();
+	/** A set of plot IDs that have received new data since the last render frame, marking them as "dirty". */
+	#dirtyPlots = new Set<string>();
+	/** A flag to ensure the render loop is only started once. */
+	#isUpdateLoopRunning = false;
 
 	// --- Private Helper for Rate Limiting ---
 	/**
@@ -356,7 +362,40 @@ class ChartState {
 		}
 	}
 
-	// --- CORE LAYOUT LOGIC ---
+	/**
+	 * Starts a single, global requestAnimationFrame loop to process data updates.
+	 * This decouples high-frequency data arrival from the UI render frequency.
+	 */
+	#startUpdateLoop() {
+		// Guard clause: If the loop is already running, do nothing.
+		if (this.#isUpdateLoopRunning) return;
+		this.#isUpdateLoopRunning = true;
+
+		const loop = () => {
+			// Only perform work if there are plots with new, unprocessed data.
+			if (this.#dirtyPlots.size > 0) {
+				// Use untrack to prevent this effect from re-triggering itself when we update plotsData.
+				untrack(() => {
+					// Process every plot that has received new data since the last frame.
+					for (const plotId of this.#dirtyPlots) {
+						const data = this.#latestDataCache.get(plotId);
+						if (data) {
+							// This is the *only* place we now update the reactive state,
+							// effectively throttling updates to the screen's refresh rate.
+							this.plotsData.set(plotId, data);
+						}
+					}
+					// Clear the set for the next frame.
+					this.#dirtyPlots.clear();
+				});
+			}
+
+			// Continue the loop on the next animation frame.
+			requestAnimationFrame(loop);
+		};
+		// Kick off the loop.
+		requestAnimationFrame(loop);
+	}
 
 	/**
 	 * A derived property that calculates the layout of plots.
@@ -414,6 +453,8 @@ class ChartState {
 	 * @param plot The PlotConfig object to sync.
 	 */
 	async syncPlotWithBackend(plot: PlotConfig) {
+		this.#startUpdateLoop();
+
 		untrack(async () => {
 			if (plot.series.length === 0) {
 				if (this.#listeningPlots.has(plot.id)) {
@@ -424,11 +465,14 @@ class ChartState {
 
 			if (!this.#listeningPlots.has(plot.id)) {
 				const plotChannel = new Channel<PlotData>();
+
 				plotChannel.onmessage = (data) => {
 					if (!this.isPaused && !plot.isPaused) {
-						this.plotsData.set(plot.id, data);
+						this.#latestDataCache.set(plot.id, data);
+						this.#dirtyPlots.add(plot.id);
 					}
 				};
+
 				try {
 					await invoke('listen_to_plot_data', {
 						plotId: plot.id,
@@ -479,6 +523,8 @@ class ChartState {
 		if (this.#listeningPlots.has(plotId)) {
 			this.#listeningPlots.delete(plotId);
 		}
+		this.#latestDataCache.delete(plotId);
+        this.#dirtyPlots.delete(plotId);
 		try {
 			await invoke('destroy_plot_pipeline', { plotId });
 		} catch (e) {
