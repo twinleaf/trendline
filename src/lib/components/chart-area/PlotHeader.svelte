@@ -15,7 +15,7 @@
 
 	let { plot = $bindable(), treeData, onRemove }: Props = $props();
 
-	const isEffectivelyPaused = $derived(chartState.isPaused || plot.isPaused);
+	const isEffectivelyPaused = $derived(plot.isPaused);
 </script>
 
 <div class="flex justify-between items-center">
@@ -33,7 +33,7 @@
 			aria-label={isEffectivelyPaused ? 'Play chart' : 'Pause chart'}
 			onclick={(e) => {
 				e.stopPropagation();
-				chartState.togglePlotPause(plot);
+				chartState.handleLocalPlotToggle(plot);
 			}}
 		>
 			{#if isEffectivelyPaused}

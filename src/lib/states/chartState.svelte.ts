@@ -367,33 +367,24 @@ class ChartState {
 	 * This decouples high-frequency data arrival from the UI render frequency.
 	 */
 	#startUpdateLoop() {
-		// Guard clause: If the loop is already running, do nothing.
 		if (this.#isUpdateLoopRunning) return;
 		this.#isUpdateLoopRunning = true;
 
 		const loop = () => {
-			// Only perform work if there are plots with new, unprocessed data.
+
 			if (this.#dirtyPlots.size > 0) {
-				// Use untrack to prevent this effect from re-triggering itself when we update plotsData.
 				untrack(() => {
-					// Process every plot that has received new data since the last frame.
 					for (const plotId of this.#dirtyPlots) {
 						const data = this.#latestDataCache.get(plotId);
 						if (data) {
-							// This is the *only* place we now update the reactive state,
-							// effectively throttling updates to the screen's refresh rate.
 							this.plotsData.set(plotId, data);
 						}
 					}
-					// Clear the set for the next frame.
 					this.#dirtyPlots.clear();
 				});
 			}
-
-			// Continue the loop on the next animation frame.
 			requestAnimationFrame(loop);
 		};
-		// Kick off the loop.
 		requestAnimationFrame(loop);
 	}
 
@@ -467,7 +458,7 @@ class ChartState {
 				const plotChannel = new Channel<PlotData>();
 
 				plotChannel.onmessage = (data) => {
-					if (!this.isPaused && !plot.isPaused) {
+					if (!plot.isPaused) {
 						this.#latestDataCache.set(plot.id, data);
 						this.#dirtyPlots.add(plot.id);
 					}
@@ -876,46 +867,56 @@ class ChartState {
 	}
 
 	/**
-	 * Toggles the pause state for a SINGLE plot and orchestrates the
-	 * creation or deletion of its backend snapshot.
+	 * A private helper to execute the backend pause/unpause logic.
+	 * This is called by both local and global toggle handlers.
+	 * @param plot The plot to update.
+	 * @param pause The desired new state (true for pause, false for unpause).
 	 */
-	async togglePlotPause(plot: PlotConfig) {
-		const intendedNewState = !plot.isPaused;
-
-		if (!intendedNewState && this.isPaused) {
-			uiState.showInfo("Cannot un-pause an individual plot while global pause is active.");
-			return;
-		}
-
+	private async _setPlotPauseOnBackend(plot: PlotConfig, pause: boolean) {
 		try {
-			if (intendedNewState) {
+			if (pause) {
 				const viewData = this.plotsData.get(plot.id);
 				if (!viewData || viewData.timestamps.length === 0) {
 					uiState.showWarning(`Cannot pause "${plot.title}": plot has no data.`);
+					plot.isPaused = false; // Revert optimistic UI update
 					return;
 				}
 				const startTime = Math.min(...viewData.timestamps);
 				const endTime = Math.max(...viewData.timestamps);
-				
 				await invoke('pause_plot', { plotId: plot.id, startTime, endTime });
 			} else {
 				await invoke('unpause_plot', { plotId: plot.id });
 			}
-			plot.isPaused = intendedNewState;
 		} catch (e) {
 			uiState.showError(e as string);
+			plot.isPaused = !pause; // Revert optimistic UI update on error
 		}
 	}
 
 	/**
-	 * Toggles the GLOBAL pause state for all plots.
-	 * This is what the Spacebar hotkey will call.
+	 * Toggles the pause state for a SINGLE plot. This is called by the UI.
+	 * Local control always takes precedence.
+	 */
+	handleLocalPlotToggle(plot: PlotConfig) {
+		const newState = !plot.isPaused;
+		plot.isPaused = newState; // Optimistically update UI
+		this._setPlotPauseOnBackend(plot, newState);
+	}
+
+	/**
+	 * Toggles the GLOBAL pause state, acting as a "Pause/Play All" button.
+	 * This sets the state for all plots.
 	 */
 	toggleGlobalPause() {
 		const newGlobalPausedState = !this.isPaused;
 		this.isPaused = newGlobalPausedState;
+
+		// Fire-and-forget updates for all plots.
 		for (const plot of this.plots) {
-			this.togglePlotPause(plot);
+			if (plot.isPaused !== newGlobalPausedState) {
+				plot.isPaused = newGlobalPausedState;
+				this._setPlotPauseOnBackend(plot, newGlobalPausedState);
+			}
 		}
 	}
 }
