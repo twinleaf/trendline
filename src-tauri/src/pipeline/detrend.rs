@@ -61,7 +61,7 @@ impl Pipeline for DetrendPipeline {
 
         let y_values: Vec<f64> = points.iter().map(|p| p.y).collect();
         let detrended_y = match self.method {
-            DetrendMethod::None => y_values,
+            DetrendMethod::None => remove_mean(&y_values),
             DetrendMethod::Linear => remove_linear_trend(&y_values),
             DetrendMethod::Quadratic => remove_quadratic_trend(&y_values),
         };
@@ -79,6 +79,17 @@ impl Pipeline for DetrendPipeline {
         capture_state.get_effective_sampling_rate(&self.source_key)
     }
 }
+
+pub fn remove_mean(y: &[f64]) -> Vec<f64> {
+    let n = y.len();
+    if n == 0 {
+        return vec![];
+    }
+    let mean = y.iter().sum::<f64>() / n as f64;
+
+    y.iter().map(|val| val - mean).collect()
+}
+
 
 pub fn remove_linear_trend(y: &[f64]) -> Vec<f64> {
     let n = y.len();

@@ -278,16 +278,11 @@ impl ProcessingManager {
         source_key: &DataColumnId,
         config: &FftConfig,
     ) -> Result<(PipelineId, PipelineId), String> {
-        let intermediate_id = match config.detrend_method {
-            DetrendMethod::None => {
-                self.create_passthrough_pipeline(source_key.clone(), config.window_seconds)
-            }
-            _ => self.create_detrend_pipeline(
-                source_key.clone(),
-                config.window_seconds,
-                config.detrend_method.clone(),
-            ),
-        };
+        let intermediate_id = self.create_detrend_pipeline(
+            source_key.clone(),
+            config.window_seconds,
+            config.detrend_method.clone(),
+        );
 
         let fft_id = self.create_fft_pipeline_from_source(intermediate_id)?;
         Ok((fft_id, intermediate_id))
