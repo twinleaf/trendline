@@ -1,5 +1,4 @@
-use super::Pipeline;
-use crate::pipeline::buffer::DoubleBuffer;
+use super::{Pipeline, PipelineCommand};
 use crate::shared::{PipelineId, PlotData};
 use crate::state::capture::CaptureState;
 use std::sync::{Arc, Mutex};
@@ -8,16 +7,14 @@ use welch_sde::{Build, SpectralDensity};
 
 pub struct FftPipeline {
     id: PipelineId,
-    source_pipeline: Arc<Mutex<dyn Pipeline>>,
-    output: Arc<Mutex<DoubleBuffer<PlotData>>>,
+    output: Arc<Mutex<PlotData>>,
 }
 
 impl FftPipeline {
-    pub fn new(source_pipeline: Arc<Mutex<dyn Pipeline>>) -> Self {
+    pub fn new() -> Self {
         Self {
             id: PipelineId(Uuid::new_v4()),
-            source_pipeline,
-            output: Arc::new(Mutex::new(DoubleBuffer::new())),
+            output: Arc::new(Mutex::new(PlotData::empty())),
         }
     }
 }
@@ -28,51 +25,38 @@ impl Pipeline for FftPipeline {
     }
 
     fn get_output(&self) -> PlotData {
-        self.output.lock().unwrap().read_with(|data| data.clone())
+        self.output.lock().unwrap().clone()
     }
 
-    fn update(&mut self, capture_state: &CaptureState) {
-        let source_output = self.source_pipeline.lock().unwrap().get_output();
+    fn process_derived_batch(&mut self, batch: (PlotData, f64)) {
+        let (plot_data, sample_rate) = batch;
 
-        let y_values = if let Some(data) = source_output.series_data.get(0) {
+        let y_values = if let Some(data) = plot_data.series_data.get(0) {
             data
         } else {
             return;
         };
-        if y_values.len() < 16 {
-            self.output
-                .lock()
-                .unwrap()
-                .write_with(|b| *b = PlotData::empty());
+
+        if y_values.len() < 16 || sample_rate <= 0.0 {
+            *self.output.lock().unwrap() = PlotData::empty();
             return;
         }
 
-        let Some(sampling_rate) = self.get_source_sampling_rate(capture_state) else {
-            self.output
-                .lock()
-                .unwrap()
-                .write_with(|b| *b = PlotData::empty());
-            return;
-        };
-
-        let welch: SpectralDensity<f64> = SpectralDensity::builder(y_values, sampling_rate).build();
+        let welch: SpectralDensity<f64> = SpectralDensity::builder(y_values, sample_rate).build();
         let psd = welch.periodogram();
+        
         let asd: Vec<f64> = psd.to_vec().iter().map(|&p| p.sqrt()).collect();
         let frequencies = psd.frequency().to_vec();
 
-        self.output
-            .lock()
-            .unwrap()
-            .write_with(|plot_data_back_buffer| {
-                plot_data_back_buffer.timestamps = frequencies;
-                plot_data_back_buffer.series_data = vec![asd];
-            });
+        let result = PlotData {
+            timestamps: frequencies,
+            series_data: vec![asd],
+        };
+
+        *self.output.lock().unwrap() = result;
     }
 
-    fn get_source_sampling_rate(&self, capture_state: &CaptureState) -> Option<f64> {
-        self.source_pipeline
-            .lock()
-            .unwrap()
-            .get_source_sampling_rate(capture_state)
+    fn process_command(&mut self, _cmd: PipelineCommand, _capture: &CaptureState) {
+        // This pipeline doesn't need to handle Hydrate or other commands directly.
     }
 }

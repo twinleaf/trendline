@@ -1,7 +1,8 @@
-use super::Pipeline;
+use super::{Pipeline, PipelineCommand};
 use crate::shared::{DataColumnId, PipelineId, PlotData, Point};
 use crate::state::capture::CaptureState;
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -17,13 +18,14 @@ pub struct StreamingFpcsPipeline {
     last_processed_time: f64,
     ratio: usize,
     window_seconds: f64,
-    output: VecDeque<Point>,
+    // Output is now thread-safe for access from the manager thread.
+    output: Arc<Mutex<VecDeque<Point>>>,
     capacity: usize,
 
+    // Internal state for the FPCS algorithm
     counter: usize,
     potential_point: Option<Point>,
     last_retained_flag: FpcsLastRetained,
-
     window_max_point: Option<Point>,
     window_min_point: Option<Point>,
 }
@@ -36,9 +38,8 @@ impl StreamingFpcsPipeline {
             last_processed_time: 0.0,
             ratio,
             window_seconds,
-            output: VecDeque::new(),
+            output: Arc::new(Mutex::new(VecDeque::new())),
             capacity: 0,
-
             counter: 0,
             potential_point: None,
             last_retained_flag: FpcsLastRetained::None,
@@ -47,6 +48,7 @@ impl StreamingFpcsPipeline {
         }
     }
 
+    /// The core stateful algorithm, now private to the pipeline.
     fn process_point(&mut self, p: Point) {
         if self.window_max_point.is_none() {
             self.retain_point(p);
@@ -93,19 +95,19 @@ impl StreamingFpcsPipeline {
                 max_p = min_p;
                 self.last_retained_flag = FpcsLastRetained::Max;
             }
-
             self.counter = 0;
         }
-
         self.window_max_point = Some(max_p);
         self.window_min_point = Some(min_p);
     }
 
+    /// Retains a point in the output buffer, managing capacity.
     fn retain_point(&mut self, p: Point) {
-        if self.capacity > 0 && self.output.len() >= self.capacity {
-            self.output.pop_front();
+        let mut output = self.output.lock().unwrap();
+        if self.capacity > 0 && output.len() >= self.capacity {
+            output.pop_front();
         }
-        self.output.push_back(p);
+        output.push_back(p);
     }
 }
 
@@ -115,14 +117,15 @@ impl Pipeline for StreamingFpcsPipeline {
     }
 
     fn get_output(&self) -> PlotData {
-        if self.output.is_empty() {
+        let output = self.output.lock().unwrap();
+        if output.is_empty() {
             return PlotData::empty();
         }
 
-        let mut timestamps = Vec::with_capacity(self.output.len());
-        let mut series_data = Vec::with_capacity(self.output.len());
+        let mut timestamps = Vec::with_capacity(output.len());
+        let mut series_data = Vec::with_capacity(output.len());
 
-        for point in &self.output {
+        for point in output.iter() {
             timestamps.push(point.x);
             series_data.push(point.y);
         }
@@ -133,52 +136,70 @@ impl Pipeline for StreamingFpcsPipeline {
         }
     }
 
-    fn update(&mut self, capture_state: &CaptureState) {
-        if self.capacity == 0 && self.window_seconds > 0.0 {
-            if let Some(sampling_rate) = self.get_source_sampling_rate(capture_state) {
-                if sampling_rate > 0.0 {
-                    let output_rate_approx = (2.0 * sampling_rate) / self.ratio as f64;
-                    let new_capacity = (output_rate_approx * self.window_seconds).ceil() as usize;
-                    self.capacity = new_capacity.max(2);
-                    self.output.reserve(self.capacity);
+    fn process_batch(&mut self, batch: Arc<crate::state::capture::BatchedData>) {
+        // Ignore batches that have already been processed during hydration.
+        if batch.t_max <= self.last_processed_time {
+            return;
+        }
+        for point in batch.points.iter() {
+            self.process_point(*point);
+        }
+        self.last_processed_time = batch.t_max;
+    }
+
+    fn process_command(&mut self, cmd: PipelineCommand, capture_state: &CaptureState) {
+        match cmd {
+            PipelineCommand::Hydrate => {
+                println!("[FPCS Pipeline {:?}] Received Hydrate command.", self.id);
+                // 1. Set up capacity based on sample rate.
+                if self.capacity == 0 && self.window_seconds > 0.0 {
+                    if let Some(sampling_rate) =
+                        capture_state.get_effective_sampling_rate(&self.source_key)
+                    {
+                        if sampling_rate > 0.0 {
+                            let output_rate_approx = (2.0 * sampling_rate) / self.ratio as f64;
+                            let new_capacity =
+                                (output_rate_approx * self.window_seconds).ceil() as usize;
+                            self.capacity = new_capacity.max(2);
+                            println!(
+                                "[FPCS Pipeline {:?}] Hydrated with capacity {}",
+                                self.id, self.capacity
+                            );
+                        }
+                    }
+                }
+
+                // 2. Backfill the buffer with historical data.
+                let Some(latest_time) =
+                    capture_state.get_latest_unified_timestamp(&[self.source_key.clone()])
+                else {
+                    return;
+                };
+
+                let start_time = latest_time - self.window_seconds;
+                let raw_data_vecs = capture_state.get_data_across_sessions_for_keys(
+                    &[self.source_key.clone()],
+                    start_time,
+                    latest_time,
+                );
+
+                if let Some(points) = raw_data_vecs.get(0) {
+                    if points.is_empty() {
+                        return;
+                    }
                     println!(
-                        "[FPCS Pipeline {:?}] Initialized with capacity {} (sr: {}, ratio: {}, win_s: {})",
-                        self.id, self.capacity, sampling_rate, self.ratio, self.window_seconds
+                        "[FPCS Pipeline {:?}] Backfilling with {} points.",
+                        self.id,
+                        points.len()
                     );
+                    for point in points {
+                        self.process_point(*point);
+                    }
+                    self.last_processed_time = latest_time;
                 }
             }
+            // This pipeline doesn't have subscribers, so AddSubscriber is a no-op.
+            _ => {}
         }
-
-        let Some(latest_time) =
-            capture_state.get_latest_unified_timestamp(&[self.source_key.clone()])
-        else {
-            return;
-        };
-
-        if latest_time <= self.last_processed_time {
-            return;
-        }
-
-        let new_raw_data_vecs = capture_state.get_data_across_sessions_for_keys(
-            &[self.source_key.clone()],
-            self.last_processed_time,
-            latest_time,
-        );
-
-        if let Some(points) = new_raw_data_vecs.get(0) {
-            if points.is_empty() {
-                self.last_processed_time = latest_time;
-                return;
-            }
-
-            for point in points {
-                self.process_point(*point);
-            }
-
-            self.last_processed_time = latest_time;
-        }
-    }
-    fn get_source_sampling_rate(&self, capture_state: &CaptureState) -> Option<f64> {
-        capture_state.get_effective_sampling_rate(&self.source_key)
     }
 }

@@ -4,7 +4,8 @@ use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Instant;
 
@@ -13,38 +14,48 @@ pub type DeviceTime = f64;
 pub type UnifiedTime = f64;
 pub type TimeOffset = f64;
 
+#[derive(Clone)]
+
 pub struct Buffer {
-    pub data: BTreeMap<u64, f64>,
-    pub cap: usize,
+    pub data: Arc<RwLock<BTreeMap<u64, f64>>>,
+    pub cap: Arc<AtomicUsize>,
 }
 
 impl Buffer {
     fn new(cap: usize) -> Self {
         Self {
-            data: BTreeMap::new(),
-            cap,
+            data: Arc::new(RwLock::new(BTreeMap::new())),
+            cap: Arc::new(AtomicUsize::new(cap)),
         }
     }
 
-    fn push(&mut self, p: Point) {
-        self.data.insert(p.x.to_bits(), p.y);
-
-        while self.data.len() > self.cap {
-            if let Some(oldest_key) = self.data.keys().next().copied() {
-                self.data.remove(&oldest_key);
+    fn push_many(&self, pts: &[Point]) {
+        let mut map = self.data.write().unwrap();
+        for p in pts {
+            map.insert(p.x.to_bits(), p.y);
+        }
+        let cap = self.cap.load(Ordering::Relaxed);
+        while map.len() > cap {
+            if let Some(oldest) = map.keys().next().copied() {
+                map.remove(&oldest);
+            } else {
+                break;
             }
         }
     }
 
-    pub fn set_capacity(&mut self, new_cap: usize) {
-        if self.cap != new_cap {
-            println!(
-                "[Buffer] Capacity changed from {} to {}. Current size: {}",
-                self.cap,
-                new_cap,
-                self.data.len()
-            );
-            self.cap = new_cap;
+    pub fn set_capacity(&self, new_cap: usize) {
+        let old = self.cap.swap(new_cap, Ordering::Relaxed);
+        if old == new_cap {
+            return;
+        }
+        let mut map = self.data.write().unwrap();
+        while map.len() > new_cap {
+            if let Some(oldest) = map.keys().next().copied() {
+                map.remove(&oldest);
+            } else {
+                break;
+            }
         }
     }
 }
@@ -64,12 +75,22 @@ pub struct StreamState {
     pub offsets_cache: Mutex<Option<Arc<HashMap<SessionId, TimeOffset>>>>,
 }
 
+#[derive(Clone)]
+pub struct BatchedData {
+    pub key: DataColumnId,
+    pub session_id: SessionId,
+    pub points: Arc<Vec<Point>>,
+    pub t_min: f64,
+    pub t_max: f64,
+}
+
 pub struct Inner {
     pub buffers: DashMap<DataColumnId, DashMap<SessionId, Buffer>>,
     pub streams: DashMap<DataColumnId, StreamState>,
     pub paused_snapshots: DashMap<String, PlotData>,
     pub active: DashMap<DataColumnId, ()>,
     pub command_tx: Sender<CaptureCommand>,
+    pub subscribers: DashMap<DataColumnId, Vec<(usize, Sender<Arc<BatchedData>>)>>,
 }
 #[derive(Debug)]
 pub enum CaptureCommand {
@@ -96,6 +117,15 @@ pub enum CaptureCommand {
     ClearSnapshot {
         plot_id: String,
     },
+    Subscribe {
+        key: DataColumnId,
+        id: usize,
+        tx: Sender<Arc<BatchedData>>,
+    },
+    Unsubscribe {
+        key: DataColumnId,
+        id: usize,
+    },
 }
 
 #[derive(Clone)]
@@ -115,6 +145,7 @@ impl CaptureState {
             paused_snapshots: DashMap::new(),
             active: DashMap::new(),
             command_tx,
+            subscribers: DashMap::new(),
         });
 
         let consumer_inner = inner.clone();
@@ -140,20 +171,21 @@ impl CaptureState {
 
         keys.iter()
             .filter_map(|key| {
-                let offsets = all_offsets.get(&key.stream_key()).or_else(|| None)?;
+                let offsets = all_offsets.get(&key.stream_key())?;
 
                 let (latest_session_id, max_offset) = offsets
                     .iter()
-                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                    .or_else(|| None)?;
+                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))?;
 
-                let binding = self.inner.buffers.get(key).or_else(|| None)?;
+                let binding = self.inner.buffers.get(key)?;
+                let buffer = binding.get(latest_session_id)?;
 
-                let buffer = binding.get(latest_session_id).or_else(|| None)?;
+                let last_raw_ts_bits = {
+                    let map = buffer.data.read().unwrap();
+                    map.iter().next_back().map(|(k, _)| *k)
+                }?;
 
-                let (last_raw_ts_bits, _) = buffer.data.iter().next_back().or_else(|| None)?;
-
-                let last_raw_ts = DeviceTime::from_bits(*last_raw_ts_bits);
+                let last_raw_ts = DeviceTime::from_bits(last_raw_ts_bits);
                 let unified_ts = last_raw_ts + max_offset;
                 Some(unified_ts)
             })
@@ -217,21 +249,23 @@ impl CaptureState {
                         continue;
                     }
 
-                    if let Some(buffer) = session_map.get(&session_id) {
+                    if let Some(buf_ref) = session_map.get(&session_id) {
                         let session_min_query = (start_time - offset).max(0.0);
                         let session_max_query = end_time - offset;
                         if session_min_query > session_max_query {
                             continue;
                         }
 
-                        let points_iter = buffer
-                            .data
-                            .range(session_min_query.to_bits()..=session_max_query.to_bits())
-                            .map(|(t_bits, y)| Point {
-                                x: DeviceTime::from_bits(*t_bits) + offset,
+                        let min_bits = session_min_query.to_bits();
+                        let max_bits = session_max_query.to_bits();
+
+                        let map = buf_ref.data.read().unwrap();
+                        for (t_bits, y) in map.range(min_bits..=max_bits) {
+                            result_points.push(Point {
+                                x: f64::from_bits(*t_bits) + offset,
                                 y: *y,
                             });
-                        result_points.extend(points_iter);
+                        }
                     }
                 }
                 result_points
@@ -245,42 +279,72 @@ impl CaptureState {
         };
         while let Ok(command) = rx.recv() {
             match command {
-                CaptureCommand::InsertBatch { key, points, session_id, instant } => {
+                CaptureCommand::InsertBatch {
+                    key,
+                    points,
+                    session_id,
+                    instant,
+                } => {
                     if !inner.active.contains_key(&key) {
                         continue;
                     }
 
-                    let stream_key  = key.stream_key();
+                    let stream_key = key.stream_key();
                     let stream_state = inner.streams.entry(stream_key).or_default();
 
                     match stream_state.session_meta.entry(session_id) {
                         Entry::Occupied(mut e) => {
                             let meta = e.get_mut();
-                            meta.last_instant      = instant;
-                            meta.last_device_time  = points.last().map(|p| p.x).unwrap_or(meta.last_device_time);
+                            meta.last_instant = instant;
+                            meta.last_device_time =
+                                points.last().map(|p| p.x).unwrap_or(meta.last_device_time);
                         }
                         Entry::Vacant(e) => {
                             *stream_state.offsets_cache.lock().unwrap() = None;
                             let first_x = points.first().map(|p| p.x).unwrap_or_default();
-                            let last_x  = points.last().map(|p| p.x).unwrap_or(first_x);
+                            let last_x = points.last().map(|p| p.x).unwrap_or(first_x);
                             e.insert(SessionMeta {
                                 first_instant: instant,
-                                last_instant:  instant,
+                                last_instant: instant,
                                 first_device_time: first_x,
-                                last_device_time:  last_x,
+                                last_device_time: last_x,
                             });
                         }
                     }
 
                     let session_map = inner.buffers.entry(key.clone()).or_default();
-                    let mut buffer = session_map.entry(session_id).or_insert_with(|| {
-                        let rate = stream_state.effective_sampling_rate
-                            .max(Self::DEFAULT_SAMPLING_RATE);
-                        let cap  = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
-                        Buffer::new(cap)
-                    });
+                    let rate =
+                        stream_state.effective_sampling_rate.max(Self::DEFAULT_SAMPLING_RATE);
+                    let cap = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
 
-                    for p in points { buffer.push(p); }
+                    if let Some(mut buf_ref) = session_map.get_mut(&session_id) {
+                        buf_ref.value_mut().set_capacity(cap);
+                        buf_ref.value_mut().push_many(&points);
+                    } else {
+                        let buf = Buffer::new(cap);
+                        buf.push_many(&points);
+                        session_map.insert(session_id, buf);
+                    }
+
+                    // This is the new distributor logic.
+                    if let Some(subscribers) = inner.subscribers.get(&key) {
+                        if subscribers.is_empty() {
+                            continue;
+                        }
+                        let t_min = points.first().map(|p| p.x).unwrap_or(0.0);
+                        let t_max = points.last().map(|p| p.x).unwrap_or(0.0);
+                        let batch = Arc::new(BatchedData {
+                            key: key.clone(),
+                            session_id,
+                            points: Arc::new(points),
+                            t_min,
+                            t_max,
+                        });
+                        // Fan out the batch to all subscribers for this key.
+                        for (_, tx) in subscribers.iter() {
+                            let _ = tx.try_send(batch.clone());
+                        }
+                    }
                 }
                 CaptureCommand::UpdateSampleRate { key, rate } => {
                     let stream_key = key.stream_key();
@@ -326,8 +390,8 @@ impl CaptureState {
                     start_time,
                     end_time,
                 } => {
-                    let raw_data_vecs = self_instance
-                        .get_data_across_sessions_for_keys(&keys, start_time, end_time);
+                    let raw_data_vecs =
+                        self_instance.get_data_across_sessions_for_keys(&keys, start_time, end_time);
 
                     let mut individual_plot_data = Vec::with_capacity(keys.len());
                     for points in raw_data_vecs {
@@ -346,6 +410,14 @@ impl CaptureState {
                 CaptureCommand::ClearSnapshot { plot_id } => {
                     if inner.paused_snapshots.remove(&plot_id).is_some() {
                         println!("[Capture] Cleared snapshot for plot {}", plot_id);
+                    }
+                }
+                CaptureCommand::Subscribe { key, id, tx } => {
+                    inner.subscribers.entry(key).or_default().push((id, tx));
+                }
+                CaptureCommand::Unsubscribe { key, id } => {
+                    if let Some(mut v) = inner.subscribers.get_mut(&key) {
+                        v.retain(|(sid, _)| *sid != id);
                     }
                 }
             }
@@ -407,10 +479,10 @@ impl CaptureState {
         Some(final_offsets_arc)
     }
 
-    pub fn get_effective_sampling_rate(&self, stream_key: &DataColumnId) -> Option<f64> {
+    pub fn get_effective_sampling_rate(&self, key: &DataColumnId) -> Option<f64> {
         self.inner
             .streams
-            .get(&stream_key.stream_key())
+            .get(&key.stream_key())
             .map(|stream_state_entry| stream_state_entry.value().effective_sampling_rate)
     }
 }
