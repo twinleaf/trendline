@@ -18,7 +18,6 @@ pub struct StreamingFpcsPipeline {
     last_processed_time: f64,
     ratio: usize,
     window_seconds: f64,
-    // Output is now thread-safe for access from the manager thread.
     output: Arc<Mutex<VecDeque<Point>>>,
     capacity: usize,
 
@@ -151,7 +150,6 @@ impl Pipeline for StreamingFpcsPipeline {
         match cmd {
             PipelineCommand::Hydrate => {
                 println!("[FPCS Pipeline {:?}] Received Hydrate command.", self.id);
-                // 1. Set up capacity based on sample rate.
                 if self.capacity == 0 && self.window_seconds > 0.0 {
                     if let Some(sampling_rate) =
                         capture_state.get_effective_sampling_rate(&self.source_key)
@@ -169,7 +167,6 @@ impl Pipeline for StreamingFpcsPipeline {
                     }
                 }
 
-                // 2. Backfill the buffer with historical data.
                 let Some(latest_time) =
                     capture_state.get_latest_unified_timestamp(&[self.source_key.clone()])
                 else {
@@ -198,7 +195,6 @@ impl Pipeline for StreamingFpcsPipeline {
                     self.last_processed_time = latest_time;
                 }
             }
-            // This pipeline doesn't have subscribers, so AddSubscriber is a no-op.
             _ => {}
         }
     }

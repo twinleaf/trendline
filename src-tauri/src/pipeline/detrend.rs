@@ -82,14 +82,12 @@ impl Pipeline for DetrendPipeline {
 
         self.buffer.extend(batch.points.iter());
 
-        // We only need to keep window_size + hop_size data at most. Trim older data.
         let max_buffer_len = self.window_size_samples + self.hop_size_samples;
         if max_buffer_len > 0 && self.buffer.len() > max_buffer_len {
              let to_drain = self.buffer.len() - max_buffer_len;
              self.buffer.drain(..to_drain);
         }
 
-        // Loop in case a large batch allows for multiple hops.
         while self.window_size_samples > 0 && self.buffer.len() >= self.window_size_samples {
             
             // Take a slice representing the most recent, full window of data.
@@ -104,8 +102,6 @@ impl Pipeline for DetrendPipeline {
             
             self.calculate_and_distribute(&window_slice);
 
-            // IMPORTANT: Drain the hop size from the *front* of the buffer
-            // to slide the window forward.
             self.buffer.drain(..self.hop_size_samples);
         }
     }
@@ -156,7 +152,6 @@ impl Pipeline for DetrendPipeline {
 }
 
 
-// --- Helper functions for detrending (unchanged) ---
 pub fn remove_mean(y: &[f64]) -> Vec<f64> {
     let n = y.len();
     if n == 0 { return vec![]; }

@@ -78,7 +78,6 @@ impl ProcessingManager {
                 .spawn(move || loop {
                     thread::sleep(Duration::from_millis(33));
                     if let Ok(mg) = manager_clone.lock() {
-                        // Plot channel logic (remains the same)
                         for (plot_id, channel) in &mg.plot_channels {
                             if let Some(data) = mg.get_merged_data_for_plot(plot_id) {
                                 if !data.is_empty() {
