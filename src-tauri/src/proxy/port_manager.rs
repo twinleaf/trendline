@@ -4,7 +4,7 @@ use crate::shared::{
 use crate::state::capture::{CaptureCommand, CaptureState, SessionId};
 use crate::state::proxy_register::ProxyRegister;
 use crate::util::{self, parse_arg_type_and_size, parse_permissions_string};
-use crossbeam::channel::Sender;
+use crossbeam::channel::{Sender, TrySendError};
 use crossbeam::select;
 use serde_json::{json, Value};
 use std::panic::AssertUnwindSafe;
@@ -30,6 +30,7 @@ pub struct DebugCounters {
     pub polls: AtomicUsize,
     pub samples_received: AtomicUsize,
     pub points_inserted: AtomicUsize,
+    pub dropped_batches: AtomicUsize
 }
 
 #[derive(Debug)]
@@ -71,6 +72,7 @@ impl PortManager {
                 polls: AtomicUsize::new(0),
                 samples_received: AtomicUsize::new(0),
                 points_inserted: AtomicUsize::new(0),
+                dropped_batches: AtomicUsize::new(0),
             },
         });
 
@@ -223,10 +225,11 @@ impl PortManager {
                             if last_debug_print.elapsed() > Duration::from_secs(30) {
                                 let polls = self_.counters.polls.swap(0, Ordering::Relaxed);
                                 let points = self_.counters.points_inserted.swap(0, Ordering::Relaxed);
+                                let batch = self_.counters.dropped_batches.swap(0, Ordering::Relaxed);
                                 let current_state = self_.state.lock().unwrap().clone();
                                 println!(
-                                    "[{}] Heartbeat (30s): State={:?}, Polls={}, PointsIns={}",
-                                    self_.url, current_state, polls, points
+                                    "[{}] Heartbeat (30s): State={:?}, Polls={}, PointsIns={}, DroppedBatches={}",
+                                    self_.url, current_state, polls, points, batch
                                 );
                                 last_debug_print = Instant::now();
                             }
@@ -562,22 +565,25 @@ impl PortManager {
         }
 
         for ((key, sid), points) in batched {
-            let len = points.len();
-            if self
-                .capture_tx
-                .send(CaptureCommand::InsertBatch {
+                let len = points.len();
+                match self.capture_tx.try_send(CaptureCommand::InsertBatch {
                     key,
                     points,
                     session_id: sid,
                     instant: poll_instant,
-                })
-                .is_ok()
-            {
-                self.counters
-                    .points_inserted
-                    .fetch_add(len, Ordering::Relaxed);
+                }) {
+                    Ok(()) => {
+                        self.counters.points_inserted.fetch_add(len, Ordering::Relaxed);
+                    }
+                    Err(TrySendError::Full(_cmd)) => {
+                        self.counters.dropped_batches.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(TrySendError::Disconnected(_cmd)) => {
+                        // capture thread died; bail
+                        break;
+                    }
+                }
             }
-        }
 
         if !reinit_needed.is_empty() {
             if let Some(proxy_if) = self.proxy.lock().unwrap().clone() {

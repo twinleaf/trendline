@@ -25,7 +25,7 @@
   },
   "bundle": {
     "macOS": {
-      "signingIdentity": "Developer ID Application: Twinleaf LLC (ABC123DE45)"
+      "signingIdentity": "Developer ID Application: Twinleaf LLC (6MFC6VKTVX)"
     },
     "active": true,
     "targets": "all",

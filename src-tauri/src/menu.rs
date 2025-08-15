@@ -2,9 +2,9 @@ use tauri::{
     menu::{
         AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem,
         SubmenuBuilder,
-    },
-    AppHandle, Runtime,
+    }, AppHandle, Emitter, Manager, Runtime
 };
+use tauri_plugin_dialog::DialogExt;
 
 pub fn create_app_menu<R: Runtime>(app_handle: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let about_metadata = AboutMetadataBuilder::new()
@@ -80,4 +80,32 @@ pub fn create_app_menu<R: Runtime>(app_handle: &AppHandle<R>) -> tauri::Result<M
         .build()?;
 
     Ok(menu)
+}
+
+pub fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
+    let window = app.get_webview_window("main").unwrap();
+    match event.id().as_ref() {
+        "open_recording" => {
+            app.dialog().file().pick_file(move |path_buf| {
+                if let Some(path) = path_buf {
+                    println!("File selected for opening: {}", path.to_string());
+                    window.emit("file-opened", path.to_string()).unwrap();
+                }
+            });
+        }
+        "save_recording" => {
+            // Using the new dialog plugin API
+            app.dialog()
+                .file()
+                .add_filter("Trendline Recording", &["json"])
+                .set_file_name("recording.json")
+                .save_file(move |path_buf| {
+                    if let Some(path) = path_buf {
+                        println!("File selected for saving: {}", path.to_string());
+                    }
+                });
+        }
+        // ... other handlers remain the same
+        _ => {}
+    }
 }

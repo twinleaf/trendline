@@ -26,7 +26,7 @@
 	// --- Primary Derived State (from props and global state) ---
 	const options = $derived(plot.uPlotOptions);
 	const isFFT = $derived(plot.viewType === 'fft');
-	const isEffectivelyPaused = $derived(chartState.isPaused || plot.isPaused);
+	const isEffectivelyPaused = $derived(plot.isPaused);
 	const rawPlotData = $derived(chartState.plotsData.get(plot.id));
 
 	// --- Buffer Management ---
@@ -190,19 +190,21 @@
         const renderLoop = () => {
             if (!isLooping) return;
 
-
             const data = untrack(() => preparedData);
             const isPaused = untrack(() => isEffectivelyPaused);
             const currentWindow = untrack(() => plot.windowSeconds);
             const isCurrentlyFFT = untrack(() => isFFT);
 
-            if (data && !isPaused) {
+            if (data) {
                 plot.hasData = true;
-                latestTimestamp = data.latestTimestamp;
 
-                if (!isCurrentlyFFT) {
-                    uplotInstance.setScale('x', { min: -currentWindow, max: 0 });
+                if (!isPaused) {
+                    latestTimestamp = data.latestTimestamp;
+                    if (!isCurrentlyFFT) {
+                        uplotInstance.setScale('x', { min: -currentWindow, max: 0 });
+                    }
                 }
+                
                 uplotInstance.setData(data.views, isCurrentlyFFT);
 
             } else if (untrack(() => plot.hasData)) {
