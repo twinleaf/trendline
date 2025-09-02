@@ -1,8 +1,10 @@
 # Overview
-`Trendline` compiles the functionality inside [`twinleaf-rust`](https://github.com/twinleaf/twinleaf-rust) into a graphical interface. It is intended to be a software oscilloscope and companion tool for use with [Twinleaf devices](https://twinleaf.com). It targets desktop platforms with support on MacOS, Linux, and Windows.
+`Trendline` compiles the functionality inside [`twinleaf-rust`](https://github.com/twinleaf/twinleaf-rust) into a graphical interface. It is intended to be a software oscilloscope and companion tool for use with [Twinleaf devices](https://twinleaf.com). It targets desktop platforms with support on macOS, Linux, and Windows.
 
 ## Implemented Features
 - Time series data visualization of device streams
+- Periodogram data visualization of device streams
+- CSV export of plotted data 
 - RPC control
 
 
@@ -17,8 +19,8 @@
 
 ### Known Issues
 
-- Multi series plots are notably slower than indiviudal plots of the same series
+- Multi series plots are notably slower than individual plots of the same series
 - Typing in the RPC filtering slows down over time
 - Changing sample rates from high sample rate to low sample rate truncates front-end buffers
 - Stream monitor does not handle Time epoch type correctly and window statistics may fill zeros on non-time aligned data
-- Seems to randomly drop sample packets during acquisition (correlated with responsiveness of front end). Could be cause by IPC back pressure?
+- Seems to randomly drop sample packets during acquisition. ~~Could be caused by IPC back pressure?~~ Known issue on macOS with process priority.

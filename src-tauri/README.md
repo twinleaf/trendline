@@ -1,106 +1,54 @@
-## Backend Architecture (Tauri/Rust)
-The backend is an event-driven system built acting as the single source of truth for device state. It is a multi-threaded, actor-like model and handles it's connection to Twinleaf devices using the `twinleaf` crate. It also exposes its capabilities to the frontend exclusively through a set of asynchronous [Tauri commands](https://tauri.app/develop/calling-rust/) located in `commands` module. 
-
-The architecture is centered on three core components: the **`ProxyRegister`**, the **`CaptureState`**, and the **`PortManager`**, which are distributed across the `state` and `proxy` modules respectively.
-
-```mermaid
-graph TD
-  %% Frontend
-  subgraph Frontend["Frontend (TypeScript)"]
-    UI_Actions["User Actions"]
-  end
-
-  %% Backend
-  subgraph Backend["Backend (Rust)"]
-    subgraph API_Layer["API Layer"]
-      Commands["Tauri Commands<br>src/commands/*.rs"]
-    end
-
-    subgraph State_Concurrency["State & Concurrency"]
-      ProxyRegister["ProxyRegister<br>(Singleton Registry)"]
-      CaptureState["CaptureState<br>(In-Memory TSDB)"]
-      PortManager1["PortManager Actor 1<br>(Thread per Port)"]
-      PortManagerN["PortManager Actor N<br>(Thread per Port)"]
-      DiscoveryThread["Discovery Thread"]
-    end
-  end
-
-  %% Hardware
-  subgraph Hardware["Hardware"]
-    Device1["Physical Device 1"]
-    DeviceN["Physical Device N"]
-  end
-
-  %% Edges
-  UI_Actions -->|Invokes| Commands
-  Commands -->|Reads/Updates| ProxyRegister
-  Commands -->|Reads/Updates| CaptureState
-  DiscoveryThread -->|Updates| ProxyRegister
-  ProxyRegister -->|Spawns/Prunes| PortManager1
-  ProxyRegister -->|Spawns/Prunes| PortManagerN
-  PortManager1 -->|Manages I/O| Device1
-  PortManagerN -->|Manages I/O| DeviceN
-  PortManager1 -->|Ingests Data| CaptureState
-  PortManagerN -->|Ingests Data| CaptureState
-```
-### 1. Data Aggregation & Querying (state module)
-This module contains a registry of all the devices connected (`ProxyRegister`) and all the data streams that were stored (`CaptureState`).
-
-`ProxyRegister` (`state/proxy_register.rs`)
-
-- **Principle**: The main registry (`Arc<ProxyRegister>`) which acts as a factory and supervisor for `PortManager` actors
-
-- **Responsibilities**:
-    - Maintains a thread-safe map (`DashMap`) of active`PortManagers`, keyed by their port URL (e.g., `serial:///dev/tty.usbmodem1234`).
-    - Instantiates new `PortManager` actors when a new device is discovered (`ensure()`).
-    - Initiates the graceful shutdown of `PortManager` actors when a device is disconnected (`prune()`).
-
-`CaptureState` (`state/capture.rs`)
-
-- **Principle**: A singleton (Arc<Inner>) data store that holds all time-series data for the application session. It is completely decoupled from the hardware I/O, only receiving structured Point data.
-
-- **Responsibilities**:
-    - Stores data in a collection of thread-safe, capacity-limited buffers (`DashMap<DataColumnId, Buffer>`). Each buffer is a `BTreeMap` for efficient, sorted time-based queries.
-    - Provides a high-level API for data insertion (`insert()`) used by `PortManagers`.
-    - Provides a high-level API for complex data retrieval used by Tauri commands, including:
-        - Fetching data within a specific time range (`get_data_in_range()`).
-        - Performing on-the-fly decimation ([`fpcs`](https://ieeexplore.ieee.org/document/10669793/media#media), `min_max_bucket`) to prepare data for visualization.
-        - Aligning and interpolating data from multiple, asynchronous streams into a unified PlotData structure.
+## System Design
 
 
-### 2. Connection & Device Management (`proxy` module)
-This system is responsible for the actual lifecycle of a hardware connection, from physical discovery to data streaming and configuration. It is implemented using an actor model, where each connected hardware port is managed by its own dedicated thread.
+Single‑process backend (Tauri/Rust) that:
 
-`PortManager` (`proxy/port_manager.rs`)
+* owns device state and time‑series,
+* runs per‑port I/O actors,
+* drives a small processing pipeline graph for plots,
+* talks to the UI via Tauri commands + IPC channels
+* updates state changes via Tauri `Emitters`
 
-- **Principle**: An actor that encapsulates the state and logic for a single hardware port (e.g., a USB serial device, ethernet device over TCP). Each `PortManager` runs in its own dedicated thread, isolating I/O operations and state management from the main Tauri application
+### Core components & contracts
 
-- **State Machine**: A finite state machine, transitioning through states defined in the shared::PortState enum:
-    - `Idle` -> `Connecting` -> `Discovery` -> `Streaming`
-    - Handles transient states like `Reconnecting` and terminal states like `Error` and `Disconnected`.
+**PortManager (per serial/TCP port)**
 
-- **Responsibilities**:
-    - Managing the low-level `twinleaf::tio::proxy` connection.
-    - Running the device discovery handshake to identify all sub-devices on the port.
-    - Continuously polling the device for new data samples in a tight loop (`poll_device_data()`).
-    - Pushing validated time-series data into the central CaptureState.
-    - Receiving commands from the API layer (e.g., to execute an RPC) and dispatching them to the hardware.
-    - Updating its state and emitting events to the frontend (e.g., `port-state-changed()`).
+* Connects → discovers → streams. Emits `port-state-changed`, `port-devices-discovered`, `device-metadata-updated`.
+* On reconnect, re‑applies the last selection from `ProxyRegister.active_selections`.
+* Pushes samples as `InsertBatch` only for *active* columns; updates stream sample rates on metadata changes.
 
-`Discovery` (`proxy/discovery.rs`)
+**CaptureState (Time-series Data Base)**
 
-- **Principle**: A simple, long-running background thread that periodically scans the host system for compatible serial devices.
+* Rolling window ≈ **180 s** per `(DataColumnId, SessionId)` in a `BTreeMap`; capacity scales with effective sample rate.
+* Aligns multiple device sessions onto a **unified time** using host `Instant` gaps (not device clocks).
+* Fans out raw batches to subscribers (pipelines). Supports **snapshots** for paused plots.
+* Only keys in `active` are recorded (updated by frontend via. Tauri command)
 
-- **Responsibilities**:
-    - Calls `util::get_valid_twinleaf_serial_urls` to get a list of currently connected devices.
-    - Instructs the ProxyRegister to ensure managers for new devices and prune managers for disconnected ones.
+**ProcessingManager (pipelines + emitter)**
 
-### 3. Frontend API (commands module)
+* Spawns **root** pipelines (subscribe to raw batches) and **derived** ones (subscribe to other pipelines).
+* Emits merged `PlotData` to the UI roughly every **33 ms** (k‑way merge + linear interp; `NaN` for gaps).
+* Backpressure: root channels **128**; derived channels **1** (drop/overwrite vs. backlog).
+* Built‑ins: `Passthrough`, `FPCS` decimation, windowed `Detrend` (None/Linear/Quadratic), `FFT` (Welch→ASD), and streaming **Statistics** (window + persistent).
 
-This is the public-facing interface of the backend.
+### Data flow
 
-- **Principle**: A set of stateless functions that orchestrate operations on the core state components (`ProxyRegister` and `CaptureState`). They are the bridge between frontend actions and backend logic.
+1. UI: `connect_to_port(url)` → `PortManager` starts.
+2. UI selects routes → `confirm_selection` → `CaptureState.SetActiveColumns`.
+3. UI: `update_plot_pipeline(SharedPlotConfig)` → manager spawns pipelines, hydrates from `CaptureState`.
+4. UI: `listen_to_plot_data(plot_id, channel)` → manager emits \~30 FPS.
+5. Optional: stats provider + channel.
+6. Optional: `pause_plot` → export snapshot/raw CSV.
 
-- **Responsibilities**:
-    - **Read Queries**: Commands like `get_latest_plot_data()` and `get_all_devices()` directly query `CaptureState` or `ProxyRegister` to retrieve data for the UI. They are a mix of state hydration and lifecycle queries.
-    - **Write/Control**: Commands like `execute_rpc()` or `connect_to_port()` look up the appropriate `PortManager` in the `ProxyRegister` and delegate the operation to it.
+### Non‑obvious behaviors
+
+* Time alignment across sessions is **host‑time‑based**; device time discontinuities won’t break plots.
+* If you wait > window (\~180 s), **raw export** for a live plot will error (data rolled out).
+* CSV headers are `route.column` when multiple devices are present; integers are formatted losslessly.
+* `Hydrate` is important: pipelines size buffers from effective sample rate and backfill the window.
+
+### Adding a new Pipeline
+
+* Implement `Pipeline`, handle `Hydrate`, expose output via `get_output()`.
+* Spawn via `spawn_root_pipeline` (raw) or `spawn_derived_pipeline` (from another node).
+* Wire it in `apply_plot_config` and add its output to the plot’s `output_pipeline_ids`.
