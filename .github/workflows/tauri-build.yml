@@ -42,7 +42,14 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libudev-dev \
+            pkg-config \
+            patchelf
 
       - name: Install frontend deps
         run: npm ci
@@ -90,7 +97,7 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_P8_B64: ${{ secrets.APPLE_API_KEY_P8_B64 }}
         run: |
-          DMG=$(ls src-tauri/target/release/bundle/dmg/*.dmg | head -n1)
+          DMG=$(ls src-tauri/target/*-apple-darwin/release/bundle/dmg/*.dmg | head -n1)
           echo "$APPLE_API_KEY_P8_B64" | base64 --decode > AuthKey.p8
           xcrun notarytool submit "$DMG" \
             --key AuthKey.p8 \
@@ -98,7 +105,8 @@ jobs:
             --issuer "$APPLE_API_ISSUER" \
             --wait
           xcrun stapler staple "$DMG"
-
+          xcrun stapler validate "$DMG"
+          
       # ----- Windows signing (Azure Trusted Signing) - enable when ready -----
       - name: Sign Windows artifacts (Trusted Signing)
         if: runner.os == 'Windows'
