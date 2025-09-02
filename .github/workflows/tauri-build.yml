@@ -137,7 +137,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ runner.os }}-artifacts
-          path: src-tauri/target/release/bundle/**/*
+          path: src-tauri/target/**/release/bundle/**/*
           if-no-files-found: error
 
   release:
