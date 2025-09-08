@@ -223,14 +223,19 @@ impl PortManager {
                                 self_.poll_device_data();
                             }
                             if last_debug_print.elapsed() > Duration::from_secs(30) {
-                                let polls = self_.counters.polls.swap(0, Ordering::Relaxed);
+                                let polls  = self_.counters.polls.swap(0, Ordering::Relaxed);
                                 let points = self_.counters.points_inserted.swap(0, Ordering::Relaxed);
-                                let batch = self_.counters.dropped_batches.swap(0, Ordering::Relaxed);
-                                let current_state = self_.state.lock().unwrap().clone();
-                                println!(
-                                    "[{}] Heartbeat (30s): State={:?}, Polls={}, PointsIns={}, DroppedBatches={}",
-                                    self_.url, current_state, polls, points, batch
-                                );
+                                let batch  = self_.counters.dropped_batches.swap(0, Ordering::Relaxed);
+
+                                let state = self_.state.lock().unwrap().clone();
+
+                                if !matches!(state, PortState::Error(_)) {
+                                    println!(
+                                        "[{}] Heartbeat (30s): State={:?}, Polls={}, PointsIns={}, DroppedBatches={}",
+                                        self_.url, state, polls, points, batch
+                                    );
+                                }
+
                                 last_debug_print = Instant::now();
                             }
                         }
@@ -250,7 +255,8 @@ impl PortManager {
     }
 
     fn discover_devices(&self, proxy_if: &Arc<proxy::Interface>) -> Result<(), proxy::PortError> {
-        let discovery_port = proxy_if.tree_probe()?;
+        // Maybe change to tree_probe(), but some sensors only emit data on StreamData which are not forwarded to probe routes
+        let discovery_port = proxy_if.tree_full()?;
         let mut discovered_routes = HashSet::new();
         let discovery_deadline = Instant::now() + Duration::from_secs(2);
 
