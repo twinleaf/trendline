@@ -472,6 +472,7 @@ impl Point {
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct StatisticSet {
     pub count: u64,
+    pub nan_count: u64,
     pub mean: f64,
     pub min: f64,
     pub max: f64,

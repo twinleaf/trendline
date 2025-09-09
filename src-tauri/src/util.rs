@@ -269,35 +269,54 @@ pub fn calculate_batch_stats(points: &[Point]) -> StatisticSet {
         return StatisticSet::default();
     }
 
-    let count = points.len() as u64;
-    let values: Vec<f64> = points.iter().map(|p| p.y).collect();
+    let mut finite_vals: Vec<f64> = Vec::with_capacity(points.len());
+    let mut nan_count: u64 = 0;
 
-    let sum: f64 = values.iter().sum();
-    let mean = sum / count as f64;
-
-    let mut min = values[0];
-    let mut max = values[0];
-    for &value in values.iter() {
-        if value < min {
-            min = value;
-        }
-        if value > max {
-            max = value;
+    for p in points {
+        if p.y.is_finite() {
+            finite_vals.push(p.y);
+        } else {
+            nan_count += 1;
         }
     }
 
+    if finite_vals.is_empty() {
+        return StatisticSet {
+            count: 0,
+            nan_count,
+            mean: 0.0,
+            min: 0.0,
+            max: 0.0,
+            stdev: 0.0,
+            rms: 0.0,
+        };
+    }
+
+    let count = finite_vals.len() as u64;
+
+    let sum: f64 = finite_vals.iter().sum();
+    let mean = sum / count as f64;
+
+    let mut min = finite_vals[0];
+    let mut max = finite_vals[0];
+    for &v in &finite_vals {
+        if v < min { min = v; }
+        if v > max { max = v; }
+    }
+
     let variance = if count > 1 {
-        values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / ((count - 1) as f64)
+        finite_vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / ((count - 1) as f64)
     } else {
         0.0
     };
     let stdev = variance.sqrt();
 
-    let sum_sq: f64 = values.iter().map(|v| v.powi(2)).sum();
+    let sum_sq: f64 = finite_vals.iter().map(|v| v.powi(2)).sum();
     let rms = (sum_sq / count as f64).sqrt();
 
     StatisticSet {
         count,
+        nan_count,
         mean,
         min,
         max,

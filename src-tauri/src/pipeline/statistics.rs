@@ -9,6 +9,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug, Default)]
 struct PersistentCalculator {
     count: u64,
+    nan_count: u64,
     mean: f64,
     m2: f64,
     sum_of_squares: f64,
@@ -18,29 +19,55 @@ struct PersistentCalculator {
 
 impl PersistentCalculator {
     fn new(first_value: f64) -> Self {
-        Self {
-            count: 1,
-            mean: first_value,
-            m2: 0.0,
-            sum_of_squares: first_value.powi(2),
-            min: first_value,
-            max: first_value,
-        }
+            if first_value.is_finite() {
+                Self {
+                    count: 1,
+                    nan_count: 0,
+                    mean: first_value,
+                    m2: 0.0,
+                    sum_of_squares: first_value.powi(2),
+                    min: first_value,
+                    max: first_value,
+                }
+            } else {
+                Self {
+                    count: 0,
+                    nan_count: 1,
+                    mean: 0.0,
+                    m2: 0.0,
+                    sum_of_squares: 0.0,
+                    min: f64::INFINITY,
+                    max: f64::NEG_INFINITY,
+                }
+            }
     }
-
     fn update(&mut self, new_value: f64) {
+        if !new_value.is_finite() {
+            self.nan_count += 1;
+            return;
+        }
+
+        if self.count == 0 {
+            self.count = 1;
+            self.mean = new_value;
+            self.m2 = 0.0;
+            self.sum_of_squares = new_value.powi(2);
+            self.min = new_value;
+            self.max = new_value;
+            return;
+        }
+
         self.count += 1;
+
         let delta = new_value - self.mean;
         self.mean += delta / self.count as f64;
         let delta2 = new_value - self.mean;
         self.m2 += delta * delta2;
+
         self.sum_of_squares += new_value.powi(2);
-        if new_value < self.min {
-            self.min = new_value;
-        }
-        if new_value > self.max {
-            self.max = new_value;
-        }
+
+        if new_value < self.min { self.min = new_value; }
+        if new_value > self.max { self.max = new_value; }
     }
 
     fn stdev(&self) -> f64 {
@@ -52,7 +79,21 @@ impl PersistentCalculator {
     }
 
     fn to_statistic_set(&self) -> StatisticSet {
-        StatisticSet { count: self.count, mean: self.mean, min: self.min, max: self.max, stdev: self.stdev(), rms: self.rms() }
+        let (min, max) = if self.count > 0 {
+            (self.min, self.max)
+        } else {
+            (0.0, 0.0)
+        };
+
+        StatisticSet {
+            count: self.count,
+            nan_count: self.nan_count,
+            mean: self.mean,
+            min,
+            max,
+            stdev: self.stdev(),
+            rms: self.rms(),
+        }
     }
 }
 
