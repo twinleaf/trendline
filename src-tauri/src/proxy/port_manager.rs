@@ -37,6 +37,7 @@ pub struct DebugCounters {
 pub enum PortCommand {
     Shutdown,
     AttemptConnection,
+    RescanDevices,
 }
 
 pub struct PortManager {
@@ -86,6 +87,10 @@ impl PortManager {
 
     pub fn connect(&self) {
         let _ = self.command_tx.send(PortCommand::AttemptConnection);
+    }
+
+    pub fn rescan(&self) {
+        let _ = self.command_tx.send(PortCommand::RescanDevices);
     }
 
     fn spawn_thread(self_: Arc<Self>, command_rx: crossbeam::channel::Receiver<PortCommand>) {
@@ -211,6 +216,24 @@ impl PortManager {
                                     *self_.proxy.lock().unwrap() = None;
                                 }
                             },
+                            Ok(PortCommand::RescanDevices) => {
+                                println!("[{}] Manual device rescan triggered.", self_.url);
+                                if let Some(proxy_if) = self_.proxy.lock().unwrap().clone() {
+                                    let prev = self_.state.lock().unwrap().clone();
+                                    self_.set_state(PortState::Discovery);
+
+                                    if let Err(e) = self_.discover_devices(&proxy_if) {
+                                        eprintln!("[{}] Rescan failed: {:?}", self_.url, e);
+                                    }
+                                    self_.set_state(prev);
+                                } else {
+                                    let current_state = self_.state.lock().unwrap().clone();
+                                    if matches!(current_state, PortState::Error(_)) {
+                                        self_.set_state(PortState::Idle);
+                                        *self_.proxy.lock().unwrap() = None;
+                                    }
+                                }
+                            }
                             Err(_) => {
                                 eprintln!("[{}] Command channel broke. Shutting down.", self_.url);
                                 break 'lifecycle;
@@ -258,18 +281,15 @@ impl PortManager {
         // Maybe change to tree_probe(), but some sensors only emit data on StreamData which are not forwarded to probe routes
         let discovery_port = proxy_if.tree_full()?;
         let mut discovered_routes = HashSet::new();
-        let discovery_deadline = Instant::now() + Duration::from_secs(2);
+        let mut discovery_deadline = Instant::now() + Duration::from_secs(2);
 
         self.set_state(PortState::Discovery);
         println!("[{}] Listening for device routes...", self.url);
 
         while Instant::now() < discovery_deadline {
-            if let Ok(pkt) = discovery_port
-                .receiver()
-                .recv_timeout(Duration::from_millis(100))
-            {
-                if !self.devices.read().unwrap().contains_key(&pkt.routing) {
-                    discovered_routes.insert(pkt.routing);
+            if let Ok(pkt) = discovery_port.receiver().recv_timeout(Duration::from_millis(100)) {
+                if discovered_routes.insert(pkt.routing) {
+                    discovery_deadline = Instant::now() + Duration::from_secs(2);
                 }
             }
         }
@@ -461,7 +481,7 @@ impl PortManager {
                 }
             })
             .collect();
-
+        println!("[{}]   -> Fetched metadata!", self.url);
         (device_meta, ui_streams)
     }
 
@@ -633,10 +653,12 @@ impl PortManager {
                     ui_device.meta    = new_meta;
                     ui_device.streams = new_streams;
 
-                    self_clone
-                        .app
-                        .emit("device-metadata-updated", ui_device.clone())
-                        .unwrap();
+                    if let Err(e) = self_clone.app.emit("device-metadata-updated", ui_device.clone()) {
+                        eprintln!(
+                            "[{}] Failed to emit device-metadata-updated event: {}",
+                            self_clone.url, e
+                        );
+                    }
                 });
             }
         }

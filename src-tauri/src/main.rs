@@ -45,9 +45,11 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // --- Device & Port Management Commands ---
-            commands::capture::confirm_selection,
-            commands::capture::connect_to_port,
+            // --- Port Management Commands ---
+            commands::port::confirm_selection,
+            commands::port::connect_to_port,
+            commands::port::refresh_port,
+            // --- Capture Management Commands ---
             commands::capture::pause_plot,
             commands::capture::unpause_plot,
             // --- Pipeline Commands ---

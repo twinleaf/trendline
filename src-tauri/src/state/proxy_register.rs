@@ -1,9 +1,10 @@
 // TAKES SERIAL/TCP PORT URL and maps it to a PortManager
 
 use crate::proxy::port_manager::PortManager;
-use crate::shared::DataColumnId;
+use crate::shared::{ DataColumnId, PortState };
 use crate::state::capture::CaptureState;
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
@@ -30,9 +31,22 @@ impl ProxyRegister {
 
     pub fn ensure(&self, url: String) {
         let capture_tx = self.capture.inner.command_tx.clone();
-        self.ports
-            .entry(url.clone())
-            .or_insert_with(|| PortManager::new(url, self.app.clone(), capture_tx));
+        match self.ports.entry(url.clone()) {
+            Entry::Occupied(mut occ) => {
+                let pm = occ.get().clone();
+                let state = pm.state.lock().unwrap().clone();
+
+                if matches!(state, PortState::Disconnected) {
+                    println!("[Registry] Recreating PortManager for '{}' (was Disconnected).", url);
+                    pm.shutdown();
+                    let new_pm = PortManager::new(url.clone(), self.app.clone(), capture_tx);
+                    occ.insert(new_pm);
+                }
+            }
+            Entry::Vacant(v) => {
+                v.insert(PortManager::new(url, self.app.clone(), capture_tx));
+            }
+        }
     }
 
     pub fn prune<F>(&self, keep: F)
