@@ -17,9 +17,10 @@ pub struct DetrendPipeline {
     buffer: VecDeque<Point>,
     window_size_samples: usize,
     hop_size_samples: usize,
+    since_last_emit: usize,
     sample_rate: Option<f64>,
 }
-const HOP_TIME_SECONDS: f64 = 0.066;
+const HOP_TIME_SECONDS: f64 = 0.032;
 
 
 impl DetrendPipeline {
@@ -34,6 +35,7 @@ impl DetrendPipeline {
             buffer: VecDeque::new(),
             window_size_samples: 0,
             hop_size_samples: 0,
+            since_last_emit: 0,
             sample_rate: None,
         }
     }
@@ -82,28 +84,46 @@ impl Pipeline for DetrendPipeline {
 
         self.buffer.extend(batch.points.iter());
 
-        let max_buffer_len = self.window_size_samples + self.hop_size_samples;
+        let max_buffer_len = self.window_size_samples.saturating_add(self.hop_size_samples);
         if max_buffer_len > 0 && self.buffer.len() > max_buffer_len {
-             let to_drain = self.buffer.len() - max_buffer_len;
-             self.buffer.drain(..to_drain);
+            let to_drain = self.buffer.len() - max_buffer_len;
+            self.buffer.drain(..to_drain);
         }
 
-        while self.window_size_samples > 0 && self.buffer.len() >= self.window_size_samples {
-            
-            // Take a slice representing the most recent, full window of data.
-            let window_slice: Vec<Point> = self
-                .buffer
-                .iter()
-                .rev() // Take from the end (most recent)
-                .take(self.window_size_samples)
-                .rev() // Reverse back to chronological order
-                .cloned()
-                .collect();
-            
-            self.calculate_and_distribute(&window_slice);
+        self.since_last_emit = self.since_last_emit.saturating_add(batch.points.len());
 
-            self.buffer.drain(..self.hop_size_samples);
+        if self.hop_size_samples == 0 || self.since_last_emit < self.hop_size_samples {
+            return;
         }
+
+        let have = self.buffer.len();
+        let want = if self.window_size_samples == 0 {
+            have
+        } else {
+            self.window_size_samples.min(have)
+        };
+
+        if want == 0 {
+            self.since_last_emit = 0;
+            return;
+        }
+
+        let slice: Vec<Point> = self
+            .buffer
+            .iter()
+            .rev()
+            .take(want)
+            .rev()
+            .cloned()
+            .collect();
+
+        self.calculate_and_distribute(&slice);
+
+        if have >= self.window_size_samples && self.window_size_samples > 0 {
+            self.buffer.drain(..self.hop_size_samples.min(self.buffer.len()));
+        }
+
+        self.since_last_emit = 0;
     }
 
     fn process_command(&mut self, cmd: PipelineCommand, capture_state: &CaptureState) {
@@ -114,8 +134,7 @@ impl Pipeline for DetrendPipeline {
             PipelineCommand::Hydrate => {
                 if let Some(sr) = capture_state.get_effective_sampling_rate(&self.source_key) {
                     self.sample_rate = Some(sr);
-                    let window_size = (sr * self.window_seconds).ceil() as usize;
-                    self.window_size_samples = window_size.next_power_of_two().max(16);
+                    self.window_size_samples  = (sr * self.window_seconds).ceil() as usize;
                     self.hop_size_samples = ((sr * HOP_TIME_SECONDS).ceil() as usize).max(1);
 
                     println!(
@@ -138,12 +157,12 @@ impl Pipeline for DetrendPipeline {
                 );
 
                 if let Some(mut points) = raw_data_vecs.into_iter().next() {
-                    if points.len() > self.window_size_samples {
+                    if self.window_size_samples > 0 && points.len() > self.window_size_samples {
                         points.drain(..points.len() - self.window_size_samples);
                     }
-                    // Prime the buffer and do an initial calculation.
                     self.calculate_and_distribute(&points);
                     self.buffer.extend(points);
+                    self.since_last_emit = 0;
                 }
             }
             _ => {}
