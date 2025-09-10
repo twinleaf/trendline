@@ -17,7 +17,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Changed
 - Remove `handleKeyDown` event for `DeviceList.svelte` (changed tab index)
 - Initially set current `PortState` to fetched parent level devices (instead of waiting for after selection)
- 
+- Change `detrend.rs` to push partial windows (to have periodogram plot even when there are not enough samples to populate full window)
+
+### Fixed
+- Fix `detrend.rs` to `Hydrate` exact number of samples (previously subsequent power of two)
+    - Should fix periodogram retaining values outside of actual window seconds
 
 ## [1.0.0] - 2025-09-02
 
