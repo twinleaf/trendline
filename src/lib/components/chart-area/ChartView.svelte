@@ -36,52 +36,59 @@
 
 	let treeData = $derived.by((): TreeRow[] => {
 		const topLevelNodes: TreeRow[] = [];
-		for (const portData of deviceState.devices) {
-			const sortedDevices = [...portData.devices].sort(sortUiDevicesByRoute);
-			for (const device of sortedDevices) {
-				const sortedStreams = [...device.streams].sort((a: UiStream, b: UiStream) =>
-					a.meta.name.localeCompare(b.meta.name)
-				);
-				const streamNodes: TreeRow[] = [];
-				for (const stream of sortedStreams) {
-					const sortedColumns = [...stream.columns].sort((a: ColumnMeta, b: ColumnMeta) =>
-						a.name.localeCompare(b.name)
-					);
-					const columnNodes: TreeRow[] = [];
-					const streamSamplingRate = stream.effective_sampling_rate ?? 0;
-					for (const column of sortedColumns) {
-						const dataKey = {
-							port_url: device.url,
-							device_route: device.route,
-							stream_id: stream.meta.stream_id,
-							column_index: column.index
-						};
-						columnNodes.push({
-							id: JSON.stringify(dataKey),
-							type: 'column',
-							name: column.name,
-							units: column.units ?? '',
-							description: column.description ?? '',
-							dataKey: dataKey,
-							samplingRate: streamSamplingRate
-						});
-					}
-					streamNodes.push({
-						id: `${device.url}:${device.route}:${stream.meta.stream_id}`,
-						type: 'stream',
-						name: stream.meta.name,
-						subRows: columnNodes,
-						samplingRate: streamSamplingRate
-					});
-				}
-				topLevelNodes.push({
-					id: `${device.url}:${device.route}`,
-					type: 'device',
-					name: device.meta.name,
-					device: device,
-					subRows: streamNodes
+
+		const devicesForTree = deviceState.selectedDevices.length
+			? [...deviceState.selectedDevices]
+			: [];
+
+		const sortedDevices = devicesForTree.sort(sortUiDevicesByRoute);
+
+		for (const device of sortedDevices) {
+			const sortedStreams = [...device.streams].sort((a: UiStream, b: UiStream) =>
+			a.meta.name.localeCompare(b.meta.name)
+			);
+
+			const streamNodes: TreeRow[] = [];
+			for (const stream of sortedStreams) {
+			const sortedColumns = [...stream.columns].sort((a: ColumnMeta, b: ColumnMeta) =>
+				a.name.localeCompare(b.name)
+			);
+
+			const columnNodes: TreeRow[] = [];
+			const streamSamplingRate = stream.effective_sampling_rate ?? 0;
+
+			for (const column of sortedColumns) {
+				const dataKey = {
+					port_url: device.url,
+					device_route: device.route,
+					stream_id: stream.meta.stream_id,
+					column_index: column.index
+				};
+				columnNodes.push({
+					id: JSON.stringify(dataKey),
+					type: 'column',
+					name: column.name,
+					units: column.units ?? '',
+					description: column.description ?? '',
+					dataKey: dataKey,
+					samplingRate: streamSamplingRate
 				});
 			}
+			streamNodes.push({
+				id: `${device.url}:${device.route}:${stream.meta.stream_id}`,
+				type: 'stream',
+				name: stream.meta.name,
+				subRows: columnNodes,
+				samplingRate: streamSamplingRate
+			});
+			}
+			topLevelNodes.push({
+				id: `${device.url}:${device.route}`,
+				type: 'device',
+				name: device.meta.name,
+				device: device,
+				subRows: streamNodes
+			});
 		}
 		return topLevelNodes;
 	});

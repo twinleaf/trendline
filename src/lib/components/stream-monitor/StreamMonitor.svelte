@@ -44,57 +44,64 @@
 		items: MonitorItem[];
 	}
 
-	// This logic is unchanged
 	let treeData = $derived.by((): TreeRow[] => {
 		const topLevelNodes: TreeRow[] = [];
-		for (const portData of deviceState.devices) {
-			const sortedDevices = [...portData.devices].sort(sortUiDevicesByRoute);
-			for (const device of sortedDevices) {
-				const streamNodes: TreeRow[] = [];
-				const sortedStreams = [...device.streams].sort((a: UiStream, b: UiStream) =>
-					a.meta.name.localeCompare(b.meta.name)
-				);
-				for (const stream of sortedStreams) {
-					const sortedColumns = [...stream.columns].sort((a: ColumnMeta, b: ColumnMeta) =>
-						a.name.localeCompare(b.name)
-					);
-					const columnNodes: TreeRow[] = [];
-					for (const column of sortedColumns) {
-						const dataKey = {
-							port_url: device.url,
-							device_route: device.route,
-							stream_id: stream.meta.stream_id,
-							column_index: column.index
-						};
-						columnNodes.push({
-							id: JSON.stringify(dataKey),
-							type: 'column',
-							name: column.name,
-							units: column.units ?? '',
-							dataKey: dataKey
-						});
-					}
-					const streamId = `${device.url}:${device.route}:${stream.meta.stream_id}`;
-					streamNodes.push({
-						id: streamId,
-						type: 'stream',
-						name: stream.meta.name,
-						subRows: columnNodes
-					});
-				}
-				const deviceId = `${device.url}:${device.route}`;
-				topLevelNodes.push({
-					id: deviceId,
-					type: 'device',
-					name: device.meta.name,
-					subRows: streamNodes
+
+		const devicesForTree = deviceState.selectedDevices.length
+			? [...deviceState.selectedDevices]
+			: [];
+
+		const sortedDevices = devicesForTree.sort(sortUiDevicesByRoute);
+
+		for (const device of sortedDevices) {
+			const streamNodes: TreeRow[] = [];
+			const sortedStreams = [...device.streams].sort((a: UiStream, b: UiStream) =>
+			a.meta.name.localeCompare(b.meta.name)
+			);
+
+			for (const stream of sortedStreams) {
+			const sortedColumns = [...stream.columns].sort((a: ColumnMeta, b: ColumnMeta) =>
+				a.name.localeCompare(b.name)
+			);
+
+			const columnNodes: TreeRow[] = [];
+			for (const column of sortedColumns) {
+				const dataKey = {
+				port_url: device.url,
+				device_route: device.route,
+				stream_id: stream.meta.stream_id,
+				column_index: column.index
+				};
+				columnNodes.push({
+				id: JSON.stringify(dataKey),
+				type: 'column',
+				name: column.name,
+				units: column.units ?? '',
+				dataKey
 				});
 			}
+
+			const streamId = `${device.url}:${device.route}:${stream.meta.stream_id}`;
+			streamNodes.push({
+				id: streamId,
+				type: 'stream',
+				name: stream.meta.name,
+				subRows: columnNodes
+			});
+			}
+
+			const deviceId = `${device.url}:${device.route}`;
+			topLevelNodes.push({
+				id: deviceId,
+				type: 'device',
+				name: device.meta.name,
+				subRows: streamNodes
+			});
 		}
+
 		return topLevelNodes;
 	});
 
-	// --- MODIFIED LOGIC: This block is updated to produce the new structure ---
 	let selectedItems = $derived.by((): GroupedMonitorItems[] => {
 		const selectedKeys = Object.keys(streamMonitorState.rowSelection);
 		const leafNodeKeys = selectedKeys.filter((key) => key.startsWith('{'));
@@ -153,7 +160,7 @@
 		return Array.from(grouped.values()).sort((a, b) => a.headerName.localeCompare(b.headerName));
 	});
 
-	// --- Helper Functions and Effects (unchanged) ---
+	// --- Helper Functions and Effects ---
 	function getAllSelectableIds(nodes: TreeRow[]): { selection: string[]; expansion: string[] } {
 		const selection: string[] = [];
 		const expansion: string[] = [];

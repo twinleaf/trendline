@@ -7,6 +7,11 @@ export function cn(...inputs: ClassValue[]) {
 	return twMerge(clsx(inputs));
 }
 
+export const isRootRoute = (route: string) => route === '/' || route === '';
+
+export const deviceDomId = (portUrl: string, route: string) =>
+  `${portUrl}::${isRootRoute(route) ? '/' : route}`;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type WithoutChild<T> = T extends { child?: any } ? Omit<T, "child"> : T;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,9 +31,9 @@ export function sortUiDevicesByRoute(a: UiDevice, b: UiDevice): number {
     const routeA = a.route;
     const routeB = b.route;
 
-    const isRootA = routeA === '/' || routeA === '';
+    const isRootA = isRootRoute(routeA);   // <— reused here
     if (isRootA) return -1;
-    const isRootB = routeB === '/' || routeB === '';
+    const isRootB = isRootRoute(routeB);
     if (isRootB) return 1;
 
     // Attempt to sort numerically if routes are slash-delimited numbers
@@ -36,17 +41,14 @@ export function sortUiDevicesByRoute(a: UiDevice, b: UiDevice): number {
     const partsB = routeB.substring(1).split('/').map(Number);
 
     if (partsA.some(isNaN) || partsB.some(isNaN)) {
-        return routeA.localeCompare(routeB); // Fallback to string compare
+      return routeA.localeCompare(routeB);
     }
 
     const minLength = Math.min(partsA.length, partsB.length);
     for (let i = 0; i < minLength; i++) {
-        const diff = partsA[i] - partsB[i];
-        if (diff !== 0) {
-            return diff;
-        }
+      const diff = partsA[i] - partsB[i];
+      if (diff !== 0) return diff;
     }
-
     return partsA.length - partsB.length;
 }
 
