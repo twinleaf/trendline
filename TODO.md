@@ -23,7 +23,11 @@ This document outlines the current bugs, desired features, and code quality impr
 
 [ ] App Icon: Build app-icon using 1024x1024 and replace only icon.icns with smaller image (otherwise macOS icon is oversized). 
 
-[X] Fix Platform Fonts: Fonts were not being bundled across platforms and thus would fallback to system fonts
+[X] Fix Platform Fonts: Fonts were not being bundled across platforms and thus would fall back to system fonts
+
+[ ] Decouple rAF and ingestion: Fix the fact that alt tabbing currently builds up a backlog of frames to render. Should just jump to the newest frame.
+
+[ ] Fix plot NaNs: Fix the fact that the FFT currently zeros on NaN inputs.
 
 ## Features
 
@@ -47,7 +51,9 @@ This document outlines the current bugs, desired features, and code quality impr
 
 [X] Context menu: Should be able to right-click to add or move plots in the Chart View area
 
-[ ] Maximize Plots: Should be able to click a button to hide the title / control bar while also better utilizing space
+[ ] Maximize Plots: Should be able to click a button to hide the title / control bar while also better utilizing space. Possibly also double click / right click and check box.
+
+[ ] Epoch metadata: Should allow smooth scrolling by properly offsetting based on the `MetadataEpoch` (e.g. zero, Unix, systime)
 
 ## Code Quality & Refactoring
 

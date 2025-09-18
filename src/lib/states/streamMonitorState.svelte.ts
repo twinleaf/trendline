@@ -7,7 +7,7 @@ import { SvelteMap } from 'svelte/reactivity';
 import { untrack } from 'svelte';
 
 class StreamMonitorState {
-	// --- Public State (The Single Source of Truth) ---
+	// --- Public State ---
 	rowSelection = $state<RowSelectionState>({});
 	expansion = $state<ExpandedState>({});
 	statisticsData = new SvelteMap<string, StreamStatistics | null>();
@@ -111,7 +111,7 @@ class StreamMonitorState {
 	}
 
     /**
-     * NEW METHOD: Resets the persistent statistics for ALL currently
+     * Resets the persistent statistics for ALL currently
      * selected and active stream monitors.
      */
     async resetAllStatistics() {
