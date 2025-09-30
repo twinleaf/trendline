@@ -18,15 +18,15 @@
 	const isEffectivelyPaused = $derived(plot.isPaused);
 </script>
 
-<div class="flex justify-between items-center">
+<div class="flex items-center">
 	<input
 		onclick={(e) => e.stopPropagation()}
 		onkeydown={(e) => e.stopPropagation()}
 		type="text"
-		class="text-lg font-semibold bg-transparent focus:bg-background rounded-md px-2 -mx-2 outline-none focus:ring-1 focus:ring-ring"
+    	class="flex-1 min-w-0 shrink text-lg font-semibold bg-transparent focus:bg-background rounded-md px-2 -mx-2 outline-none focus:ring-1 focus:ring-ring"
 		bind:value={plot.title}
 	/>
-	<div class="flex items-center gap-2">
+  	<div class="ml-3 flex items-center gap-2 shrink-0 whitespace-nowrap">
 		<Button
 			variant="ghost"
 			size="icon"

@@ -18,9 +18,12 @@
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import type { ExpandedState, RowSelectionState } from '@tanstack/table-core';
 	import type { UiDevice } from '$lib/bindings/UiDevice';
+	import { Checkbox } from "$lib/components/ui/checkbox/index.js";
+    import { Label } from "$lib/components/ui/label";
 
 	let isInitialSelectionDone = false;
 	let isWipeDialogOpen = $state(false);
+	let showDesc = $state(true);
 
 	onMount(() => {
 		streamMonitorState.init();
@@ -146,7 +149,7 @@
 					const isMultiColumn = stream.columns.length > 1;
 					grouped.get(deviceKey)!.items.push({
 						id: key,
-						name: isMultiColumn ? column.name : stream.meta.name,
+						name: showDesc ? column.description : column.name,
 						depth: isMultiColumn ? 1 : 0,
 						units: column.units,
 						dataKey: dataKey
@@ -200,7 +203,7 @@
 </script>
 
 <div class="flex h-full w-full flex-col rounded-lg border bg-card p-4 text-card-foreground">
-	<div class="mb-2 flex items-center justify-end border-b pb-2">
+	<div class="mb-2 flex items-center justify-end border-b pb-2 gap-1">
 		<AlertDialog.Root bind:open={isWipeDialogOpen}>
 			<AlertDialog.Trigger aria-label="Wipe all persistent statistics">
 				{#snippet child({ props })}
@@ -236,9 +239,15 @@
 					</Button>
 				{/snippet}
 			</Popover.Trigger>
-			<Popover.Content class="w-[500px] p-0" side="bottom" align="end">
+			<Popover.Content class="w-[500px] p-0 pt-1" side="bottom" align="end">
 				<div class="p-2">
-					<h3 class="mb-2 px-2 font-semibold">Channel Selection</h3>
+					<div class="mb-2 flex items-center justify-between border-b pb-1">
+						<h3 class="mb-2 px-1 font-semibold">Channel Selection</h3>
+						<div class="mb-2 px-1 flex items-center gap-1">
+							<Checkbox id="terms" bind:checked={showDesc}/>
+							<Label>Descriptive names</Label>
+						</div>
+					</div>
 					<ScrollArea class="h-full">
 						<div class="max-h-[40vh]">
 							<DataTable

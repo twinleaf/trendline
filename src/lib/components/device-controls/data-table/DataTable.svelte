@@ -42,7 +42,7 @@
 		permissions: !isSmall && toggleState.includes('perms')
 	});
 	const columnFilters = $derived([
-		{ id: 'name', value: fuzzySearchValue },
+		...(fuzzySearchValue ? [{ id: 'name', value: fuzzySearchValue }] : []),
 		{ id: 'name_prefix', value: [...selectedPrefixes] }
 	]);
 
@@ -56,6 +56,7 @@
 			get columnVisibility() { return columnVisibility; }
 		},
 		onSortingChange: (updater) => (sorting = typeof updater === 'function' ? updater(sorting) : updater),
+		getRowId: (row) => row.name,
 		getCoreRowModel: getCoreRowModel(),
 		getSortedRowModel: getSortedRowModel(),
 		getFilteredRowModel: getFilteredRowModel()
