@@ -5,7 +5,6 @@
 	import type { PlotConfig } from '$lib/states/chartState.svelte';
 	import CustomLegend from '$lib/components/chart-area/legend/CustomLegend.svelte';
 	import { findTimestampIndex, lerp } from '$lib/utils';
-    import { untrack } from 'svelte';
 
 	// --- Props ---
 	let { plot, latestTimestamp = $bindable() }: { plot: PlotConfig; latestTimestamp?: number } = $props();
@@ -123,22 +122,6 @@
 		});
 	});
 
-	// --- SIDE EFFECTS ---
-
-	// Sync plot configuration with the backend
-	$effect(() => {
-		const _fingerprint = {
-			series: plot.series,
-			viewType: plot.viewType,
-			decimationMethod: plot.decimationMethod,
-			windowSeconds: plot.windowSeconds,
-			resolutionMultiplier: plot.resolutionMultiplier,
-			fftSeconds: plot.fftSeconds,
-			fftDetrendMethod: plot.fftDetrendMethod
-		};
-		chartState.syncPlotWithBackend(plot);
-	});
-
 	// --- uPlot Instantiation and Lifecycle ---
 	$effect(() => {
 		if (!chartContainer) return;
@@ -175,9 +158,8 @@
 
 		const finalOptions: uPlot.Options = { ...options, plugins: [legendPlugin] };
         const uplotInstance = new uPlot(finalOptions, [[]], chartContainer);
-        uplot = uplotInstance; // Update the state.raw variable
+        uplot = uplotInstance;
 
-        // Setup the resize observer
         const resizeObserver = new ResizeObserver((entries) => {
             if (!entries.length) return;
             const { width, height } = entries[0].contentRect;
@@ -185,45 +167,54 @@
         });
         resizeObserver.observe(chartContainer);
 
-        let isLooping = true;
-
-        const renderLoop = () => {
-            if (!isLooping) return;
-
-            const data = untrack(() => preparedData);
-            const isPaused = untrack(() => isEffectivelyPaused);
-            const currentWindow = untrack(() => plot.windowSeconds);
-            const isCurrentlyFFT = untrack(() => isFFT);
-
-            if (data) {
-                plot.hasData = true;
-
-                if (!isPaused) {
-                    latestTimestamp = data.latestTimestamp;
-                    if (!isCurrentlyFFT) {
-                        uplotInstance.setScale('x', { min: -currentWindow, max: 0 });
-                    }
-                }
-                
-                uplotInstance.setData(data.views, isCurrentlyFFT);
-
-            } else if (untrack(() => plot.hasData)) {
-                uplotInstance.setData([[]], false);
-                plot.hasData = false;
-            }
-
-            requestAnimationFrame(renderLoop);
-        };
-
-        requestAnimationFrame(renderLoop);
-
-
         return () => {
-            isLooping = false;
             resizeObserver.disconnect();
             uplotInstance.destroy();
         };
     });
+
+	// Sync plot configuration with the backend
+	$effect(() => {
+		const _fingerprint = {
+			series: plot.series,
+			viewType: plot.viewType,
+			decimationMethod: plot.decimationMethod,
+			windowSeconds: plot.windowSeconds,
+			resolutionMultiplier: plot.resolutionMultiplier,
+			fftSeconds: plot.fftSeconds,
+			fftDetrendMethod: plot.fftDetrendMethod
+		};
+		chartState.syncPlotWithBackend(plot);
+	});
+
+	// Reactive effect for updating uPlot data
+	$effect(() => {
+		const uplotInstance = uplot;
+		if (!uplotInstance) return;
+
+		const data = preparedData;
+		const isPaused = isEffectivelyPaused;
+		const currentWindow = plot.windowSeconds;
+        const isCurrentlyFFT = isFFT;
+
+		if (data) {
+			plot.hasData = true;
+
+			if (!isPaused) {
+				latestTimestamp = data.latestTimestamp;
+				if (!isCurrentlyFFT) {
+					uplotInstance.setScale('x', { min: -currentWindow, max: 0 });
+				}
+			}
+			
+			uplotInstance.setData(data.views, isCurrentlyFFT);
+
+		} else if (plot.hasData) {
+			uplotInstance.setData([[]], false);
+			plot.hasData = false;
+		}
+	});
+
 </script>
 
 <div class="relative h-full w-full">
