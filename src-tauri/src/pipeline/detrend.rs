@@ -20,8 +20,7 @@ pub struct DetrendPipeline {
     since_last_emit: usize,
     sample_rate: Option<f64>,
 }
-const HOP_TIME_SECONDS: f64 = 0.032;
-
+const HOP_TIME_SECONDS: f64 = 0.066;
 
 impl DetrendPipeline {
     pub fn new(source_key: DataColumnId, window_seconds: f64, method: DetrendMethod) -> Self {
@@ -84,7 +83,9 @@ impl Pipeline for DetrendPipeline {
 
         self.buffer.extend(batch.points.iter());
 
-        let max_buffer_len = self.window_size_samples.saturating_add(self.hop_size_samples);
+        let max_buffer_len = self
+            .window_size_samples
+            .saturating_add(self.hop_size_samples);
         if max_buffer_len > 0 && self.buffer.len() > max_buffer_len {
             let to_drain = self.buffer.len() - max_buffer_len;
             self.buffer.drain(..to_drain);
@@ -92,38 +93,49 @@ impl Pipeline for DetrendPipeline {
 
         self.since_last_emit = self.since_last_emit.saturating_add(batch.points.len());
 
-        if self.hop_size_samples == 0 || self.since_last_emit < self.hop_size_samples {
+        if self.hop_size_samples == 0 {
+            let have = self.buffer.len();
+            let want = if self.window_size_samples == 0 {
+                have
+            } else {
+                self.window_size_samples.min(have)
+            };
+            if want == 0 {
+                return;
+            }
+
+            let slice: Vec<Point> = self.buffer.iter().rev().take(want).rev().cloned().collect();
+            self.calculate_and_distribute(&slice);
             return;
         }
 
-        let have = self.buffer.len();
-        let want = if self.window_size_samples == 0 {
-            have
-        } else {
-            self.window_size_samples.min(have)
-        };
-
-        if want == 0 {
-            self.since_last_emit = 0;
+        let hops_owed = self.since_last_emit / self.hop_size_samples;
+        if hops_owed == 0 {
             return;
         }
 
-        let slice: Vec<Point> = self
-            .buffer
-            .iter()
-            .rev()
-            .take(want)
-            .rev()
-            .cloned()
-            .collect();
+        for _ in 0..hops_owed {
+            let have = self.buffer.len();
+            let want = if self.window_size_samples == 0 {
+                have
+            } else {
+                self.window_size_samples.min(have)
+            };
 
-        self.calculate_and_distribute(&slice);
+            if want == 0 {
+                break;
+            }
 
-        if have >= self.window_size_samples && self.window_size_samples > 0 {
-            self.buffer.drain(..self.hop_size_samples.min(self.buffer.len()));
+            let slice: Vec<Point> = self.buffer.iter().rev().take(want).rev().cloned().collect();
+            self.calculate_and_distribute(&slice);
+
+            if self.window_size_samples > 0 && have >= self.window_size_samples {
+                let drain = self.hop_size_samples.min(self.buffer.len());
+                self.buffer.drain(..drain);
+            }
         }
 
-        self.since_last_emit = 0;
+        self.since_last_emit %= self.hop_size_samples;
     }
 
     fn process_command(&mut self, cmd: PipelineCommand, capture_state: &CaptureState) {
@@ -134,7 +146,7 @@ impl Pipeline for DetrendPipeline {
             PipelineCommand::Hydrate => {
                 if let Some(sr) = capture_state.get_effective_sampling_rate(&self.source_key) {
                     self.sample_rate = Some(sr);
-                    self.window_size_samples  = (sr * self.window_seconds).ceil() as usize;
+                    self.window_size_samples = (sr * self.window_seconds).ceil() as usize;
                     self.hop_size_samples = ((sr * HOP_TIME_SECONDS).ceil() as usize).max(1);
 
                     println!(
@@ -170,29 +182,37 @@ impl Pipeline for DetrendPipeline {
     }
 }
 
-
 pub fn remove_mean(y: &[f64]) -> Vec<f64> {
     let n = y.len();
-    if n == 0 { return vec![]; }
+    if n == 0 {
+        return vec![];
+    }
     let mean = y.iter().sum::<f64>() / n as f64;
     y.iter().map(|val| val - mean).collect()
 }
 
 pub fn remove_linear_trend(y: &[f64]) -> Vec<f64> {
     let n = y.len();
-    if n == 0 { return vec![]; }
+    if n == 0 {
+        return vec![];
+    }
     let t: Vec<f64> = (0..n).map(|i| i as f64).collect();
     let a = DMatrix::from_fn(n, 2, |r, c| if c == 0 { 1.0 } else { t[r] });
     let b = DVector::from_vec(y.to_vec());
     let coeffs = a.svd(true, true).solve(&b, 1e-10).unwrap();
     let c = coeffs[0];
     let m = coeffs[1];
-    y.iter().zip(t.iter()).map(|(yi, ti)| yi - (m * ti + c)).collect()
+    y.iter()
+        .zip(t.iter())
+        .map(|(yi, ti)| yi - (m * ti + c))
+        .collect()
 }
 
 pub fn remove_quadratic_trend(y: &[f64]) -> Vec<f64> {
     let n = y.len();
-    if n < 3 { return remove_linear_trend(y); }
+    if n < 3 {
+        return remove_linear_trend(y);
+    }
     let t: Vec<f64> = (0..n).map(|i| i as f64).collect();
     let a = DMatrix::from_fn(n, 3, |r, c| match c {
         0 => 1.0,
@@ -204,5 +224,8 @@ pub fn remove_quadratic_trend(y: &[f64]) -> Vec<f64> {
     let c = coeffs[0];
     let b_coeff = coeffs[1];
     let a_coeff = coeffs[2];
-    y.iter().zip(t.iter()).map(|(yi, ti)| yi - (a_coeff * ti.powi(2) + b_coeff * ti + c)).collect()
+    y.iter()
+        .zip(t.iter())
+        .map(|(yi, ti)| yi - (a_coeff * ti.powi(2) + b_coeff * ti + c))
+        .collect()
 }

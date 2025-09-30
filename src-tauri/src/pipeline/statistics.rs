@@ -19,27 +19,27 @@ struct PersistentCalculator {
 
 impl PersistentCalculator {
     fn new(first_value: f64) -> Self {
-            if first_value.is_finite() {
-                Self {
-                    count: 1,
-                    nan_count: 0,
-                    mean: first_value,
-                    m2: 0.0,
-                    sum_of_squares: first_value.powi(2),
-                    min: first_value,
-                    max: first_value,
-                }
-            } else {
-                Self {
-                    count: 0,
-                    nan_count: 1,
-                    mean: 0.0,
-                    m2: 0.0,
-                    sum_of_squares: 0.0,
-                    min: f64::INFINITY,
-                    max: f64::NEG_INFINITY,
-                }
+        if first_value.is_finite() {
+            Self {
+                count: 1,
+                nan_count: 0,
+                mean: first_value,
+                m2: 0.0,
+                sum_of_squares: first_value.powi(2),
+                min: first_value,
+                max: first_value,
             }
+        } else {
+            Self {
+                count: 0,
+                nan_count: 1,
+                mean: 0.0,
+                m2: 0.0,
+                sum_of_squares: 0.0,
+                min: f64::INFINITY,
+                max: f64::NEG_INFINITY,
+            }
+        }
     }
     fn update(&mut self, new_value: f64) {
         if !new_value.is_finite() {
@@ -66,16 +66,28 @@ impl PersistentCalculator {
 
         self.sum_of_squares += new_value.powi(2);
 
-        if new_value < self.min { self.min = new_value; }
-        if new_value > self.max { self.max = new_value; }
+        if new_value < self.min {
+            self.min = new_value;
+        }
+        if new_value > self.max {
+            self.max = new_value;
+        }
     }
 
     fn stdev(&self) -> f64 {
-        if self.count < 2 { 0.0 } else { (self.m2 / (self.count - 1) as f64).sqrt() }
+        if self.count < 2 {
+            0.0
+        } else {
+            (self.m2 / (self.count - 1) as f64).sqrt()
+        }
     }
 
     fn rms(&self) -> f64 {
-        if self.count == 0 { 0.0 } else { (self.sum_of_squares / self.count as f64).sqrt() }
+        if self.count == 0 {
+            0.0
+        } else {
+            (self.sum_of_squares / self.count as f64).sqrt()
+        }
     }
 
     fn to_statistic_set(&self) -> StatisticSet {
@@ -130,7 +142,11 @@ impl StreamingStatisticsProvider {
     fn trim_window(&mut self, t_now: f64) {
         let t_min = t_now - self.window_seconds;
         while let Some(front) = self.buf.front() {
-            if front.x < t_min { self.buf.pop_front(); } else { break; }
+            if front.x < t_min {
+                self.buf.pop_front();
+            } else {
+                break;
+            }
         }
     }
 
@@ -143,16 +159,23 @@ impl StreamingStatisticsProvider {
 }
 
 impl StatisticsProvider for StreamingStatisticsProvider {
-    fn id(&self) -> PipelineId { self.id }
+    fn id(&self) -> PipelineId {
+        self.id
+    }
 
     fn get_output(&mut self, _capture_state: &CaptureState) -> StreamStatistics {
         self.output.lock().unwrap().clone()
     }
 
     fn process_batch(&mut self, batch: Arc<BatchedData>) {
-        if batch.key != self.source_key { return; }
+        if batch.key != self.source_key {
+            return;
+        }
 
-        if self.last_session_id.map_or(false, |sid| sid != batch.session_id) {
+        if self
+            .last_session_id
+            .map_or(false, |sid| sid != batch.session_id)
+        {
             self.buf.clear();
         }
         self.last_session_id = Some(batch.session_id);

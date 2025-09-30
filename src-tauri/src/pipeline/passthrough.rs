@@ -75,8 +75,11 @@ impl Pipeline for PassthroughPipeline {
                 return;
             };
             let start_time = latest_time - self.window_seconds;
-            let raw_data_vecs = capture_state
-                .get_data_across_sessions_for_keys(&[self.source_key.clone()], start_time, latest_time);
+            let raw_data_vecs = capture_state.get_data_across_sessions_for_keys(
+                &[self.source_key.clone()],
+                start_time,
+                latest_time,
+            );
             if let Some(points) = raw_data_vecs.get(0) {
                 let mut buffer = self.buffer.lock().unwrap();
                 buffer.clear();

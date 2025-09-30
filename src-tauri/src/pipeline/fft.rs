@@ -44,7 +44,7 @@ impl Pipeline for FftPipeline {
 
         let welch: SpectralDensity<f64> = SpectralDensity::builder(y_values, sample_rate).build();
         let psd = welch.periodogram();
-        
+
         let asd: Vec<f64> = psd.to_vec().iter().map(|&p| p.sqrt()).collect();
         let frequencies = psd.frequency().to_vec();
 

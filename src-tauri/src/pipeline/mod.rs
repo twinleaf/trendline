@@ -22,7 +22,7 @@ pub trait Pipeline: Send + Sync {
 pub trait StatisticsProvider: Send + Sync {
     fn id(&self) -> PipelineId;
     fn get_output(&mut self, capture_state: &CaptureState) -> StreamStatistics;
-    fn process_batch(&mut self, batch: Arc<BatchedData>); 
+    fn process_batch(&mut self, batch: Arc<BatchedData>);
     fn reset(&mut self, capture_state: &CaptureState);
 }
 pub mod decimation;

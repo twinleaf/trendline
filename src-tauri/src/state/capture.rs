@@ -313,8 +313,9 @@ impl CaptureState {
                     }
 
                     let session_map = inner.buffers.entry(key.clone()).or_default();
-                    let rate =
-                        stream_state.effective_sampling_rate.max(Self::DEFAULT_SAMPLING_RATE);
+                    let rate = stream_state
+                        .effective_sampling_rate
+                        .max(Self::DEFAULT_SAMPLING_RATE);
                     let cap = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
 
                     if let Some(mut buf_ref) = session_map.get_mut(&session_id) {
@@ -390,8 +391,8 @@ impl CaptureState {
                     start_time,
                     end_time,
                 } => {
-                    let raw_data_vecs =
-                        self_instance.get_data_across_sessions_for_keys(&keys, start_time, end_time);
+                    let raw_data_vecs = self_instance
+                        .get_data_across_sessions_for_keys(&keys, start_time, end_time);
 
                     let mut individual_plot_data = Vec::with_capacity(keys.len());
                     for points in raw_data_vecs {

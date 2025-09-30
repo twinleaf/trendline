@@ -2,7 +2,8 @@ use tauri::{
     menu::{
         AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem,
         SubmenuBuilder,
-    }, AppHandle, Emitter, Manager, Runtime
+    },
+    AppHandle, Emitter, Manager, Runtime,
 };
 use tauri_plugin_dialog::DialogExt;
 

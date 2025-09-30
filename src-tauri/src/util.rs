@@ -300,8 +300,12 @@ pub fn calculate_batch_stats(points: &[Point]) -> StatisticSet {
     let mut min = finite_vals[0];
     let mut max = finite_vals[0];
     for &v in &finite_vals {
-        if v < min { min = v; }
-        if v > max { max = v; }
+        if v < min {
+            min = v;
+        }
+        if v > max {
+            max = v;
+        }
     }
 
     let variance = if count > 1 {

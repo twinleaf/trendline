@@ -17,7 +17,6 @@ use trendline_lib::state::capture::CaptureState;
 use trendline_lib::state::proxy_register::ProxyRegister;
 use trendline_lib::{commands, menu, proxy};
 
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_prevent_default::debug())
