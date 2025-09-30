@@ -623,7 +623,7 @@ class ChartState {
 			const deviceId = `${dataKey.port_url}:${dataKey.device_route}`;
 			const streamId = `${deviceId}:${dataKey.stream_id}`;
 			const initialExpansion: ExpandedState = { [deviceId]: true, [streamId]: true };
-			const newPlot = new PlotConfig(`${streamName} Timeseries`, { [selectionKey]: true }, initialExpansion, this.isPaused);
+			const newPlot = new PlotConfig(`${streamName}`, { [selectionKey]: true }, initialExpansion, this.isPaused);
 			this.plots.push(newPlot);
 			if (this.layoutMode === 'manual') {
 				const newLayout = { ...this.manualLayout };
