@@ -313,9 +313,8 @@ impl CaptureState {
                     }
 
                     let session_map = inner.buffers.entry(key.clone()).or_default();
-                    let rate = stream_state
-                        .effective_sampling_rate
-                        .max(Self::DEFAULT_SAMPLING_RATE);
+                    let rate =
+                        stream_state.effective_sampling_rate.max(Self::DEFAULT_SAMPLING_RATE);
                     let cap = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
 
                     if let Some(mut buf_ref) = session_map.get_mut(&session_id) {
@@ -327,7 +326,6 @@ impl CaptureState {
                         session_map.insert(session_id, buf);
                     }
 
-                    // This is the new distributor logic.
                     if let Some(subscribers) = inner.subscribers.get(&key) {
                         if subscribers.is_empty() {
                             continue;
@@ -391,8 +389,8 @@ impl CaptureState {
                     start_time,
                     end_time,
                 } => {
-                    let raw_data_vecs = self_instance
-                        .get_data_across_sessions_for_keys(&keys, start_time, end_time);
+                    let raw_data_vecs =
+                        self_instance.get_data_across_sessions_for_keys(&keys, start_time, end_time);
 
                     let mut individual_plot_data = Vec::with_capacity(keys.len());
                     for points in raw_data_vecs {
@@ -423,6 +421,32 @@ impl CaptureState {
                 }
             }
         }
+    }
+
+    pub fn clear_stream_by_key(&self, any_key_in_stream: &DataColumnId) {
+        let stream_key = any_key_in_stream.stream_key();
+
+        let keys_in_stream: Vec<DataColumnId> = self.inner
+            .buffers
+            .iter()
+            .filter(|e| e.key().stream_key() == stream_key)
+            .map(|e| e.key().clone())
+            .collect();
+
+        for col_key in keys_in_stream {
+            if let Some(session_map) = self.inner.buffers.get_mut(&col_key) {
+                session_map.clear();
+            }
+        }
+
+        if let Some(mut st) = self.inner.streams.get_mut(&stream_key) {
+            let st = st.value_mut();
+            st.session_meta.clear();
+            *st.offsets_cache.lock().unwrap() = None;
+        }
+        // TODO If paused snapshots can pin old axes, drop them here.
+        // self.inner.paused_snapshots.retain(|_plot_id, _| /* keep or drop */ true);
+        println!("[Capture] Cleared all buffers for stream {:?}", stream_key);
     }
 
     fn _get_or_compute_offsets_for_stream(

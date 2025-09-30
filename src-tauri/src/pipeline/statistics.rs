@@ -208,11 +208,12 @@ impl StatisticsProvider for StreamingStatisticsProvider {
         }
     }
 
-    fn reset(&mut self, _capture_state: &CaptureState) {
+    fn reset(&mut self, capture_state: &CaptureState) {
         self.buf.clear();
         self.scratch.clear();
         self.persistent_calculator = None;
         self.last_session_id = None;
         *self.output.lock().unwrap() = StreamStatistics::default();
+        capture_state.clear_stream_by_key(&self.source_key);
     }
 }
