@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Ability to manually refresh devices from `DeviceSelectorDialog.svelte`
 - Close button for `DeviceSelectorDialog.svelte`
 - Fontsource npm module for bundling fonts in app distribution
+- Drop `PortManager`s for non-selected URLs
 
 ### Changed
 - Revert discovery port from `tree_probe()` to `tree_full()`
@@ -21,12 +22,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Remove `handleKeyDown` event for `DeviceList.svelte` (changed tab index)
 - Initially set current `PortState` to fetched parent level devices (instead of waiting for after selection)
 - Change `detrend.rs` to push partial windows (to have periodogram plot even when there are not enough samples to populate full window)
+- Make `StreamMonitor` use channel descriptions as names by default (toggle inside settings pop over)
+- Make default plot title from `StreamMonitor` use channel descriptions
 
 ### Fixed
 - Fix `detrend.rs` to `Hydrate` exact number of samples (previously subsequent power of two)
     - Should fix periodogram retaining values outside of actual window seconds
 - Fix infinite reactivity when moving plot and then resizing using a preset sizes
     - Occurred due to resize handler attempting to react to preset size change, in turn making the preset size react
+- Fix name of plot getting cut off
 
 ## [1.0.0] - 2025-09-02
 
