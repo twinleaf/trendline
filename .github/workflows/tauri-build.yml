@@ -139,18 +139,16 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: macOS-installer
+          name: macOS-${{ runner.arch }}-artifacts
           path: |
             src-tauri/target/*-apple-darwin/release/bundle/dmg/*.dmg
-          name: ${{ runner.os }}-${{ runner.arch }}-artifacts
-          path: src-tauri/target/release/bundle/**/*
           if-no-files-found: error
 
       - name: Upload installers (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installers
+          name: windows-${{ runner.arch }}-artifacts
           path: |
             src-tauri/target/**/release/bundle/msi/*.msi
             src-tauri/target/**/release/bundle/nsis/*.exe
@@ -160,7 +158,7 @@ jobs:
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: linux-installers
+          name: linux-${{ runner.arch }}-artifacts
           path: |
             src-tauri/target/**/release/bundle/deb/*.deb
             src-tauri/target/**/release/bundle/rpm/*.rpm
