@@ -17,7 +17,6 @@ use trendline_lib::state::capture::CaptureState;
 use trendline_lib::state::proxy_register::ProxyRegister;
 use trendline_lib::{commands, menu, proxy};
 
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_prevent_default::debug())
@@ -45,9 +44,11 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // --- Device & Port Management Commands ---
-            commands::capture::confirm_selection,
-            commands::capture::connect_to_port,
+            // --- Port Management Commands ---
+            commands::port::confirm_selection,
+            commands::port::connect_to_port,
+            commands::port::refresh_port,
+            // --- Capture Management Commands ---
             commands::capture::pause_plot,
             commands::capture::unpause_plot,
             // --- Pipeline Commands ---
@@ -57,7 +58,10 @@ fn main() {
             commands::pipeline::destroy_processor,
             commands::pipeline::listen_to_plot_data,
             commands::pipeline::listen_to_statistics,
-            commands::pipeline::reset_statistics_provider,
+            commands::pipeline::reset_by_pipeline_id,
+            commands::pipeline::reset_by_column,
+            commands::pipeline::reset_by_stream,
+            commands::pipeline::reset_by_device,
             // --- Pipeline Management Commands ---
             commands::settings::get_all_devices,
             commands::settings::get_port_state,

@@ -30,13 +30,14 @@ pub struct DebugCounters {
     pub polls: AtomicUsize,
     pub samples_received: AtomicUsize,
     pub points_inserted: AtomicUsize,
-    pub dropped_batches: AtomicUsize
+    pub dropped_batches: AtomicUsize,
 }
 
 #[derive(Debug)]
 pub enum PortCommand {
     Shutdown,
     AttemptConnection,
+    RescanDevices,
 }
 
 pub struct PortManager {
@@ -88,6 +89,10 @@ impl PortManager {
         let _ = self.command_tx.send(PortCommand::AttemptConnection);
     }
 
+    pub fn rescan(&self) {
+        let _ = self.command_tx.send(PortCommand::RescanDevices);
+    }
+
     fn spawn_thread(self_: Arc<Self>, command_rx: crossbeam::channel::Receiver<PortCommand>) {
         thread::Builder::new()
             .name(format!("port-{}", self_.url))
@@ -119,7 +124,6 @@ impl PortManager {
                                 *self_.connection_retries.lock().unwrap() = 0;
 
                                 println!("[{}] Connection established.", self_.url);
-                                self_.set_state(PortState::Discovery);
 
                                 if let Some(proxy_if) = self_.proxy.lock().unwrap().clone() {
                                     if self_.discover_devices(&proxy_if).is_ok() {
@@ -211,6 +215,24 @@ impl PortManager {
                                     *self_.proxy.lock().unwrap() = None;
                                 }
                             },
+                            Ok(PortCommand::RescanDevices) => {
+                                println!("[{}] Manual device rescan triggered.", self_.url);
+                                if let Some(proxy_if) = self_.proxy.lock().unwrap().clone() {
+                                    let prev = self_.state.lock().unwrap().clone();
+                                    self_.set_state(PortState::Discovery);
+
+                                    if let Err(e) = self_.discover_devices(&proxy_if) {
+                                        eprintln!("[{}] Rescan failed: {:?}", self_.url, e);
+                                    }
+                                    self_.set_state(prev);
+                                } else {
+                                    let current_state = self_.state.lock().unwrap().clone();
+                                    if matches!(current_state, PortState::Error(_)) {
+                                        self_.set_state(PortState::Idle);
+                                        *self_.proxy.lock().unwrap() = None;
+                                    }
+                                }
+                            }
                             Err(_) => {
                                 eprintln!("[{}] Command channel broke. Shutting down.", self_.url);
                                 break 'lifecycle;
@@ -223,14 +245,19 @@ impl PortManager {
                                 self_.poll_device_data();
                             }
                             if last_debug_print.elapsed() > Duration::from_secs(30) {
-                                let polls = self_.counters.polls.swap(0, Ordering::Relaxed);
+                                let polls  = self_.counters.polls.swap(0, Ordering::Relaxed);
                                 let points = self_.counters.points_inserted.swap(0, Ordering::Relaxed);
-                                let batch = self_.counters.dropped_batches.swap(0, Ordering::Relaxed);
-                                let current_state = self_.state.lock().unwrap().clone();
-                                println!(
-                                    "[{}] Heartbeat (30s): State={:?}, Polls={}, PointsIns={}, DroppedBatches={}",
-                                    self_.url, current_state, polls, points, batch
-                                );
+                                let batch  = self_.counters.dropped_batches.swap(0, Ordering::Relaxed);
+
+                                let state = self_.state.lock().unwrap().clone();
+
+                                if !matches!(state, PortState::Error(_)) {
+                                    println!(
+                                        "[{}] Heartbeat (30s): State={:?}, Polls={}, PointsIns={}, DroppedBatches={}",
+                                        self_.url, state, polls, points, batch
+                                    );
+                                }
+
                                 last_debug_print = Instant::now();
                             }
                         }
@@ -250,9 +277,10 @@ impl PortManager {
     }
 
     fn discover_devices(&self, proxy_if: &Arc<proxy::Interface>) -> Result<(), proxy::PortError> {
-        let discovery_port = proxy_if.tree_probe()?;
+        // Maybe change to tree_probe(), but some sensors only emit data on StreamData which are not forwarded to probe routes
+        let discovery_port = proxy_if.tree_full()?;
         let mut discovered_routes = HashSet::new();
-        let discovery_deadline = Instant::now() + Duration::from_secs(2);
+        let mut discovery_deadline = Instant::now() + Duration::from_secs(2);
 
         self.set_state(PortState::Discovery);
         println!("[{}] Listening for device routes...", self.url);
@@ -262,8 +290,8 @@ impl PortManager {
                 .receiver()
                 .recv_timeout(Duration::from_millis(100))
             {
-                if !self.devices.read().unwrap().contains_key(&pkt.routing) {
-                    discovered_routes.insert(pkt.routing);
+                if discovered_routes.insert(pkt.routing) {
+                    discovery_deadline = Instant::now() + Duration::from_secs(2);
                 }
             }
         }
@@ -455,7 +483,7 @@ impl PortManager {
                 }
             })
             .collect();
-
+        println!("[{}]   -> Fetched metadata!", self.url);
         (device_meta, ui_streams)
     }
 
@@ -464,6 +492,7 @@ impl PortManager {
         self.app
             .emit("port-state-changed", (self.url.clone(), new_state.clone()))
             .unwrap();
+        println!("[{}] Emit new port state {:?}", self.url, new_state);
 
         if let Some(window) = self.app.get_webview_window("main") {
             if let Some(menu) = window.menu() {
@@ -510,14 +539,19 @@ impl PortManager {
         let poll_instant = Instant::now();
 
         let mut refresh_needed = HashSet::new();
-        let mut reinit_needed  = HashSet::new();
+        let mut reinit_needed = HashSet::new();
 
-        let mut batched: HashMap<(DataColumnId, SessionId), Vec<Point>> = HashMap::new();
+        struct BatchedEntry {
+            points: Vec<Point>,
+            sample_numbers: Vec<u32>,
+        }
+
+        let mut batched: HashMap<(DataColumnId, SessionId), BatchedEntry> = HashMap::new();
 
         {
             let devices_map = self.devices.read().unwrap();
             for (route, entry) in devices_map.iter() {
-                let mut tuple   = entry.lock().unwrap();
+                let mut tuple = entry.lock().unwrap();
                 let (device, _) = &mut *tuple;
 
                 let result = panic::catch_unwind(AssertUnwindSafe(|| device.drain()));
@@ -526,26 +560,35 @@ impl PortManager {
                     Ok(samples) => {
                         for sample in samples {
                             let sid = sample.device.session_id;
+                            let sample_number = sample.n;
 
                             for col in &sample.columns {
                                 let val = match col.value {
-                                    twinleaf::data::ColumnData::Int(i)   => i as f64,
-                                    twinleaf::data::ColumnData::UInt(u)  => u as f64,
+                                    twinleaf::data::ColumnData::Int(i) => i as f64,
+                                    twinleaf::data::ColumnData::UInt(u) => u as f64,
                                     twinleaf::data::ColumnData::Float(f) => f,
                                     _ => continue,
                                 };
 
                                 let key = DataColumnId {
-                                    port_url:     self.url.clone(),
+                                    port_url: self.url.clone(),
                                     device_route: route.clone(),
-                                    stream_id:    sample.stream.stream_id,
+                                    stream_id: sample.stream.stream_id,
                                     column_index: col.desc.index,
                                 };
 
-                                batched
+                                let e = batched
                                     .entry((key, sid))
-                                    .or_insert_with(Vec::new)
-                                    .push(Point { x: sample.timestamp_end(), y: val });
+                                    .or_insert_with(|| BatchedEntry {
+                                        points: Vec::new(),
+                                        sample_numbers: Vec::new(),
+                                    });
+
+                                e.points.push(Point {
+                                    x: sample.timestamp_end(),
+                                    y: val,
+                                });
+                                e.sample_numbers.push(sample_number);
                             }
 
                             if sample.meta_changed || sample.segment_changed {
@@ -564,26 +607,31 @@ impl PortManager {
             }
         }
 
-        for ((key, sid), points) in batched {
-                let len = points.len();
-                match self.capture_tx.try_send(CaptureCommand::InsertBatch {
-                    key,
-                    points,
-                    session_id: sid,
-                    instant: poll_instant,
-                }) {
-                    Ok(()) => {
-                        self.counters.points_inserted.fetch_add(len, Ordering::Relaxed);
-                    }
-                    Err(TrySendError::Full(_cmd)) => {
-                        self.counters.dropped_batches.fetch_add(1, Ordering::Relaxed);
-                    }
-                    Err(TrySendError::Disconnected(_cmd)) => {
-                        // capture thread died; bail
-                        break;
-                    }
+        for ((key, sid), entry) in batched {
+            let len = entry.points.len();
+            match self.capture_tx.try_send(CaptureCommand::InsertBatch {
+                key,
+                points: entry.points,
+                sample_numbers: entry.sample_numbers,
+                session_id: sid,
+                instant: poll_instant,
+            }) {
+                Ok(()) => {
+                    self.counters
+                        .points_inserted
+                        .fetch_add(len, Ordering::Relaxed);
+                }
+                Err(TrySendError::Full(_cmd)) => {
+                    self.counters
+                        .dropped_batches
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+                Err(TrySendError::Disconnected(_cmd)) => {
+                    // capture thread died; bail
+                    break;
                 }
             }
+        }
 
         if !reinit_needed.is_empty() {
             if let Some(proxy_if) = self.proxy.lock().unwrap().clone() {
@@ -609,7 +657,7 @@ impl PortManager {
         for route in refresh_needed {
             if let Some(device_entry) = devices_map.get(&route) {
                 let device_arc_clone = device_entry.clone();
-                let self_clone       = self.clone();
+                let self_clone = self.clone();
 
                 async_runtime::spawn_blocking(move || {
                     println!(
@@ -617,20 +665,24 @@ impl PortManager {
                         self_clone.url, route
                     );
 
-                    let mut device_tuple           = device_arc_clone.lock().unwrap();
-                    let (data_device, ui_device)   = &mut *device_tuple;
-                    let (new_meta, new_streams)    = self_clone.fetch_metadata(data_device);
+                    let mut device_tuple = device_arc_clone.lock().unwrap();
+                    let (data_device, ui_device) = &mut *device_tuple;
+                    let (new_meta, new_streams) = self_clone.fetch_metadata(data_device);
 
-                    self_clone
-                        .update_capture_state_with_stream_metadata(&route, &new_streams);
+                    self_clone.update_capture_state_with_stream_metadata(&route, &new_streams);
 
-                    ui_device.meta    = new_meta;
+                    ui_device.meta = new_meta;
                     ui_device.streams = new_streams;
 
-                    self_clone
+                    if let Err(e) = self_clone
                         .app
                         .emit("device-metadata-updated", ui_device.clone())
-                        .unwrap();
+                    {
+                        eprintln!(
+                            "[{}] Failed to emit device-metadata-updated event: {}",
+                            self_clone.url, e
+                        );
+                    }
                 });
             }
         }

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "trendline",
-  "version": "1.0.0",
+  "productName": "Trendline",
+  "version": "1.0.1",
   "identifier": "com.trendline.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "trendline",
+        "title": "Trendline",
         "width": 1600,
         "height": 900,
         "minWidth": 800,

@@ -1,13 +1,13 @@
 use crate::pipeline::StatisticsProvider;
-use crate::shared::{DataColumnId, PipelineId, Point, StatisticSet, StreamStatistics};
+use crate::shared::{ColumnStatistics, DataColumnId, HealthSet, PipelineId, Point, StatisticSet};
 use crate::state::capture::{BatchedData, CaptureState, SessionId};
-use crate::util::calculate_batch_stats;
+use crate::util::{calculate_health_stats, calculate_value_stats};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Default)]
-struct PersistentCalculator {
+struct ValueAccumulator {
     count: u64,
     mean: f64,
     m2: f64,
@@ -16,44 +16,96 @@ struct PersistentCalculator {
     max: f64,
 }
 
-impl PersistentCalculator {
-    fn new(first_value: f64) -> Self {
-        Self {
-            count: 1,
-            mean: first_value,
-            m2: 0.0,
-            sum_of_squares: first_value.powi(2),
-            min: first_value,
-            max: first_value,
+impl ValueAccumulator {
+    fn update(&mut self, v: f64) {
+        if !v.is_finite() { return; }
+        if self.count == 0 {
+            self.count = 1;
+            self.mean = v;
+            self.m2 = 0.0;
+            self.sum_of_squares = v * v;
+            self.min = v;
+            self.max = v;
+            return;
         }
-    }
-
-    fn update(&mut self, new_value: f64) {
         self.count += 1;
-        let delta = new_value - self.mean;
-        self.mean += delta / self.count as f64;
-        let delta2 = new_value - self.mean;
-        self.m2 += delta * delta2;
-        self.sum_of_squares += new_value.powi(2);
-        if new_value < self.min {
-            self.min = new_value;
+        let d = v - self.mean;
+        self.mean += d / self.count as f64;
+        let d2 = v - self.mean;
+        self.m2 += d * d2;
+        self.sum_of_squares += v * v;
+        if v < self.min { self.min = v; }
+        if v > self.max { self.max = v; }
+    }
+    fn to_stat(&self) -> StatisticSet {
+        if self.count == 0 {
+            return StatisticSet::default();
         }
-        if new_value > self.max {
-            self.max = new_value;
+        let stdev = if self.count > 1 {
+            (self.m2 / (self.count - 1) as f64).sqrt()
+        } else { 0.0 };
+        let rms = (self.sum_of_squares / self.count as f64).sqrt();
+        StatisticSet {
+            count: self.count,
+            mean: self.mean,
+            min: self.min,
+            max: self.max,
+            stdev,
+            rms,
         }
     }
+    fn reset(&mut self) { *self = Self::default(); }
+}
 
-    fn stdev(&self) -> f64 {
-        if self.count < 2 { 0.0 } else { (self.m2 / (self.count - 1) as f64).sqrt() }
-    }
+#[derive(Clone, Debug, Default)]
+struct HealthAccumulator {
+    gap_count: u64,
+    gap_sum: f64,
+    gap_min: f64,
+    gap_max: f64,
+    nan_count: u64,
+}
 
-    fn rms(&self) -> f64 {
-        if self.count == 0 { 0.0 } else { (self.sum_of_squares / self.count as f64).sqrt() }
+impl HealthAccumulator {
+    fn update(&mut self, prev_sn: Option<u32>, sn: u32, y: f64) -> Option<u32> {
+        if !y.is_finite() {
+            self.nan_count += 1;
+        }
+        if let Some(p) = prev_sn {
+            if sn > p {
+                let d: u32 = sn - p;
+                if d > 1 {
+                    let gap = f64::from(d - 1);
+                    self.gap_count += 1;
+                    self.gap_sum += gap;
+                    if self.gap_count == 1 {
+                        self.gap_min = gap;
+                        self.gap_max = gap;
+                    } else {
+                        if gap < self.gap_min { self.gap_min = gap; }
+                        if gap > self.gap_max { self.gap_max = gap; }
+                    }
+                }
+            }
+            // else: out-of-order or duplicate; ignore for gaps
+        }
+        Some(sn)
     }
-
-    fn to_statistic_set(&self) -> StatisticSet {
-        StatisticSet { count: self.count, mean: self.mean, min: self.min, max: self.max, stdev: self.stdev(), rms: self.rms() }
+    fn to_health(&self) -> HealthSet {
+        let (gap_mean, gap_min, gap_max) = if self.gap_count == 0 {
+            (0.0, 0.0, 0.0)
+        } else {
+            (self.gap_sum / self.gap_count as f64, self.gap_min, self.gap_max)
+        };
+        HealthSet {
+            gap_count: self.gap_count,
+            nan_count: self.nan_count,
+            gap_mean,
+            gap_min,
+            gap_max,
+        }
     }
+    fn reset(&mut self) { *self = Self::default(); }
 }
 
 pub struct StreamingStatisticsProvider {
@@ -61,14 +113,18 @@ pub struct StreamingStatisticsProvider {
     source_key: DataColumnId,
     window_seconds: f64,
 
-    buf: VecDeque<Point>,
-    scratch: Vec<Point>,
+    buf_points: VecDeque<Point>,
+    buf_samples: VecDeque<u32>,
+    scratch_points: Vec<Point>,
+    scratch_samples: Vec<u32>,
 
-    persistent_calculator: Option<PersistentCalculator>,
+    persistent_values: ValueAccumulator,
+    persistent_health: HealthAccumulator,
 
     last_session_id: Option<SessionId>,
+    last_sample_number: Option<u32>,
 
-    output: Arc<Mutex<StreamStatistics>>,
+    output: Arc<Mutex<ColumnStatistics>>,
 }
 
 impl StreamingStatisticsProvider {
@@ -77,78 +133,111 @@ impl StreamingStatisticsProvider {
             id: PipelineId(Uuid::new_v4()),
             source_key,
             window_seconds,
-            buf: VecDeque::new(),
-            scratch: Vec::with_capacity(4096),
-            persistent_calculator: None,
+            buf_points: VecDeque::new(),
+            buf_samples: VecDeque::new(),
+            scratch_points: Vec::with_capacity(4096),
+            scratch_samples: Vec::with_capacity(4096),
+            persistent_values: ValueAccumulator::default(),
+            persistent_health: HealthAccumulator::default(),
             last_session_id: None,
-            output: Arc::new(Mutex::new(StreamStatistics::default())),
+            last_sample_number: None,
+            output: Arc::new(Mutex::new(ColumnStatistics::default())),
         }
     }
 
     #[inline]
     fn trim_window(&mut self, t_now: f64) {
         let t_min = t_now - self.window_seconds;
-        while let Some(front) = self.buf.front() {
-            if front.x < t_min { self.buf.pop_front(); } else { break; }
+        while let (Some(p), Some(_s)) = (self.buf_points.front(), self.buf_samples.front()) {
+            if p.x < t_min {
+                self.buf_points.pop_front();
+                self.buf_samples.pop_front();
+            } else {
+                break;
+            }
         }
     }
 
-    fn recompute_window_stats(&mut self) -> StatisticSet {
-        self.scratch.clear();
-        // Copy refs as Points (cheap: Point is two f64s)
-        self.scratch.extend(self.buf.iter().copied());
-        calculate_batch_stats(&self.scratch)
+    fn recompute_window_value_stats(&mut self) -> StatisticSet {
+        self.scratch_points.clear();
+        self.scratch_points.extend(self.buf_points.iter().copied());
+        calculate_value_stats(&self.scratch_points)
+    }
+
+    fn recompute_window_health(&mut self) -> HealthSet {
+        self.scratch_points.clear();
+        self.scratch_samples.clear();
+        self.scratch_points.extend(self.buf_points.iter().copied());
+        self.scratch_samples.extend(self.buf_samples.iter().copied());
+        calculate_health_stats(&self.scratch_samples, &self.scratch_points)
     }
 }
 
 impl StatisticsProvider for StreamingStatisticsProvider {
     fn id(&self) -> PipelineId { self.id }
 
-    fn get_output(&mut self, _capture_state: &CaptureState) -> StreamStatistics {
+    fn get_output(&mut self, _capture_state: &CaptureState) -> ColumnStatistics {
         self.output.lock().unwrap().clone()
     }
 
     fn process_batch(&mut self, batch: Arc<BatchedData>) {
-        if batch.key != self.source_key { return; }
+        if batch.key != self.source_key {
+            return;
+        }
 
         if self.last_session_id.map_or(false, |sid| sid != batch.session_id) {
-            self.buf.clear();
+            self.buf_points.clear();
+            self.buf_samples.clear();
+            self.last_sample_number = None;
         }
         self.last_session_id = Some(batch.session_id);
 
-        for p in batch.points.iter() {
-            self.buf.push_back(*p);
-            match &mut self.persistent_calculator {
-                Some(calc) => calc.update(p.y),
-                None => self.persistent_calculator = Some(PersistentCalculator::new(p.y)),
-            }
+        debug_assert_eq!(
+            batch.points.len(), batch.sample_numbers.len(),
+            "points and sample_numbers must be same length"
+        );
+
+        let n = batch.points.len().min(batch.sample_numbers.len());
+        for i in 0..n {
+            let p = batch.points[i];
+            let sn = batch.sample_numbers[i];
+
+            self.buf_points.push_back(p);
+            self.buf_samples.push_back(sn);
+
+            self.persistent_values.update(p.y);
+            self.last_sample_number = self.persistent_health.update(self.last_sample_number, sn, p.y);
         }
 
-        if let Some(last) = self.buf.back().copied() {
+        if let Some(last) = self.buf_points.back().copied() {
             self.trim_window(last.x);
 
-            let window_stats = self.recompute_window_stats();
+            let window_stats = self.recompute_window_value_stats();
+            let window_health = self.recompute_window_health();
 
-            let persistent = self
-                .persistent_calculator
-                .as_ref()
-                .map(|c| c.to_statistic_set())
-                .unwrap_or_default();
+            let persistent = self.persistent_values.to_stat();
+            let persistent_health = self.persistent_health.to_health();
 
-            let snapshot = StreamStatistics {
+            let snapshot = ColumnStatistics {
                 latest_value: last.y,
-                window: window_stats,
                 persistent,
+                window: window_stats,
+                persistent_health,
+                window_health,
             };
             *self.output.lock().unwrap() = snapshot;
         }
     }
 
-    fn reset(&mut self, _capture_state: &CaptureState) {
-        self.buf.clear();
-        self.scratch.clear();
-        self.persistent_calculator = None;
+    fn reset(&mut self) {
+        self.buf_points.clear();
+        self.buf_samples.clear();
+        self.scratch_points.clear();
+        self.scratch_samples.clear();
+        self.persistent_values.reset();
+        self.persistent_health.reset();
         self.last_session_id = None;
-        *self.output.lock().unwrap() = StreamStatistics::default();
+        self.last_sample_number = None;
+        *self.output.lock().unwrap() = ColumnStatistics::default();
     }
 }

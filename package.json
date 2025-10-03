@@ -1,6 +1,6 @@
 {
   "name": "trendline",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "",
   "type": "module",
   "scripts": {
@@ -13,6 +13,8 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.6",
+    "@fontsource/ibm-plex-mono": "^5.2.6",
     "@tailwindcss/vite": "^4.1.10",
     "@tanstack/match-sorter-utils": "^8.19.4",
     "@tauri-apps/api": "^2.5.0",

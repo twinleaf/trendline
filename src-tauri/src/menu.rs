@@ -2,14 +2,15 @@ use tauri::{
     menu::{
         AboutMetadataBuilder, Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem,
         SubmenuBuilder,
-    }, AppHandle, Emitter, Manager, Runtime
+    },
+    AppHandle, Emitter, Manager, Runtime,
 };
 use tauri_plugin_dialog::DialogExt;
 
 pub fn create_app_menu<R: Runtime>(app_handle: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let about_metadata = AboutMetadataBuilder::new()
         .name(Some("Trendline"))
-        .version(Some("1.0.0"))
+        .version(Some("1.0.1")) 
         .authors(Some(vec!["Steven Nguyen".to_string()]))
         .website(Some("https://twinleaf.com"))
         .build();

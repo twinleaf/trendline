@@ -18,36 +18,29 @@
 	let rpcError = $state<RpcError | null>(null);
 	let displayedError = $state<RpcError | null>(null);
 	let isPopoverOpen = $state(false);
-	let observer: IntersectionObserver;
+	let observer: IntersectionObserver | null = null;
 
 	let inputContainerEl = $state<HTMLDivElement | undefined>();
 	let executeButtonContainerEl = $state<HTMLDivElement | undefined>();
 
-	onMount(() => {
-		observer = new IntersectionObserver(
-			(entries) => {
-				const entry = entries[0];
-				if (!entry.isIntersecting && isPopoverOpen) {
-					rpcError = null;
-				}
-			},
-			{ threshold: 0 }
-		);
-	});
-
-	onDestroy(() => {
-		if (observer) {
-			observer.disconnect();
-		}
-	});
-
 	$effect(() => {
-		const elementToObserve = rpc.writable ? inputContainerEl : executeButtonContainerEl;
-
-		if (observer && elementToObserve) {
-			observer.disconnect();
-			observer.observe(elementToObserve);
+		if (!isPopoverOpen) {
+			if (observer) { observer.disconnect(); observer = null; }
+			return;
 		}
+		const el = rpc.writable ? inputContainerEl : executeButtonContainerEl;
+		if (!el) return;
+
+		observer = new IntersectionObserver((entries) => {
+			const entry = entries[0];
+			if (!entry.isIntersecting) rpcError = null;
+		}, { threshold: 0 });
+
+		observer.observe(el);
+
+		return () => {
+			if (observer) { observer.disconnect(); observer = null; }
+		};
 	});
 
 	$effect(() => {

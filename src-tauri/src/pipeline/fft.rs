@@ -44,7 +44,7 @@ impl Pipeline for FftPipeline {
 
         let welch: SpectralDensity<f64> = SpectralDensity::builder(y_values, sample_rate).build();
         let psd = welch.periodogram();
-        
+
         let asd: Vec<f64> = psd.to_vec().iter().map(|&p| p.sqrt()).collect();
         let frequencies = psd.frequency().to_vec();
 
@@ -56,7 +56,10 @@ impl Pipeline for FftPipeline {
         *self.output.lock().unwrap() = result;
     }
 
-    fn process_command(&mut self, _cmd: PipelineCommand, _capture: &CaptureState) {
-        // This pipeline doesn't need to handle Hydrate or other commands directly.
+    fn process_command(&mut self, cmd: PipelineCommand, _capture: &CaptureState) {
+        if let PipelineCommand::ResetSelf = cmd {
+            println!("[Detrend {:?}] Received ResetSelf command", self.id);
+            *self.output.lock().unwrap() = PlotData::empty();
+        }
     }
 }

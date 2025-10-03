@@ -7,7 +7,7 @@ use crate::pipeline::statistics::StreamingStatisticsProvider;
 use crate::pipeline::StatisticsProvider;
 use crate::shared::{
     DataColumnId, DecimationMethod, FftConfig, PipelineId, PlotData, SharedPlotConfig,
-    StreamStatistics, TimeseriesConfig, ViewConfig,
+    ColumnStatistics, TimeseriesConfig, ViewConfig,
 };
 use crate::state::capture::{CaptureCommand, CaptureState};
 use crate::util::k_way_merge_plot_data;
@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
 
 pub struct ManagedPlotPipeline {
@@ -34,9 +34,10 @@ enum ThreadType {
         sub_id: usize,
         source_key: DataColumnId,
     },
-    Derived,
+    Derived{
+        source_key: DataColumnId,
+    },
 }
-
 
 struct PipelineThreadHandle {
     cmd_tx: Sender<PipelineCommand>,
@@ -49,7 +50,7 @@ pub struct ProcessingManager {
     pub pipelines: HashMap<PipelineId, Arc<Mutex<dyn Pipeline>>>,
     pub stat_providers: HashMap<PipelineId, Arc<Mutex<dyn StatisticsProvider>>>,
     pub plot_channels: HashMap<String, Channel<PlotData>>,
-    pub statistics_channels: HashMap<PipelineId, Channel<StreamStatistics>>,
+    pub statistics_channels: HashMap<PipelineId, Channel<ColumnStatistics>>,
     pipeline_threads: HashMap<PipelineId, PipelineThreadHandle>,
     capture_state: CaptureState,
     capture_cmd_tx: Sender<CaptureCommand>,
@@ -75,26 +76,48 @@ impl ProcessingManager {
             let manager_clone = manager.clone();
             thread::Builder::new()
                 .name("ui-emitter".into())
-                .spawn(move || loop {
-                    thread::sleep(Duration::from_millis(33));
-                    if let Ok(mg) = manager_clone.lock() {
-                        for (plot_id, channel) in &mg.plot_channels {
-                            if let Some(data) = mg.get_merged_data_for_plot(plot_id) {
-                                if !data.is_empty() {
-                                    let _ = channel.send(data);
+                .spawn(move || {
+                    let plot_period  = Duration::from_millis(33);
+                    let stats_period = Duration::from_millis(16);
+
+                    let mut next_plot  = Instant::now();
+                    let mut next_stats = Instant::now();
+
+                    loop {
+                        let now = Instant::now();
+
+                        if let Ok(mg) = manager_clone.lock() {
+                            if now >= next_plot {
+                                for (plot_id, channel) in &mg.plot_channels {
+                                    if let Some(data) = mg.get_merged_data_for_plot(plot_id) {
+                                        if !data.is_empty() {
+                                            let _ = channel.send(data);
+                                        }
+                                    }
                                 }
+                                next_plot = now + plot_period;
                             }
-                        }
-                        
-                        for (provider_id, channel) in &mg.statistics_channels {
-                            if let Some(provider) = mg.stat_providers.get(provider_id) {
-                                let mut provider_locked = provider.lock().unwrap();
-                                let stats = provider_locked.get_output(&mg.capture_state);
-                                let _ = channel.send(stats);
+
+                            if now >= next_stats {
+                                for (provider_id, channel) in &mg.statistics_channels {
+                                    if let Some(provider) = mg.stat_providers.get(provider_id) {
+                                        let mut provider_locked = provider.lock().unwrap();
+                                        let stats = provider_locked.get_output(&mg.capture_state);
+                                        let _ = channel.send(stats);
+                                    }
+                                }
+                                next_stats = now + stats_period;
                             }
+                        } else {
+                            break;
                         }
-                    } else {
-                        break;
+
+                        // Sleep to the nearest deadline to avoid busy-spinning.
+                        let now2 = Instant::now();
+                        let sleep_until = next_plot.min(next_stats);
+                        if sleep_until > now2 {
+                            thread::sleep(sleep_until - now2);
+                        }
                     }
                 })
                 .expect("Failed to spawn ui-emitter thread");
@@ -140,17 +163,21 @@ impl ProcessingManager {
                 }
             })
             .unwrap();
-        self.pipeline_threads.insert(id, PipelineThreadHandle {
-            cmd_tx,
-            handle,
-            thread_type: ThreadType::Root { sub_id, source_key },
-        });
+        self.pipeline_threads.insert(
+            id,
+            PipelineThreadHandle {
+                cmd_tx,
+                handle,
+                thread_type: ThreadType::Root { sub_id, source_key },
+            },
+        );
         id
     }
 
     fn spawn_derived_pipeline<P>(
         &mut self,
         pipeline: P,
+        source_key: DataColumnId,
     ) -> (PipelineId, Sender<(PlotData, f64)>)
     where
         P: Pipeline + 'static,
@@ -159,7 +186,7 @@ impl ProcessingManager {
         let pipeline_arc = Arc::new(Mutex::new(pipeline));
         self.pipelines.insert(id, pipeline_arc.clone());
 
-        let (data_tx, data_rx) = bounded(1);
+        let (data_tx, data_rx) = bounded(128);
         let (cmd_tx, cmd_rx) = bounded(16);
         let capture_clone = self.capture_state.clone();
         let handle = thread::Builder::new()
@@ -186,7 +213,7 @@ impl ProcessingManager {
             PipelineThreadHandle {
                 cmd_tx,
                 handle,
-                thread_type: ThreadType::Derived,
+                thread_type: ThreadType::Derived { source_key },
             },
         );
         (id, data_tx)
@@ -244,7 +271,8 @@ impl ProcessingManager {
                 let ratio = ((max_sr * config.window_seconds)
                     / (10.0 * config.resolution_multiplier as f64))
                     .round() as usize;
-                let pipeline = StreamingFpcsPipeline::new(key.clone(), ratio.max(1), config.window_seconds);
+                let pipeline =
+                    StreamingFpcsPipeline::new(key.clone(), ratio.max(1), config.window_seconds);
                 self.spawn_root_pipeline(pipeline, key.clone())
             }
             DecimationMethod::None => {
@@ -259,17 +287,26 @@ impl ProcessingManager {
         key: &DataColumnId,
         config: &FftConfig,
     ) -> Result<(PipelineId, PipelineId), String> {
-        let detrend_pipeline =
-            DetrendPipeline::new(key.clone(), config.window_seconds, config.detrend_method.clone());
+        let detrend_pipeline = DetrendPipeline::new(
+            key.clone(),
+            config.window_seconds,
+            config.detrend_method.clone(),
+        );
         let detrend_id = self.spawn_root_pipeline(detrend_pipeline, key.clone());
-        
+
         let fft_pipeline = FftPipeline::new();
-        let (fft_id, fft_input_tx) = self.spawn_derived_pipeline(fft_pipeline);
-        
-        let handle = self.pipeline_threads.get(&detrend_id).ok_or("Detrend handle not found")?;
-        
-        handle.cmd_tx.send(PipelineCommand::AddSubscriber(fft_input_tx)).map_err(|e| e.to_string())?;
-        
+        let (fft_id, fft_input_tx) = self.spawn_derived_pipeline(fft_pipeline, key.clone());
+
+        let handle = self
+            .pipeline_threads
+            .get(&detrend_id)
+            .ok_or("Detrend handle not found")?;
+
+        handle
+            .cmd_tx
+            .send(PipelineCommand::AddSubscriber(fft_input_tx))
+            .map_err(|e| e.to_string())?;
+
         Ok((fft_id, detrend_id))
     }
 
@@ -318,7 +355,11 @@ impl ProcessingManager {
         );
 
         self.capture_cmd_tx
-            .send(CaptureCommand::Subscribe { key: source_key.clone(), id: sub_id, tx: data_tx })
+            .send(CaptureCommand::Subscribe {
+                key: source_key.clone(),
+                id: sub_id,
+                tx: data_tx,
+            })
             .unwrap();
 
         let handle = thread::Builder::new()
@@ -333,6 +374,10 @@ impl ProcessingManager {
                         },
                         recv(cmd_rx) -> msg => match msg {
                             Ok(PipelineCommand::Shutdown) => break,
+                            Ok(PipelineCommand::ResetSelf) => {
+                                println!("[Stats {:?}] Received ResetSelf command", id);
+                                provider_arc.lock().unwrap().reset();
+                            }
                             Ok(_) => {},
                             Err(_) => break,
                         }
@@ -347,7 +392,10 @@ impl ProcessingManager {
             PipelineThreadHandle {
                 cmd_tx,
                 handle,
-                thread_type: ThreadType::Statistics { sub_id, source_key: source_key.clone() },
+                thread_type: ThreadType::Statistics {
+                    sub_id,
+                    source_key: source_key.clone(),
+                },
             },
         );
 
@@ -373,7 +421,7 @@ impl ProcessingManager {
                         id: *sub_id,
                     });
                 }
-                ThreadType::Derived => {
+                ThreadType::Derived {..}=> {
                     println!("[Pipeline] Destroying derived pipeline {:?}.", id);
                 }
             }
@@ -390,11 +438,134 @@ impl ProcessingManager {
         let removed_s = self.stat_providers.remove(&id).is_some();
         let removed_c = self.statistics_channels.remove(&id).is_some();
         if removed_p || removed_s || removed_c {
-            println!("[Pipeline] Removed maps for {:?} (pipelines={}, stats={}, chan={}).",
-                    id, removed_p, removed_s, removed_c);
+            println!(
+                "[Pipeline] Removed maps for {:?} (pipelines={}, stats={}, chan={}).",
+                id, removed_p, removed_s, removed_c
+            );
         }
     }
-        
+    pub fn clear_column(
+        &mut self,
+        column_key: &DataColumnId,
+        reset_capture_state: bool,
+    ) -> Result<(), String> {
+        if reset_capture_state {
+            self.capture_state.clear_column_by_key(column_key);
+        }
+        for handle in self.pipeline_threads.values() {
+            match &handle.thread_type {
+                ThreadType::Root { source_key, .. }
+                | ThreadType::Statistics { source_key, .. }
+                | ThreadType::Derived { source_key } => {
+                    if source_key == column_key {
+                        let _ = handle.cmd_tx.send(PipelineCommand::ResetSelf);
+                    }
+                }
+            }
+        }
+        for (plot_id, managed) in &self.managed_plots {
+            if managed.config.data_keys.iter().any(|k| k == column_key) {
+                if let Some(ch) = self.plot_channels.get(plot_id) {
+                    let _ = ch.send(PlotData::empty());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn clear_stream(
+        &mut self,
+        any_key_in_stream: &DataColumnId,
+        reset_capture_state: bool,
+    ) -> Result<(), String> {
+        let stream_key = any_key_in_stream.stream_key();
+
+        // Snapshot the column keys in this stream (from all pipeline threads).
+        let mut column_keys: Vec<DataColumnId> = Vec::new();
+        for handle in self.pipeline_threads.values() {
+            let source_key = match &handle.thread_type {
+                ThreadType::Root { source_key, .. }
+                | ThreadType::Statistics { source_key, .. }
+                | ThreadType::Derived { source_key } => source_key,
+            };
+            if source_key.stream_key() == stream_key && !column_keys.contains(source_key) {
+                column_keys.push(source_key.clone());
+            }
+        }
+
+        for ck in &column_keys {
+            self.clear_column(ck, reset_capture_state)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn clear_device(
+        &mut self,
+        any_key_on_device: &DataColumnId,
+        reset_capture_state: bool,
+    ) -> Result<(), String> {
+        let device_key = any_key_on_device.device_key();
+
+        let mut stream_keys: Vec<DataColumnId> = Vec::new();
+
+        for handle in self.pipeline_threads.values() {
+            let source_key = match &handle.thread_type {
+                ThreadType::Root { source_key, .. }
+                | ThreadType::Statistics { source_key, .. }
+                | ThreadType::Derived { source_key } => source_key,
+            };
+            if source_key.device_key() == device_key {
+                let sk = source_key.stream_key();
+                if !stream_keys.iter().any(|k| k.stream_key() == sk) {
+                    stream_keys.push(sk);
+                }
+            }
+        }
+
+        for e in self.capture_state.inner.streams.iter() {
+            let k = e.key();
+            if k.device_key() == device_key {
+                let sk = k.stream_key();
+                if !stream_keys.iter().any(|s| s.stream_key() == sk) {
+                    stream_keys.push(sk);
+                }
+            }
+        }
+
+        for sk in &stream_keys {
+            self.clear_stream(sk, reset_capture_state)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn reset_by_pipeline_id(
+        &mut self,
+        id: PipelineId,
+        reset_capture_state: bool,
+    ) -> Result<(), String> {
+        let (cmd_tx, upstream_stream_key): (Sender<PipelineCommand>, Option<DataColumnId>) = {
+            let h = self.pipeline_threads.get(&id).ok_or("Pipeline not found")?;
+            let key_opt = match &h.thread_type {
+                ThreadType::Root { source_key, .. } |
+                ThreadType::Statistics { source_key, .. } => Some(source_key.clone()),
+                ThreadType::Derived { .. } => None,
+            };
+            (h.cmd_tx.clone(), key_opt)
+        };
+
+        cmd_tx.send(PipelineCommand::ResetSelf).map_err(|e| e.to_string())?;
+
+        if reset_capture_state {
+            if let Some(k) = upstream_stream_key {
+                self.clear_column(&k, true)?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn register_plot_channel(&mut self, plot_id: String, channel: Channel<PlotData>) {
         self.plot_channels.insert(plot_id, channel);
     }
@@ -402,9 +573,12 @@ impl ProcessingManager {
     pub fn register_statistics_channel(
         &mut self,
         provider_id: PipelineId,
-        channel: Channel<StreamStatistics>,
+        channel: Channel<ColumnStatistics>,
     ) {
-        println!("[Manager] Registering IPC channel for stats provider {:?}", provider_id);
+        println!(
+            "[Manager] Registering IPC channel for stats provider {:?}",
+            provider_id
+        );
         self.statistics_channels.insert(provider_id, channel);
     }
 }

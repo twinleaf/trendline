@@ -133,14 +133,18 @@ pub async fn export_plot_data_to_clipboard(
     let csv_string =
         format_plot_data_to_csv_string(&internal_plot_data, &data_column_ids, &registry)?;
 
-    app_handle.clipboard().write_text(csv_string)
+    app_handle
+        .clipboard()
+        .write_text(csv_string)
         .map_err(|e| format!("Clipboard error: {:?}", e))?;
 
     let payload = CsvExportPayload {
         message: "Plotted data copied to clipboard!".to_string(),
         path: None,
     };
-    app_handle.emit("csv-export-complete", payload).map_err(|e| format!("Emit error: {:?}", e))?;
+    app_handle
+        .emit("csv-export-complete", payload)
+        .map_err(|e| format!("Emit error: {:?}", e))?;
 
     Ok(())
 }
@@ -179,20 +183,23 @@ pub async fn save_plot_data_to_file(
         .blocking_save_file();
 
     if let Some(file_path_enum) = file_path_result {
-        let path_buf = file_path_enum.into_path()
+        let path_buf = file_path_enum
+            .into_path()
             .map_err(|e| format!("Failed to resolve file path: {}", e))?;
 
         fs::write(&path_buf, csv_string).map_err(|e| format!("Failed to write file: {}", e))?;
 
         let success_msg = format!("Plotted data saved to {}", path_buf.to_string_lossy());
-        
+
         let payload = CsvExportPayload {
             message: success_msg,
             path: Some(path_buf.to_string_lossy().to_string()),
         };
-        app_handle.emit("csv-export-complete", payload).map_err(|e| format!("Emit error: {:?}", e))?;
+        app_handle
+            .emit("csv-export-complete", payload)
+            .map_err(|e| format!("Emit error: {:?}", e))?;
     }
-    
+
     Ok(())
 }
 
@@ -238,26 +245,31 @@ pub async fn save_raw_plot_data_to_file(
 
     let csv_string = format_plot_data_to_csv_string(&raw_plot_data, &data_column_ids, &registry)?;
 
-    let file_path_result = app_handle.dialog().file()
+    let file_path_result = app_handle
+        .dialog()
+        .file()
         .add_filter("CSV", &["csv"])
         .set_title("Save Raw Plot Data")
         .set_file_name(&file_name_suggestion)
         .blocking_save_file();
 
     if let Some(file_path_enum) = file_path_result {
-        let path_buf = file_path_enum.into_path()
+        let path_buf = file_path_enum
+            .into_path()
             .map_err(|e| format!("Failed to resolve file path: {}", e))?;
 
         fs::write(&path_buf, csv_string).map_err(|e| format!("Failed to write file: {}", e))?;
-        
+
         let success_msg = format!("Raw data snapshot saved to {}", path_buf.to_string_lossy());
-        
+
         let payload = CsvExportPayload {
             message: success_msg,
             path: Some(path_buf.to_string_lossy().to_string()),
         };
-        app_handle.emit("csv-export-complete", payload).map_err(|e| format!("Emit error: {:?}", e))?;
+        app_handle
+            .emit("csv-export-complete", payload)
+            .map_err(|e| format!("Emit error: {:?}", e))?;
     }
-    
+
     Ok(())
 }

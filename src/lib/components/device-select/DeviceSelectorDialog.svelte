@@ -8,6 +8,7 @@
 	import { LoaderCircleIcon, PlusIcon } from '@lucide/svelte/icons';
 	import DeviceList from '$lib/components/device-select/DeviceList.svelte';
 	import { invoke } from '@tauri-apps/api/core';
+	import { X } from '@lucide/svelte/icons';
 
 	let devices = $derived(deviceState.deviceTree);
 	let selectedParent = $state('');
@@ -15,6 +16,7 @@
 
 	// We need this state variable to control the manual connect dialog
 	let manualConnectDialogOpen = $state(false);
+	let confirmButton: HTMLButtonElement | null = $state(null);
 
 	let isConfirmDisabled = $derived.by(() => {
 		if (deviceState.deviceTree.length === 0) {
@@ -24,7 +26,11 @@
 		if (!portInfo) {
 			return true;
 		}
-		return portInfo.state !== 'Streaming';
+		if (portInfo.state == 'Streaming') {
+			confirmButton?.focus();
+			return false;
+		}
+		return true
 	});
 
 	$effect(() => {
@@ -68,6 +74,19 @@
 	<AlertDialog.Content
 		class="fixed left-1/2 top-1/2 z-50 w-[32rem] max-w-[95vw] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-card p-6 shadow-lg"
 	>
+		<AlertDialog.Cancel>
+			{#snippet child({ props })}
+				<button
+				{...props}
+				type="button"
+				class="absolute right-3 top-3 inline-grid place-items-center rounded-md p-1 text-muted-foreground hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				aria-label="Close"
+				>
+				<X class="h-4 w-4" />
+				</button>
+			{/snippet}
+		</AlertDialog.Cancel>
+
 		<AlertDialog.Header class="flex flex-col items-center space-y-2 text-center">
 			<img src="/Twinleaf-Logo-Black.svg" alt="Twinleaf Logo" class="mb-4 h-12" />
 			<AlertDialog.Title class="text-lg font-semibold text-zinc-900">
@@ -102,7 +121,7 @@
 					<PlusIcon class="size-4" />
 				</Button>
 
-				<AlertDialog.Action type="submit" form="device-select-form" disabled={isConfirmDisabled}>
+				<AlertDialog.Action type="submit" form="device-select-form" disabled={isConfirmDisabled} bind:ref={confirmButton}>
 					Confirm
 				</AlertDialog.Action>
 			</div>

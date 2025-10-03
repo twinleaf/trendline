@@ -217,7 +217,22 @@ export class PlotConfig {
 		const axesConfig: uPlot.Axis[] = [{}];
 		if (this.viewType === 'fft') {
 			scalesConfig['x'] = { time: false, distr: 3, log: 10 };
-			axesConfig[0] = { scale: 'x', label: 'Frequency (Hz)' };
+			const formatHz = (v: number) => {
+				if (v == null || !isFinite(v)) return '';
+				if (v < 1e3) {
+					const dp = v < 10 ? 2 : v < 100 ? 1 : 0;
+					return `${v.toFixed(dp)} Hz`;
+				}
+				if (v < 1e6) {
+					const n = v / 1e3;
+					const dp = n < 10 ? 2 : n < 100 ? 1 : 0;
+					return `${n.toFixed(dp)} kHz`;
+				}
+				const n = v / 1e6;
+				const dp = n < 10 ? 2 : n < 100 ? 1 : 0;
+				return `${n.toFixed(dp)} MHz`;
+			};
+			axesConfig[0] = { scale: 'x', values: (_u, ticks) => ticks.map(formatHz)};
 			for (const unit of uniqueUnits)
 				if (unit && scalesConfig[unit]) {
 					scalesConfig[unit].distr = 3;
@@ -608,7 +623,7 @@ class ChartState {
 			const deviceId = `${dataKey.port_url}:${dataKey.device_route}`;
 			const streamId = `${deviceId}:${dataKey.stream_id}`;
 			const initialExpansion: ExpandedState = { [deviceId]: true, [streamId]: true };
-			const newPlot = new PlotConfig(`${streamName} Timeseries`, { [selectionKey]: true }, initialExpansion, this.isPaused);
+			const newPlot = new PlotConfig(`${streamName}`, { [selectionKey]: true }, initialExpansion, this.isPaused);
 			this.plots.push(newPlot);
 			if (this.layoutMode === 'manual') {
 				const newLayout = { ...this.manualLayout };
@@ -852,6 +867,7 @@ class ChartState {
 	 * @param percentages An array of numbers (0-100) representing the new size of each pane.
 	 */
 	updateLayoutFromManualResize(percentages: number[]) {
+		if (this.#isActionLocked) return;
 		const currentPlots = untrack(() => this.plots);
 		if (this.layoutMode !== 'manual' || percentages.length !== currentPlots.length) return;
 		const totalPixelHeight = Object.values(untrack(() => this.layout)).reduce(

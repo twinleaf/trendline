@@ -2,8 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::{
     pipeline::manager::ProcessingManager,
-    shared::{DataColumnId, PipelineId, PlotData, SharedPlotConfig, StreamStatistics},
-    state::capture::CaptureState,
+    shared::{DataColumnId, PipelineId, PlotData, SharedPlotConfig, ColumnStatistics},
 };
 use tauri::{ipc::Channel, State};
 
@@ -53,7 +52,7 @@ pub async fn listen_to_plot_data(
 #[tauri::command]
 pub async fn listen_to_statistics(
     id: PipelineId,
-    on_event: Channel<StreamStatistics>,
+    on_event: Channel<ColumnStatistics>,
     manager: tauri::State<'_, Arc<Mutex<ProcessingManager>>>,
 ) -> Result<(), String> {
     manager
@@ -69,17 +68,37 @@ pub fn destroy_processor(id: PipelineId, manager: State<Arc<Mutex<ProcessingMana
 }
 
 #[tauri::command]
-pub fn reset_statistics_provider(
+pub fn reset_by_pipeline_id(
     id: PipelineId,
+    reset_capture_state: bool,
     manager: State<Arc<Mutex<ProcessingManager>>>,
-    capture_state: State<CaptureState>,
 ) -> Result<(), String> {
-    let manager = manager.lock().unwrap();
-    if let Some(provider_mutex) = manager.stat_providers.get(&id) {
-        let mut provider = provider_mutex.lock().unwrap();
-        provider.reset(&capture_state);
-        Ok(())
-    } else {
-        Err("Statistics provider not found".to_string())
-    }
+    manager.lock().unwrap().reset_by_pipeline_id(id, reset_capture_state)
+}
+
+#[tauri::command]
+pub fn reset_by_column(
+    manager: tauri::State<Arc<Mutex<ProcessingManager>>>,
+    key: DataColumnId,
+    reset_capture_state: bool,
+) -> Result<(), String> {
+    manager.lock().unwrap().clear_column(&key, reset_capture_state)
+}
+
+#[tauri::command]
+pub fn reset_by_stream(
+    manager: tauri::State<Arc<Mutex<ProcessingManager>>>,
+    key: DataColumnId,
+    reset_capture_state: bool,
+) -> Result<(), String> {
+    manager.lock().unwrap().clear_stream(&key, reset_capture_state)
+}
+
+#[tauri::command]
+pub fn reset_by_device(
+    manager: tauri::State<Arc<Mutex<ProcessingManager>>>,
+    key: DataColumnId,
+    reset_capture_state: bool,
+) -> Result<(), String> {
+    manager.lock().unwrap().clear_device(&key, reset_capture_state)
 }

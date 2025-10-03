@@ -6,7 +6,7 @@ use tauri::Runtime;
 use twinleaf::tio::proto::DeviceRoute;
 use twinleaf::tio::util::TioRpcReplyable;
 
-use crate::shared::{PlotData, Point, StatisticSet};
+use crate::shared::{HealthSet, PlotData, Point, StatisticSet};
 
 pub fn is_process_running(exe_name: &str) -> bool {
     let mut sys = System::new_all();
@@ -264,36 +264,41 @@ pub fn parse_permissions_string(meta_bits: u16) -> String {
     )
 }
 
-pub fn calculate_batch_stats(points: &[Point]) -> StatisticSet {
+pub fn calculate_value_stats(points: &[Point]) -> StatisticSet {
     if points.is_empty() {
         return StatisticSet::default();
     }
 
-    let count = points.len() as u64;
-    let values: Vec<f64> = points.iter().map(|p| p.y).collect();
+    let mut count: u64 = 0;
+    let mut mean = 0.0;
+    let mut m2 = 0.0;
+    let mut sum_sq = 0.0;
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
 
-    let sum: f64 = values.iter().sum();
-    let mean = sum / count as f64;
+    for p in points {
+        let y = p.y;
+        if !y.is_finite() { continue; }
 
-    let mut min = values[0];
-    let mut max = values[0];
-    for &value in values.iter() {
-        if value < min {
-            min = value;
-        }
-        if value > max {
-            max = value;
-        }
+        count += 1;
+        let delta = y - mean;
+        mean += delta / count as f64;
+        let delta2 = y - mean;
+        m2 += delta * delta2;
+
+        sum_sq += y * y;
+
+        if y < min { min = y; }
+        if y > max { max = y; }
     }
 
-    let variance = if count > 1 {
-        values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / ((count - 1) as f64)
-    } else {
-        0.0
-    };
-    let stdev = variance.sqrt();
+    if count == 0 {
+        return StatisticSet::default();
+    }
 
-    let sum_sq: f64 = values.iter().map(|v| v.powi(2)).sum();
+    let stdev = if count > 1 {
+        (m2 / (count - 1) as f64).sqrt()
+    } else { 0.0 };
     let rms = (sum_sq / count as f64).sqrt();
 
     StatisticSet {
@@ -303,6 +308,56 @@ pub fn calculate_batch_stats(points: &[Point]) -> StatisticSet {
         max,
         stdev,
         rms,
+    }
+}
+
+pub fn calculate_health_stats(sample_numbers: &[u32], points: &[Point]) -> HealthSet {
+    use std::cmp::min;
+
+    let n = min(sample_numbers.len(), points.len());
+    if n == 0 {
+        return HealthSet::default();
+    }
+
+    let mut nan_count: u64 = 0;
+
+    for i in 0..n {
+        if !points[i].y.is_finite() {
+            nan_count += 1;
+        }
+    }
+
+    let mut gap_count: u64 = 0;
+    let mut gap_sum: f64 = 0.0;
+    let mut gap_min: f64 = f64::INFINITY;
+    let mut gap_max: f64 = f64::NEG_INFINITY;
+
+    for i in 1..n {
+        let (prev, curr) = (sample_numbers[i - 1], sample_numbers[i]);
+        if curr > prev {
+            let d = curr - prev;
+            if d > 1 {
+                let gap = (d - 1) as f64;
+                gap_count += 1;
+                gap_sum += gap;
+                if gap < gap_min { gap_min = gap; }
+                if gap > gap_max { gap_max = gap; }
+            }
+        }
+    }
+
+    let (gap_mean, gap_min, gap_max) = if gap_count == 0 {
+        (0.0, 0.0, 0.0)
+    } else {
+        (gap_sum / gap_count as f64, gap_min, gap_max)
+    };
+
+    HealthSet {
+        gap_count,
+        nan_count,
+        gap_mean,
+        gap_min,
+        gap_max,
     }
 }
 

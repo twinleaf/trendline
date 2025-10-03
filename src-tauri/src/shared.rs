@@ -481,8 +481,20 @@ pub struct StatisticSet {
 
 #[derive(Clone, Debug, Serialize, TS, Default, PartialEq)]
 #[ts(export, export_to = "../../src/lib/bindings/")]
-pub struct StreamStatistics {
+pub struct HealthSet {
+    pub gap_count: u64,
+    pub nan_count: u64,
+    pub gap_mean: f64,
+    pub gap_min: f64,
+    pub gap_max: f64,
+}
+
+#[derive(Clone, Debug, Serialize, TS, Default, PartialEq)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct ColumnStatistics {
     pub latest_value: f64,
     pub persistent: StatisticSet,
     pub window: StatisticSet,
+    pub persistent_health: HealthSet,
+    pub window_health: HealthSet,
 }
