@@ -55,7 +55,7 @@ This document outlines the current bugs, desired features, and code quality impr
 
 [ ] Epoch metadata: Should allow smooth scrolling by properly offsetting based on the `MetadataEpoch` (e.g. zero, Unix, systime)
 
-[ ] StreamMonitor: Make stream monitor show number of NaNs to stream
+[X] StreamMonitor: Make stream monitor show number of NaNs to stream
 
 ## Code Quality & Refactoring
 
