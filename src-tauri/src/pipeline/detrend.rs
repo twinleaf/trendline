@@ -143,6 +143,12 @@ impl Pipeline for DetrendPipeline {
             PipelineCommand::AddSubscriber(tx) => {
                 self.subscribers.push(tx);
             }
+            PipelineCommand::ResetSelf => {
+                println!("[Detrend {:?}] Received ResetSelf command", self.id);
+                self.buffer.clear();
+                self.since_last_emit = 0;
+                *self.output.lock().unwrap() = PlotData::empty();
+            }
             PipelineCommand::Hydrate => {
                 if let Some(sr) = capture_state.get_effective_sampling_rate(&self.source_key) {
                     self.sample_rate = Some(sr);

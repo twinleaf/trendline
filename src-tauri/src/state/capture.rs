@@ -80,6 +80,7 @@ pub struct BatchedData {
     pub key: DataColumnId,
     pub session_id: SessionId,
     pub points: Arc<Vec<Point>>,
+    pub sample_numbers: Arc<Vec<u32>>,
     pub t_min: f64,
     pub t_max: f64,
 }
@@ -97,6 +98,7 @@ pub enum CaptureCommand {
     InsertBatch {
         key: DataColumnId,
         points: Vec<Point>,
+        sample_numbers: Vec<u32>,
         session_id: SessionId,
         instant: Instant,
     },
@@ -282,6 +284,7 @@ impl CaptureState {
                 CaptureCommand::InsertBatch {
                     key,
                     points,
+                    sample_numbers,
                     session_id,
                     instant,
                 } => {
@@ -336,6 +339,7 @@ impl CaptureState {
                             key: key.clone(),
                             session_id,
                             points: Arc::new(points),
+                            sample_numbers: Arc::new(sample_numbers),
                             t_min,
                             t_max,
                         });
@@ -423,6 +427,13 @@ impl CaptureState {
         }
     }
 
+    pub fn clear_column_by_key(&self, column_key: &DataColumnId) {
+        if let Some(session_map) = self.inner.buffers.get_mut(column_key) {
+            session_map.clear();
+        }
+        println!("[Capture] Cleared buffers for column {:?}", column_key);
+    }
+
     pub fn clear_stream_by_key(&self, any_key_in_stream: &DataColumnId) {
         let stream_key = any_key_in_stream.stream_key();
 
@@ -434,9 +445,7 @@ impl CaptureState {
             .collect();
 
         for col_key in keys_in_stream {
-            if let Some(session_map) = self.inner.buffers.get_mut(&col_key) {
-                session_map.clear();
-            }
+            self.clear_column_by_key(&col_key);
         }
 
         if let Some(mut st) = self.inner.streams.get_mut(&stream_key) {
@@ -447,6 +456,22 @@ impl CaptureState {
         // TODO If paused snapshots can pin old axes, drop them here.
         // self.inner.paused_snapshots.retain(|_plot_id, _| /* keep or drop */ true);
         println!("[Capture] Cleared all buffers for stream {:?}", stream_key);
+    }
+
+    pub fn clear_device_by_key(&self, any_key_on_device: &DataColumnId) {
+        let device_key = any_key_on_device.device_key();
+
+        let keys_in_device: Vec<DataColumnId> = self.inner
+            .buffers
+            .iter()
+            .filter(|e| e.key().device_key() == device_key)
+            .map(|e| e.key().clone())
+            .collect();
+
+        for sk in keys_in_device {
+            self.clear_stream_by_key(&sk);
+        }
+        println!("[Capture] Cleared all streams for device {:?}", device_key);
     }
 
     fn _get_or_compute_offsets_for_stream(

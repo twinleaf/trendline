@@ -57,14 +57,6 @@ impl ProxyRegister {
 
     pub fn ensure(&self, url: String) {
         if url.starts_with("serial://") && !self.is_selected(&url) {
-            if let Some(pm_ref) = self.ports.get(&url) {
-                let pm = pm_ref.value().clone();
-                let state = pm.state.lock().unwrap().clone();
-                if !matches!(state, PortState::Disconnected) {
-                    println!("[Registry] Shutting down unselected port '{}'.", url);
-                    pm.shutdown();
-                }
-            }
             return;
         }
         let capture_tx = self.capture.inner.command_tx.clone();

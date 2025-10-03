@@ -63,28 +63,36 @@ impl Pipeline for PassthroughPipeline {
     }
 
     fn process_command(&mut self, cmd: PipelineCommand, capture_state: &CaptureState) {
-        if let PipelineCommand::Hydrate = cmd {
-            if let Some(sr) = capture_state.get_effective_sampling_rate(&self.source_key) {
-                self.sample_rate = Some(sr);
-                self.capacity = ((sr * self.window_seconds).ceil() as usize).max(2);
-                self.buffer.lock().unwrap().reserve(self.capacity);
+        match cmd {
+            PipelineCommand::ResetSelf => {
+                println!("[Passthrough Pipeline {:?}] Received ResetSelf command", self.id);
+                self.buffer.lock().unwrap().clear();
             }
-            let Some(latest_time) =
-                capture_state.get_latest_unified_timestamp(&[self.source_key.clone()])
-            else {
-                return;
-            };
-            let start_time = latest_time - self.window_seconds;
-            let raw_data_vecs = capture_state.get_data_across_sessions_for_keys(
-                &[self.source_key.clone()],
-                start_time,
-                latest_time,
-            );
-            if let Some(points) = raw_data_vecs.get(0) {
-                let mut buffer = self.buffer.lock().unwrap();
-                buffer.clear();
-                buffer.extend(points);
+            PipelineCommand::Hydrate => {
+                println!("[Passthrough Pipeline {:?}] Received Hydrate command.", self.id);
+                if let Some(sr) = capture_state.get_effective_sampling_rate(&self.source_key) {
+                    self.sample_rate = Some(sr);
+                    self.capacity = ((sr * self.window_seconds).ceil() as usize).max(2);
+                    self.buffer.lock().unwrap().reserve(self.capacity);
+                }
+                let Some(latest_time) =
+                    capture_state.get_latest_unified_timestamp(&[self.source_key.clone()])
+                else {
+                    return;
+                };
+                let start_time = latest_time - self.window_seconds;
+                let raw_data_vecs = capture_state.get_data_across_sessions_for_keys(
+                    &[self.source_key.clone()],
+                    start_time,
+                    latest_time,
+                );
+                if let Some(points) = raw_data_vecs.get(0) {
+                    let mut buffer = self.buffer.lock().unwrap();
+                    buffer.clear();
+                    buffer.extend(points);
+                }
             }
+            _ => {}
         }
     }
 }

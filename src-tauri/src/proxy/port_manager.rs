@@ -124,7 +124,6 @@ impl PortManager {
                                 *self_.connection_retries.lock().unwrap() = 0;
 
                                 println!("[{}] Connection established.", self_.url);
-                                self_.set_state(PortState::Discovery);
 
                                 if let Some(proxy_if) = self_.proxy.lock().unwrap().clone() {
                                     if self_.discover_devices(&proxy_if).is_ok() {
@@ -493,6 +492,7 @@ impl PortManager {
         self.app
             .emit("port-state-changed", (self.url.clone(), new_state.clone()))
             .unwrap();
+        println!("[{}] Emit new port state {:?}", self.url, new_state);
 
         if let Some(window) = self.app.get_webview_window("main") {
             if let Some(menu) = window.menu() {
@@ -541,7 +541,12 @@ impl PortManager {
         let mut refresh_needed = HashSet::new();
         let mut reinit_needed = HashSet::new();
 
-        let mut batched: HashMap<(DataColumnId, SessionId), Vec<Point>> = HashMap::new();
+        struct BatchedEntry {
+            points: Vec<Point>,
+            sample_numbers: Vec<u32>,
+        }
+
+        let mut batched: HashMap<(DataColumnId, SessionId), BatchedEntry> = HashMap::new();
 
         {
             let devices_map = self.devices.read().unwrap();
@@ -555,6 +560,7 @@ impl PortManager {
                     Ok(samples) => {
                         for sample in samples {
                             let sid = sample.device.session_id;
+                            let sample_number = sample.n;
 
                             for col in &sample.columns {
                                 let val = match col.value {
@@ -571,13 +577,18 @@ impl PortManager {
                                     column_index: col.desc.index,
                                 };
 
-                                batched
+                                let e = batched
                                     .entry((key, sid))
-                                    .or_insert_with(Vec::new)
-                                    .push(Point {
-                                        x: sample.timestamp_end(),
-                                        y: val,
+                                    .or_insert_with(|| BatchedEntry {
+                                        points: Vec::new(),
+                                        sample_numbers: Vec::new(),
                                     });
+
+                                e.points.push(Point {
+                                    x: sample.timestamp_end(),
+                                    y: val,
+                                });
+                                e.sample_numbers.push(sample_number);
                             }
 
                             if sample.meta_changed || sample.segment_changed {
@@ -596,11 +607,12 @@ impl PortManager {
             }
         }
 
-        for ((key, sid), points) in batched {
-            let len = points.len();
+        for ((key, sid), entry) in batched {
+            let len = entry.points.len();
             match self.capture_tx.try_send(CaptureCommand::InsertBatch {
                 key,
-                points,
+                points: entry.points,
+                sample_numbers: entry.sample_numbers,
                 session_id: sid,
                 instant: poll_instant,
             }) {

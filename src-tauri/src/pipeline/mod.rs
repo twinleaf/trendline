@@ -1,4 +1,4 @@
-use crate::shared::{PipelineId, PlotData, StreamStatistics};
+use crate::shared::{PipelineId, PlotData, ColumnStatistics};
 use crate::state::capture::{BatchedData, CaptureState};
 use crossbeam::channel::Sender;
 use std::sync::Arc;
@@ -8,6 +8,7 @@ pub enum PipelineCommand {
     Hydrate,
     AddSubscriber(Sender<(PlotData, f64)>),
     Shutdown,
+    ResetSelf,
 }
 
 /// The core trait for a processing stage.
@@ -21,9 +22,9 @@ pub trait Pipeline: Send + Sync {
 
 pub trait StatisticsProvider: Send + Sync {
     fn id(&self) -> PipelineId;
-    fn get_output(&mut self, capture_state: &CaptureState) -> StreamStatistics;
+    fn get_output(&mut self, capture_state: &CaptureState) -> ColumnStatistics;
     fn process_batch(&mut self, batch: Arc<BatchedData>);
-    fn reset(&mut self, capture_state: &CaptureState);
+    fn reset(&mut self);
 }
 pub mod decimation;
 pub mod detrend;

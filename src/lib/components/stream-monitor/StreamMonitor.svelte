@@ -220,7 +220,7 @@
 				<AlertDialog.Header>
 					<AlertDialog.Title>Are you absolutely sure?</AlertDialog.Title>
 					<AlertDialog.Description>
-						This action will permanently wipe the persistent statistics for all streams. This cannot
+						This action will permanently wipe the statistics AND data for all streams. This cannot
 						be undone.
 					</AlertDialog.Description>
 				</AlertDialog.Header>

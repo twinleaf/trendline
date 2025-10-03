@@ -58,7 +58,10 @@ fn main() {
             commands::pipeline::destroy_processor,
             commands::pipeline::listen_to_plot_data,
             commands::pipeline::listen_to_statistics,
-            commands::pipeline::reset_statistics_provider,
+            commands::pipeline::reset_by_pipeline_id,
+            commands::pipeline::reset_by_column,
+            commands::pipeline::reset_by_stream,
+            commands::pipeline::reset_by_device,
             // --- Pipeline Management Commands ---
             commands::settings::get_all_devices,
             commands::settings::get_port_state,

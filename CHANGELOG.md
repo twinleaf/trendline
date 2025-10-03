@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Close button for `DeviceSelectorDialog.svelte`
 - Fontsource npm module for bundling fonts in app distribution
 - Drop `PortManager`s for non-selected URLs
+- Added ability to clear individual columns and all columns via stream monitor
+- Added NaN count and skipped sample number to `StreamMonitor` (toggle button to go to `HealthSet`)
+- Added Linux ARM build
+- Make `port_manager` send sample numbers alongside data to `CaptureState`
 
 ### Changed
 - Revert discovery port from `tree_probe()` to `tree_full()`
@@ -24,6 +28,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Change `detrend.rs` to push partial windows (to have periodogram plot even when there are not enough samples to populate full window)
 - Make `StreamMonitor` use channel descriptions as names by default (toggle inside settings pop over)
 - Make default plot title from `StreamMonitor` use channel descriptions
+- Make confirm button focus on valid state (not disabled)
+- Clearing all stream monitors also clears all `CaptureState` buffers
+- Changed `StreamMonitor` window from 2 seconds to 1 second
+- Rename from `StreamStatistics` to `ColumnStatistics`
+- Separate into `StatisticSet` into `HealthSet` and `StatisticSet`
 
 ### Fixed
 - Fix `detrend.rs` to `Hydrate` exact number of samples (previously subsequent power of two)

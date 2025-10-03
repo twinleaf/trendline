@@ -16,6 +16,7 @@
 
 	// We need this state variable to control the manual connect dialog
 	let manualConnectDialogOpen = $state(false);
+	let confirmButton: HTMLButtonElement | null = $state(null);
 
 	let isConfirmDisabled = $derived.by(() => {
 		if (deviceState.deviceTree.length === 0) {
@@ -25,7 +26,11 @@
 		if (!portInfo) {
 			return true;
 		}
-		return portInfo.state !== 'Streaming';
+		if (portInfo.state == 'Streaming') {
+			confirmButton?.focus();
+			return false;
+		}
+		return true
 	});
 
 	$effect(() => {
@@ -116,7 +121,7 @@
 					<PlusIcon class="size-4" />
 				</Button>
 
-				<AlertDialog.Action type="submit" form="device-select-form" disabled={isConfirmDisabled}>
+				<AlertDialog.Action type="submit" form="device-select-form" disabled={isConfirmDisabled} bind:ref={confirmButton}>
 					Confirm
 				</AlertDialog.Action>
 			</div>

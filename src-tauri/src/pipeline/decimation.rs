@@ -148,6 +148,17 @@ impl Pipeline for StreamingFpcsPipeline {
 
     fn process_command(&mut self, cmd: PipelineCommand, capture_state: &CaptureState) {
         match cmd {
+            PipelineCommand::ResetSelf => {
+                println!("[FPCS Pipeline {:?}] Received ResetSelf command", self.id);
+                self.output.lock().unwrap().clear();
+                self.capacity = self.capacity;
+                self.counter = 0;
+                self.potential_point = None;
+                self.last_retained_flag = FpcsLastRetained::None;
+                self.window_max_point = None;
+                self.window_min_point = None;
+                self.last_processed_time = 0.0;
+            }
             PipelineCommand::Hydrate => {
                 println!("[FPCS Pipeline {:?}] Received Hydrate command.", self.id);
                 if self.capacity == 0 && self.window_seconds > 0.0 {
