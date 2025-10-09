@@ -27,11 +27,13 @@ class DeviceState {
     listen<[string, PortState]>(
       "port-state-changed",
       ({ payload: [url, newState] }) => {
-          console.log(
-          `[DeviceState] Received state of ${newState} devices for port ${url}`,
+        console.log(
+          `[DeviceState] Received state of ${newState} devices for port ${url} with selection ${this.selection?.portUrl}`,
         );
         this.#setPortState(url, newState);
-        if (newState === "Streaming") this.#setDefaultChildrenForPort(url);
+        console.log(
+          `[DeviceState] Set state of ${newState} devices for port ${url} with selection ${this.selection?.portUrl}`,
+        );
       },
     );
 
@@ -60,6 +62,20 @@ class DeviceState {
     listen<string>('device-removed', ({ payload: url }) => {
       this.#removePort(url);
     });
+
+    listen<{ portUrl: string; childrenRoutes: string[] }>(
+      "device-reconnected",
+      ({ payload: { portUrl, childrenRoutes } }) => {
+        const set = new Set(childrenRoutes);
+        deviceState.childrenSelections.set(portUrl, set);
+
+        if (!deviceState.selection || deviceState.selection.portUrl === portUrl) {
+          deviceState.selection = { portUrl, childrenRoutes: Array.from(set) };
+        }
+
+        this.#reconcileChildrenSelection?.(portUrl);
+      },
+    );
 
     listen<UiDevice>(
       "device-metadata-updated",
@@ -134,17 +150,18 @@ class DeviceState {
 
 
     if (state === "Streaming") this.#setDefaultChildrenForPort(url);
-    if (state === "Disconnected") {
-        this.childrenSelections.delete(url);
-        if (this.selection?.portUrl === url) this.selection = null;
-    }
   }
 
   #setDefaultChildrenForPort(url: string) {
-    if (this.childrenSelections.has(url)) return;
+    if (this.childrenSelections.has(url)) {
+      console.log(`[DeviceState] Already has childrenSelection ${url} inside setDefaultChildrenForPort`)
+      return;
+    }
     const portData = this.#devicesMap.get(url);
-    if (!portData || portData.devices.length === 0) return;
-
+    if (!portData || portData.devices.length === 0) {
+      console.log(`[DeviceState] Found no portData or devices inside setDefaultChildrenForPort`)
+      return;
+    }
     const allChildrenRoutes = new Set(
       portData.devices.filter(d => !isRootRoute(d.route)).map(d => d.route),
     );
@@ -153,13 +170,16 @@ class DeviceState {
 
     if (!this.selection) {
       this.selection = { portUrl: url, childrenRoutes: Array.from(allChildrenRoutes) };
+      console.log(`[DeviceState] Set ${this.selection?.portUrl} inside setDefaultChildrenForPort`)
     }
   }
 
   #reconcileChildrenSelection(url: string) {
     const portData = this.#devicesMap.get(url);
-    if (!portData) return;
-
+    if (!portData) {
+      console.log(`[DeviceState] Found no portData reconcileChildrenSelection`)
+      return;
+    }
     const allChildrenRoutes = portData.devices
       .filter((d) => !isRootRoute(d.route))
       .map((d) => d.route);
@@ -168,11 +188,13 @@ class DeviceState {
     if (!set) {
       set = new Set(allChildrenRoutes);
       this.childrenSelections.set(url, set);
+      console.log(`[DeviceState] Set childrenSelections with set of ${this.selection?.portUrl} inside reconcileChildrenSelection`)
     } else {
       for (const r of allChildrenRoutes) if (!set.has(r)) set.add(r);
       for (const r of Array.from(set))
         if (!allChildrenRoutes.includes(r)) set.delete(r);
       this.childrenSelections.set(url, set);
+      console.log(`[DeviceState] Set childrenSelections of ${this.selection?.portUrl} inside reconcileChildrenSelection`)
     }
 
     if (this.selection?.portUrl === url) {
@@ -180,6 +202,7 @@ class DeviceState {
       for (const r of Array.from(cur)) if (!set!.has(r)) cur.delete(r);
       for (const r of set!) if (!cur.has(r)) cur.add(r);
       this.selection = { portUrl: url, childrenRoutes: Array.from(cur) };
+      console.log(`[DeviceState] Set ${this.selection?.portUrl} inside reconcileChildrenSelection`)
     }
   }
 

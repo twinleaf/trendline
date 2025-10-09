@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Added
 - Publish time aligned data and session ID to pipelines
 - Add explicit `Idle` if-branch to `StatusFooter` and no selection state
+- Add `device-reconnected` emit event from `PortManager` for `DeviceState`
 
 ### Changed
 - Stop clearing device selection on any state change (only when `PortState` becomes `Disconnected`)

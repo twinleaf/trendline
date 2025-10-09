@@ -140,6 +140,24 @@ impl PortManager {
                                             if let Err(e) = capture_state.inner.command_tx.send(command) {
                                                 eprintln!("[{}] Failed to send SetActiveColumns command: {}", self_.url, e);
                                             }
+
+                                            let mut child_routes: Vec<String> = keys
+                                                .value()
+                                                .iter()
+                                                .map(|k| k.device_route.to_string())
+                                                .filter(|r| !r.is_empty())
+                                                .collect();
+                                            child_routes.sort();
+                                            child_routes.dedup();
+
+                                            let payload = serde_json::json!({
+                                                "portUrl": self_.url,
+                                                "childrenRoutes": child_routes,
+                                            });
+
+                                            if let Err(e) = self_.app.emit("device-reconnected", payload) {
+                                                eprintln!("[{}] Failed to emit device-reconnected: {}", self_.url, e);
+                                            }
                                         }
                                         self_.set_state(PortState::Streaming);
                                     } else {

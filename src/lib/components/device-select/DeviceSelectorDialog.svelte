@@ -60,6 +60,7 @@
 		};
 
 		deviceState.selection = payload;
+		console.log(`[DeviceSelectorDialog] Made selection for ${selectedParent} with length ${Array.from(selectedChildren).length}`)
 		invoke('confirm_selection', payload);
 		uiState.close();
 		manualConnectDialogOpen = false;
