@@ -1,6 +1,6 @@
 use super::{Pipeline, PipelineCommand};
 use crate::shared::{DataColumnId, PipelineId, PlotData, Point};
-use crate::state::capture::CaptureState;
+use crate::state::capture::{CaptureState, SessionId};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -27,6 +27,8 @@ pub struct StreamingFpcsPipeline {
     last_retained_flag: FpcsLastRetained,
     window_max_point: Option<Point>,
     window_min_point: Option<Point>,
+    last_session_id: Option<SessionId>,
+    last_sample_number: Option<u32>,
 }
 
 impl StreamingFpcsPipeline {
@@ -34,7 +36,7 @@ impl StreamingFpcsPipeline {
         Self {
             id: PipelineId(Uuid::new_v4()),
             source_key,
-            last_processed_time: 0.0,
+            last_processed_time: f64::NEG_INFINITY,
             ratio,
             window_seconds,
             output: Arc::new(Mutex::new(VecDeque::new())),
@@ -44,7 +46,20 @@ impl StreamingFpcsPipeline {
             last_retained_flag: FpcsLastRetained::None,
             window_max_point: None,
             window_min_point: None,
+            last_session_id: None,
+            last_sample_number: None,
         }
+    }
+
+    #[inline]
+    fn reset_internal(&mut self) {
+        self.output.lock().unwrap().clear();
+        self.counter = 0;
+        self.potential_point = None;
+        self.last_retained_flag = FpcsLastRetained::None;
+        self.window_max_point = None;
+        self.window_min_point = None;
+        self.last_processed_time = 0.0;
     }
 
     /// The core stateful algorithm, now private to the pipeline.
@@ -136,29 +151,43 @@ impl Pipeline for StreamingFpcsPipeline {
     }
 
     fn process_batch(&mut self, batch: Arc<crate::state::capture::BatchedData>) {
-        // Ignore batches that have already been processed during hydration.
-        if batch.t_max <= self.last_processed_time {
-            return;
+        // Reset if the session changed.
+        let mut need_reset = self
+            .last_session_id
+            .map_or(false, |sid| sid != batch.session_id);
+
+        // Reset if sample numbers went backwards (wrap/reset).
+        if !need_reset {
+            if let (Some(prev_sn), Some(first_sn)) =
+                (self.last_sample_number, batch.sample_numbers.first().copied())
+            {
+                if first_sn <= prev_sn {
+                    need_reset = true;
+                }
+            }
         }
+
+        // Reset if (for any reason) time went backwards.
+        if !need_reset && batch.t_max <= self.last_processed_time {
+            need_reset = true;
+        }
+
+        if need_reset {
+            self.reset_internal();
+        }
+
         for point in batch.points.iter() {
             self.process_point(*point);
         }
+
         self.last_processed_time = batch.t_max;
+        self.last_session_id = Some(batch.session_id);
+        self.last_sample_number = batch.sample_numbers.last().copied();
     }
 
     fn process_command(&mut self, cmd: PipelineCommand, capture_state: &CaptureState) {
         match cmd {
-            PipelineCommand::ResetSelf => {
-                println!("[FPCS Pipeline {:?}] Received ResetSelf command", self.id);
-                self.output.lock().unwrap().clear();
-                self.capacity = self.capacity;
-                self.counter = 0;
-                self.potential_point = None;
-                self.last_retained_flag = FpcsLastRetained::None;
-                self.window_max_point = None;
-                self.window_min_point = None;
-                self.last_processed_time = 0.0;
-            }
+            PipelineCommand::ResetSelf => self.reset_internal(),
             PipelineCommand::Hydrate => {
                 println!("[FPCS Pipeline {:?}] Received Hydrate command.", self.id);
                 if self.capacity == 0 && self.window_seconds > 0.0 {

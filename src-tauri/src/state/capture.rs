@@ -293,60 +293,83 @@ impl CaptureState {
                     }
 
                     let stream_key = key.stream_key();
-                    let stream_state = inner.streams.entry(stream_key).or_default();
+                    {
+                        let stream_state = inner.streams.entry(stream_key.clone()).or_default();
 
-                    match stream_state.session_meta.entry(session_id) {
-                        Entry::Occupied(mut e) => {
-                            let meta = e.get_mut();
-                            meta.last_instant = instant;
-                            meta.last_device_time =
-                                points.last().map(|p| p.x).unwrap_or(meta.last_device_time);
-                        }
-                        Entry::Vacant(e) => {
-                            *stream_state.offsets_cache.lock().unwrap() = None;
-                            let first_x = points.first().map(|p| p.x).unwrap_or_default();
-                            let last_x = points.last().map(|p| p.x).unwrap_or(first_x);
-                            e.insert(SessionMeta {
-                                first_instant: instant,
-                                last_instant: instant,
-                                first_device_time: first_x,
-                                last_device_time: last_x,
-                            });
-                        }
+                        match stream_state.session_meta.entry(session_id) {
+                            Entry::Occupied(mut e) => {
+                                let meta = e.get_mut();
+                                meta.last_instant = instant;
+                                meta.last_device_time =
+                                    points.last().map(|p| p.x).unwrap_or(meta.last_device_time);
+                            }
+                            Entry::Vacant(e) => {
+                                *stream_state.offsets_cache.lock().unwrap() = None;
+                                let first_x = points.first().map(|p| p.x).unwrap_or_default();
+                                let last_x = points.last().map(|p| p.x).unwrap_or(first_x);
+                                e.insert(SessionMeta {
+                                    first_instant: instant,
+                                    last_instant: instant,
+                                    first_device_time: first_x,
+                                    last_device_time: last_x,
+                                });
+                            }
+                        };
+                   }
+
+                    {
+                        let session_map = inner.buffers.entry(key.clone()).or_default();
+                        let rate = inner
+                            .streams
+                            .get(&stream_key)
+                            .map(|st| st.effective_sampling_rate)
+                            .unwrap_or(Self::DEFAULT_SAMPLING_RATE)
+                            .max(Self::DEFAULT_SAMPLING_RATE);
+
+                        let cap = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
+                        if let Some(mut buf_ref) = session_map.get_mut(&session_id) {
+                            buf_ref.value_mut().set_capacity(cap);
+                            buf_ref.value_mut().push_many(&points);
+                        } else {
+                            let buf = Buffer::new(cap);
+                            buf.push_many(&points);
+                            session_map.insert(session_id, buf);
+                        };
                     }
 
-                    let session_map = inner.buffers.entry(key.clone()).or_default();
-                    let rate =
-                        stream_state.effective_sampling_rate.max(Self::DEFAULT_SAMPLING_RATE);
-                    let cap = ((rate * Self::BUFFER_WINDOW_SECONDS) as usize).max(100);
+                    let offset = self_instance
+                        ._get_or_compute_offsets_for_stream(&stream_key)
+                        .and_then(|m| m.get(&session_id).copied())
+                        .unwrap_or(0.0);
 
-                    if let Some(mut buf_ref) = session_map.get_mut(&session_id) {
-                        buf_ref.value_mut().set_capacity(cap);
-                        buf_ref.value_mut().push_many(&points);
-                    } else {
-                        let buf = Buffer::new(cap);
-                        buf.push_many(&points);
-                        session_map.insert(session_id, buf);
+                    let subscribers: Vec<Sender<Arc<BatchedData>>> = inner
+                        .subscribers
+                        .get(&key)
+                        .map(|v| v.iter().map(|(_id, tx)| tx.clone()).collect())
+                        .unwrap_or_default();
+
+                    if subscribers.is_empty() {
+                        continue;
                     }
 
-                    if let Some(subscribers) = inner.subscribers.get(&key) {
-                        if subscribers.is_empty() {
-                            continue;
-                        }
-                        let t_min = points.first().map(|p| p.x).unwrap_or(0.0);
-                        let t_max = points.last().map(|p| p.x).unwrap_or(0.0);
-                        let batch = Arc::new(BatchedData {
-                            key: key.clone(),
-                            session_id,
-                            points: Arc::new(points),
-                            sample_numbers: Arc::new(sample_numbers),
-                            t_min,
-                            t_max,
-                        });
-                        // Fan out the batch to all subscribers for this key.
-                        for (_, tx) in subscribers.iter() {
-                            let _ = tx.try_send(batch.clone());
-                        }
+                    let mut unified_points = Vec::with_capacity(points.len());
+                    for p in &points {
+                        unified_points.push(Point { x: p.x + offset, y: p.y });
+                    }
+                    let t_min = unified_points.first().map(|p| p.x).unwrap_or(0.0);
+                    let t_max = unified_points.last().map(|p| p.x).unwrap_or(0.0);
+
+                    let batch = Arc::new(BatchedData {
+                        key: key.clone(),
+                        session_id,
+                        points: Arc::new(unified_points),
+                        sample_numbers: Arc::new(sample_numbers),
+                        t_min,
+                        t_max,
+                    });
+
+                    for tx in subscribers {
+                        let _ = tx.try_send(batch.clone());
                     }
                 }
                 CaptureCommand::UpdateSampleRate { key, rate } => {
