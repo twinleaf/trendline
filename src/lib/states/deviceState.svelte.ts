@@ -27,6 +27,9 @@ class DeviceState {
     listen<[string, PortState]>(
       "port-state-changed",
       ({ payload: [url, newState] }) => {
+          console.log(
+          `[DeviceState] Received state of ${newState} devices for port ${url}`,
+        );
         this.#setPortState(url, newState);
         if (newState === "Streaming") this.#setDefaultChildrenForPort(url);
       },
@@ -55,8 +58,8 @@ class DeviceState {
     );
 
     listen<string>('device-removed', ({ payload: url }) => {
-		this.#removePort(url);
-	});
+      this.#removePort(url);
+    });
 
     listen<UiDevice>(
       "device-metadata-updated",
@@ -126,33 +129,30 @@ class DeviceState {
 
   #setPortState(url: string, state: PortState) {
     const entry = this.#devicesMap.get(url) ?? { state, devices: [] };
-    const wasStreaming = entry.state === "Streaming";
-    const updatedEntry = { ...entry, state };
-    this.#devicesMap.set(url, updatedEntry);
+    const prev = entry.state;
+    this.#devicesMap.set(url, { ...entry, state });
+
 
     if (state === "Streaming") this.#setDefaultChildrenForPort(url);
-    if (wasStreaming && state !== "Streaming") {
-      // Clear selections anchored to a now non-streaming port
-      this.childrenSelections.delete(url);
-      if (this.selection?.portUrl === url) this.selection = null;
+    if (state === "Disconnected") {
+        this.childrenSelections.delete(url);
+        if (this.selection?.portUrl === url) this.selection = null;
     }
   }
 
   #setDefaultChildrenForPort(url: string) {
     if (this.childrenSelections.has(url)) return;
-
     const portData = this.#devicesMap.get(url);
     if (!portData || portData.devices.length === 0) return;
 
-    const parent = portData.devices.find((d) => isRootRoute(d.route));
-    if (parent) {
-      const allChildrenRoutes = new Set(
-        portData.devices
-          .filter((d) => !isRootRoute(d.route))
-          .map((d) => d.route),
-      );
-      this.childrenSelections.set(url, allChildrenRoutes);
-      this.#reconcileChildrenSelection(url);
+    const allChildrenRoutes = new Set(
+      portData.devices.filter(d => !isRootRoute(d.route)).map(d => d.route),
+    );
+    this.childrenSelections.set(url, allChildrenRoutes);
+    this.#reconcileChildrenSelection(url);
+
+    if (!this.selection) {
+      this.selection = { portUrl: url, childrenRoutes: Array.from(allChildrenRoutes) };
     }
   }
 

@@ -69,11 +69,15 @@
 				<CircleX class="size-3.5" />
 				Error
 			</Badge>
-
-		{:else}
+		{:else if deviceState.selectedPortState === 'Idle'}
    			<Badge variant="default" class="gap-1.5 bg-gray-400 text-gray-900 hover:bg-gray-400/80">
 				<CircleCheck class="size-3.5" />
 				Idle
+			</Badge>
+		{:else}
+   			<Badge variant="default" class="gap-1.5 bg-gray-400 text-gray-900 hover:bg-gray-400/80">
+				<CircleCheck class="size-3.5" />
+				No selection
 			</Badge>
 		{/if}
 	</div>
