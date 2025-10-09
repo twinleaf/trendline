@@ -185,13 +185,15 @@
 		<div class="flex w-full min-w-0 items-center gap-2">
 			<div bind:this={inputContainerEl} class="flex-1">
 				<Input
-					type={
-						rpc.arg_type.includes('f') || rpc.arg_type.includes('i') || rpc.arg_type.includes('u')
-							? 'number'
-							: 'text'
-					}
+					type={rpc.arg_type.includes('f') || rpc.arg_type.includes('i') || rpc.arg_type.includes('u') ? 'number' : 'text'}
 					class="h-8 w-full bg-transparent font-mono text-xs"
-					placeholder={`${JSON.stringify(rpc.value) ?? 'N/A'}`}
+					placeholder={
+						rpc.value == null
+						? 'N/A'
+						: typeof rpc.value === 'string' || typeof rpc.value === 'number' || typeof rpc.value === 'boolean'
+							? String(rpc.value)
+							: '[object]'
+					}
 					bind:value={inputValue}
 					onkeydown={handleKeyDown}
 					oninput={() => (rpcError = null)}
