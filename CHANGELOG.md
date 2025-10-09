@@ -4,13 +4,21 @@ All notable changes to this project will be documented in this file.
  
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
- 
 
-## [1.0.1] - 2025-09-10
+ ## [1.0.2] - 2025-10-09
   
  
 ### Added
+- Publish time aligned data and session ID to pipelines
+- Add explicit `Idle` if-branch to `StatusFooter` and no selection state
 
+### Changed
+- Stop clearing device selection on any state change (only when `PortState` becomes `Disconnected`)
+
+## [1.0.1] - 2025-10-05
+  
+ 
+### Added
 - Ability to manually refresh devices from `DeviceSelectorDialog.svelte`
 - Close button for `DeviceSelectorDialog.svelte`
 - Fontsource npm module for bundling fonts in app distribution

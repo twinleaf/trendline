@@ -1,6 +1,6 @@
 [package]
 name = "trendline"
-version = "1.0.0"
+version = "1.0.2"
 description = "A Twinleaf software oscilloscope"
 authors = ["Steven Nguyen <nguyen@twinleaf.com>"]
 edition = "2021"
