@@ -1,4 +1,4 @@
-use crate::shared::{PipelineId, PlotData, ColumnStatistics};
+use crate::shared::{ColumnStatistics, PipelineId, PlotData};
 use crate::state::capture::{BatchedData, CaptureState};
 use crossbeam::channel::Sender;
 use std::sync::Arc;

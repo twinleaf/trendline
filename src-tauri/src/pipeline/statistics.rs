@@ -18,7 +18,9 @@ struct ValueAccumulator {
 
 impl ValueAccumulator {
     fn update(&mut self, v: f64) {
-        if !v.is_finite() { return; }
+        if !v.is_finite() {
+            return;
+        }
         if self.count == 0 {
             self.count = 1;
             self.mean = v;
@@ -34,8 +36,12 @@ impl ValueAccumulator {
         let d2 = v - self.mean;
         self.m2 += d * d2;
         self.sum_of_squares += v * v;
-        if v < self.min { self.min = v; }
-        if v > self.max { self.max = v; }
+        if v < self.min {
+            self.min = v;
+        }
+        if v > self.max {
+            self.max = v;
+        }
     }
     fn to_stat(&self) -> StatisticSet {
         if self.count == 0 {
@@ -43,7 +49,9 @@ impl ValueAccumulator {
         }
         let stdev = if self.count > 1 {
             (self.m2 / (self.count - 1) as f64).sqrt()
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         let rms = (self.sum_of_squares / self.count as f64).sqrt();
         StatisticSet {
             count: self.count,
@@ -54,7 +62,9 @@ impl ValueAccumulator {
             rms,
         }
     }
-    fn reset(&mut self) { *self = Self::default(); }
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -82,8 +92,12 @@ impl HealthAccumulator {
                         self.gap_min = gap;
                         self.gap_max = gap;
                     } else {
-                        if gap < self.gap_min { self.gap_min = gap; }
-                        if gap > self.gap_max { self.gap_max = gap; }
+                        if gap < self.gap_min {
+                            self.gap_min = gap;
+                        }
+                        if gap > self.gap_max {
+                            self.gap_max = gap;
+                        }
                     }
                 }
             }
@@ -95,7 +109,11 @@ impl HealthAccumulator {
         let (gap_mean, gap_min, gap_max) = if self.gap_count == 0 {
             (0.0, 0.0, 0.0)
         } else {
-            (self.gap_sum / self.gap_count as f64, self.gap_min, self.gap_max)
+            (
+                self.gap_sum / self.gap_count as f64,
+                self.gap_min,
+                self.gap_max,
+            )
         };
         HealthSet {
             gap_count: self.gap_count,
@@ -105,7 +123,9 @@ impl HealthAccumulator {
             gap_max,
         }
     }
-    fn reset(&mut self) { *self = Self::default(); }
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 
 pub struct StreamingStatisticsProvider {
@@ -168,13 +188,16 @@ impl StreamingStatisticsProvider {
         self.scratch_points.clear();
         self.scratch_samples.clear();
         self.scratch_points.extend(self.buf_points.iter().copied());
-        self.scratch_samples.extend(self.buf_samples.iter().copied());
+        self.scratch_samples
+            .extend(self.buf_samples.iter().copied());
         calculate_health_stats(&self.scratch_samples, &self.scratch_points)
     }
 }
 
 impl StatisticsProvider for StreamingStatisticsProvider {
-    fn id(&self) -> PipelineId { self.id }
+    fn id(&self) -> PipelineId {
+        self.id
+    }
 
     fn get_output(&mut self, _capture_state: &CaptureState) -> ColumnStatistics {
         self.output.lock().unwrap().clone()
@@ -185,7 +208,10 @@ impl StatisticsProvider for StreamingStatisticsProvider {
             return;
         }
 
-        if self.last_session_id.map_or(false, |sid| sid != batch.session_id) {
+        if self
+            .last_session_id
+            .map_or(false, |sid| sid != batch.session_id)
+        {
             self.buf_points.clear();
             self.buf_samples.clear();
             self.last_sample_number = None;
@@ -193,7 +219,8 @@ impl StatisticsProvider for StreamingStatisticsProvider {
         self.last_session_id = Some(batch.session_id);
 
         debug_assert_eq!(
-            batch.points.len(), batch.sample_numbers.len(),
+            batch.points.len(),
+            batch.sample_numbers.len(),
             "points and sample_numbers must be same length"
         );
 
@@ -206,7 +233,9 @@ impl StatisticsProvider for StreamingStatisticsProvider {
             self.buf_samples.push_back(sn);
 
             self.persistent_values.update(p.y);
-            self.last_sample_number = self.persistent_health.update(self.last_sample_number, sn, p.y);
+            self.last_sample_number =
+                self.persistent_health
+                    .update(self.last_sample_number, sn, p.y);
         }
 
         if let Some(last) = self.buf_points.back().copied() {

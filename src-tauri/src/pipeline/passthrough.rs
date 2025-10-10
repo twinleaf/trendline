@@ -65,11 +65,17 @@ impl Pipeline for PassthroughPipeline {
     fn process_command(&mut self, cmd: PipelineCommand, capture_state: &CaptureState) {
         match cmd {
             PipelineCommand::ResetSelf => {
-                println!("[Passthrough Pipeline {:?}] Received ResetSelf command", self.id);
+                println!(
+                    "[Passthrough Pipeline {:?}] Received ResetSelf command",
+                    self.id
+                );
                 self.buffer.lock().unwrap().clear();
             }
             PipelineCommand::Hydrate => {
-                println!("[Passthrough Pipeline {:?}] Received Hydrate command.", self.id);
+                println!(
+                    "[Passthrough Pipeline {:?}] Received Hydrate command.",
+                    self.id
+                );
                 if let Some(sr) = capture_state.get_effective_sampling_rate(&self.source_key) {
                     self.sample_rate = Some(sr);
                     self.capacity = ((sr * self.window_seconds).ceil() as usize).max(2);

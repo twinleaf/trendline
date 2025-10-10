@@ -278,7 +278,9 @@ pub fn calculate_value_stats(points: &[Point]) -> StatisticSet {
 
     for p in points {
         let y = p.y;
-        if !y.is_finite() { continue; }
+        if !y.is_finite() {
+            continue;
+        }
 
         count += 1;
         let delta = y - mean;
@@ -288,8 +290,12 @@ pub fn calculate_value_stats(points: &[Point]) -> StatisticSet {
 
         sum_sq += y * y;
 
-        if y < min { min = y; }
-        if y > max { max = y; }
+        if y < min {
+            min = y;
+        }
+        if y > max {
+            max = y;
+        }
     }
 
     if count == 0 {
@@ -298,7 +304,9 @@ pub fn calculate_value_stats(points: &[Point]) -> StatisticSet {
 
     let stdev = if count > 1 {
         (m2 / (count - 1) as f64).sqrt()
-    } else { 0.0 };
+    } else {
+        0.0
+    };
     let rms = (sum_sq / count as f64).sqrt();
 
     StatisticSet {
@@ -340,8 +348,12 @@ pub fn calculate_health_stats(sample_numbers: &[u32], points: &[Point]) -> Healt
                 let gap = (d - 1) as f64;
                 gap_count += 1;
                 gap_sum += gap;
-                if gap < gap_min { gap_min = gap; }
-                if gap > gap_max { gap_max = gap; }
+                if gap < gap_min {
+                    gap_min = gap;
+                }
+                if gap > gap_max {
+                    gap_max = gap;
+                }
             }
         }
     }

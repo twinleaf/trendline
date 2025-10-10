@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::{
     pipeline::manager::ProcessingManager,
-    shared::{DataColumnId, PipelineId, PlotData, SharedPlotConfig, ColumnStatistics},
+    shared::{ColumnStatistics, DataColumnId, PipelineId, PlotData, SharedPlotConfig},
 };
 use tauri::{ipc::Channel, State};
 
@@ -73,7 +73,10 @@ pub fn reset_by_pipeline_id(
     reset_capture_state: bool,
     manager: State<Arc<Mutex<ProcessingManager>>>,
 ) -> Result<(), String> {
-    manager.lock().unwrap().reset_by_pipeline_id(id, reset_capture_state)
+    manager
+        .lock()
+        .unwrap()
+        .reset_by_pipeline_id(id, reset_capture_state)
 }
 
 #[tauri::command]
@@ -82,7 +85,10 @@ pub fn reset_by_column(
     key: DataColumnId,
     reset_capture_state: bool,
 ) -> Result<(), String> {
-    manager.lock().unwrap().clear_column(&key, reset_capture_state)
+    manager
+        .lock()
+        .unwrap()
+        .clear_column(&key, reset_capture_state)
 }
 
 #[tauri::command]
@@ -91,7 +97,10 @@ pub fn reset_by_stream(
     key: DataColumnId,
     reset_capture_state: bool,
 ) -> Result<(), String> {
-    manager.lock().unwrap().clear_stream(&key, reset_capture_state)
+    manager
+        .lock()
+        .unwrap()
+        .clear_stream(&key, reset_capture_state)
 }
 
 #[tauri::command]
@@ -100,5 +109,8 @@ pub fn reset_by_device(
     key: DataColumnId,
     reset_capture_state: bool,
 ) -> Result<(), String> {
-    manager.lock().unwrap().clear_device(&key, reset_capture_state)
+    manager
+        .lock()
+        .unwrap()
+        .clear_device(&key, reset_capture_state)
 }

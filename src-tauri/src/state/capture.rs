@@ -315,7 +315,7 @@ impl CaptureState {
                                 });
                             }
                         };
-                   }
+                    }
 
                     {
                         let session_map = inner.buffers.entry(key.clone()).or_default();
@@ -354,7 +354,10 @@ impl CaptureState {
 
                     let mut unified_points = Vec::with_capacity(points.len());
                     for p in &points {
-                        unified_points.push(Point { x: p.x + offset, y: p.y });
+                        unified_points.push(Point {
+                            x: p.x + offset,
+                            y: p.y,
+                        });
                     }
                     let t_min = unified_points.first().map(|p| p.x).unwrap_or(0.0);
                     let t_max = unified_points.last().map(|p| p.x).unwrap_or(0.0);
@@ -416,8 +419,8 @@ impl CaptureState {
                     start_time,
                     end_time,
                 } => {
-                    let raw_data_vecs =
-                        self_instance.get_data_across_sessions_for_keys(&keys, start_time, end_time);
+                    let raw_data_vecs = self_instance
+                        .get_data_across_sessions_for_keys(&keys, start_time, end_time);
 
                     let mut individual_plot_data = Vec::with_capacity(keys.len());
                     for points in raw_data_vecs {
@@ -460,7 +463,8 @@ impl CaptureState {
     pub fn clear_stream_by_key(&self, any_key_in_stream: &DataColumnId) {
         let stream_key = any_key_in_stream.stream_key();
 
-        let keys_in_stream: Vec<DataColumnId> = self.inner
+        let keys_in_stream: Vec<DataColumnId> = self
+            .inner
             .buffers
             .iter()
             .filter(|e| e.key().stream_key() == stream_key)
@@ -484,7 +488,8 @@ impl CaptureState {
     pub fn clear_device_by_key(&self, any_key_on_device: &DataColumnId) {
         let device_key = any_key_on_device.device_key();
 
-        let keys_in_device: Vec<DataColumnId> = self.inner
+        let keys_in_device: Vec<DataColumnId> = self
+            .inner
             .buffers
             .iter()
             .filter(|e| e.key().device_key() == device_key)

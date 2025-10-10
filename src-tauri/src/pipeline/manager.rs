@@ -6,8 +6,8 @@ use super::{Pipeline, PipelineCommand};
 use crate::pipeline::statistics::StreamingStatisticsProvider;
 use crate::pipeline::StatisticsProvider;
 use crate::shared::{
-    DataColumnId, DecimationMethod, FftConfig, PipelineId, PlotData, SharedPlotConfig,
-    ColumnStatistics, TimeseriesConfig, ViewConfig,
+    ColumnStatistics, DataColumnId, DecimationMethod, FftConfig, PipelineId, PlotData,
+    SharedPlotConfig, TimeseriesConfig, ViewConfig,
 };
 use crate::state::capture::{CaptureCommand, CaptureState};
 use crate::util::k_way_merge_plot_data;
@@ -34,7 +34,7 @@ enum ThreadType {
         sub_id: usize,
         source_key: DataColumnId,
     },
-    Derived{
+    Derived {
         source_key: DataColumnId,
     },
 }
@@ -77,10 +77,10 @@ impl ProcessingManager {
             thread::Builder::new()
                 .name("ui-emitter".into())
                 .spawn(move || {
-                    let plot_period  = Duration::from_millis(33);
+                    let plot_period = Duration::from_millis(33);
                     let stats_period = Duration::from_millis(16);
 
-                    let mut next_plot  = Instant::now();
+                    let mut next_plot = Instant::now();
                     let mut next_stats = Instant::now();
 
                     loop {
@@ -421,7 +421,7 @@ impl ProcessingManager {
                         id: *sub_id,
                     });
                 }
-                ThreadType::Derived {..}=> {
+                ThreadType::Derived { .. } => {
                     println!("[Pipeline] Destroying derived pipeline {:?}.", id);
                 }
             }
@@ -548,14 +548,17 @@ impl ProcessingManager {
         let (cmd_tx, upstream_stream_key): (Sender<PipelineCommand>, Option<DataColumnId>) = {
             let h = self.pipeline_threads.get(&id).ok_or("Pipeline not found")?;
             let key_opt = match &h.thread_type {
-                ThreadType::Root { source_key, .. } |
-                ThreadType::Statistics { source_key, .. } => Some(source_key.clone()),
+                ThreadType::Root { source_key, .. } | ThreadType::Statistics { source_key, .. } => {
+                    Some(source_key.clone())
+                }
                 ThreadType::Derived { .. } => None,
             };
             (h.cmd_tx.clone(), key_opt)
         };
 
-        cmd_tx.send(PipelineCommand::ResetSelf).map_err(|e| e.to_string())?;
+        cmd_tx
+            .send(PipelineCommand::ResetSelf)
+            .map_err(|e| e.to_string())?;
 
         if reset_capture_state {
             if let Some(k) = upstream_stream_key {

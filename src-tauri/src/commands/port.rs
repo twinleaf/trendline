@@ -105,6 +105,6 @@ pub fn confirm_selection(
         .insert(port_url.clone(), keys_to_activate);
     registry.set_selected_port(Some(port_url.clone()));
     registry.shutdown_all_except(&port_url);
-    
+
     Ok(())
 }

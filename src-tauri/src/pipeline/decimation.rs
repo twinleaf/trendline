@@ -158,9 +158,10 @@ impl Pipeline for StreamingFpcsPipeline {
 
         // Reset if sample numbers went backwards (wrap/reset).
         if !need_reset {
-            if let (Some(prev_sn), Some(first_sn)) =
-                (self.last_sample_number, batch.sample_numbers.first().copied())
-            {
+            if let (Some(prev_sn), Some(first_sn)) = (
+                self.last_sample_number,
+                batch.sample_numbers.first().copied(),
+            ) {
                 if first_sn <= prev_sn {
                     need_reset = true;
                 }
