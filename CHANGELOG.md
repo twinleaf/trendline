@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ### Changed
 - Stop clearing device selection on any state change (only when `PortState` becomes `Disconnected`)
+- **Updated to `twinleaf` crate version 1.4.1**
+    - Use `try_as_f64()` in `Sample`
+    - Add error handling from `Device`
+    - Remove `panic_unwind` from handling lost proxy connection
 
 ## [1.0.1] - 2025-10-05
   

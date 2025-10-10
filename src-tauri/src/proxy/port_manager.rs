@@ -7,11 +7,9 @@ use crate::util::{self, parse_arg_type_and_size, parse_permissions_string};
 use crossbeam::channel::{Sender, TrySendError};
 use crossbeam::select;
 use serde_json::{json, Value};
-use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{
     collections::{HashMap, HashSet},
-    panic,
     sync::{Arc, Mutex, RwLock},
     thread,
     time::{Duration, Instant},
@@ -25,6 +23,23 @@ use twinleaf::{
     },
     Device,
 };
+
+#[derive(Debug)]
+pub enum InitDeviceError {
+    Port(proxy::PortError),
+    Rpc(proxy::RpcError),
+}
+
+impl From<proxy::PortError> for InitDeviceError {
+    fn from(e: proxy::PortError) -> Self {
+        Self::Port(e)
+    }
+}
+impl From<proxy::RpcError> for InitDeviceError {
+    fn from(e: proxy::RpcError) -> Self {
+        Self::Rpc(e)
+    }
+}
 
 pub struct DebugCounters {
     pub polls: AtomicUsize,
@@ -342,7 +357,16 @@ impl PortManager {
         let mut devices = self.devices.write().unwrap();
         let mut discovered_ui_devices_for_event = Vec::new();
         for (route, ui_dev) in discovered_info {
-            let data_device = Device::open(proxy_if, route.clone());
+            let data_device = match Device::open(proxy_if, route.clone()) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!(
+                        "[{}] Failed to open data device on '{}': {:?}",
+                        self.url, route, e
+                    );
+                    continue;
+                }
+            };
 
             self.update_capture_state_with_stream_metadata(&route, &ui_dev.streams);
 
@@ -368,13 +392,13 @@ impl PortManager {
         &self,
         proxy_if: &Arc<proxy::Interface>,
         route: &DeviceRoute,
-    ) -> Result<UiDevice, proxy::PortError> {
+    ) -> Result<UiDevice, InitDeviceError> {
         let rpc_port = proxy_if.device_rpc(route.clone())?;
         let mut temp_rpc_device = Device::new(rpc_port);
         let rpcs = self.fetch_rpcs(&mut temp_rpc_device);
 
-        let mut temp_data_device = Device::open(proxy_if, route.clone());
-        let (meta, streams) = self.fetch_metadata(&mut temp_data_device);
+        let mut temp_data_device = Device::open(proxy_if, route.clone())?;
+        let (meta, streams) = self.fetch_metadata(&mut temp_data_device)?;
 
         println!(
             "[{}]   -> Fetched {} streams and {} RPCs for '{}'",
@@ -397,9 +421,13 @@ impl PortManager {
     fn fetch_rpcs(&self, rpc_device: &mut Device) -> Vec<RpcMeta> {
         println!("[{}]   -> Fetching RPCs...", self.url);
         let mut rpc_metas = Vec::new();
+
         let rpc_count: u16 = match rpc_device.get("rpc.listinfo") {
             Ok(count) => count,
-            Err(_) => return rpc_metas,
+            Err(e) => {
+                eprintln!("[{}]   -> Failed to query rpc.listinfo: {:?}", self.url, e);
+                return rpc_metas;
+            }
         };
 
         for rpc_id in 0..rpc_count {
@@ -407,6 +435,7 @@ impl PortManager {
                 rpc_device.rpc::<u16, (u16, String)>("rpc.listinfo", rpc_id)
             {
                 let (arg_type, size) = parse_arg_type_and_size(meta_bits);
+
                 let mut meta = RpcMeta {
                     name: name.clone(),
                     size,
@@ -420,54 +449,54 @@ impl PortManager {
                 };
 
                 if meta.readable {
-                    let rpc_result = panic::catch_unwind(AssertUnwindSafe(|| {
-                        match arg_type.as_str() {
-                            "u8" => rpc_device.get::<u8>(&name).map(|v| json!(v)),
-                            "u16" => rpc_device.get::<u16>(&name).map(|v| json!(v)),
-                            "u32" => rpc_device.get::<u32>(&name).map(|v| json!(v)),
-                            "u64" => rpc_device.get::<u64>(&name).map(|v| json!(v)),
-                            "i8" => rpc_device.get::<i8>(&name).map(|v| json!(v)),
-                            "i16" => rpc_device.get::<i16>(&name).map(|v| json!(v)),
-                            "i32" => rpc_device.get::<i32>(&name).map(|v| json!(v)),
-                            "i64" => rpc_device.get::<i64>(&name).map(|v| json!(v)),
-                            "f32" => rpc_device.get::<f32>(&name).map(|v| json!(v)),
-                            "f64" => rpc_device.get::<f64>(&name).map(|v| json!(v)),
-                            "string" => rpc_device.get::<String>(&name).map(|v| json!(v)),
-                            s if s.starts_with("string<") => {
-                                rpc_device.get::<String>(&name).map(|v| json!(v))
-                            }
-                            _ => {
-                                // Fallback to original method for unhandled types
-                                match rpc_device.raw_rpc(&name, &[]) {
-                                    Ok(reply_bytes) => {
-                                        Ok(util::bytes_to_json_value(&reply_bytes, &arg_type)
-                                            .unwrap_or(Value::Null))
-                                    }
-                                    Err(e) => Err(e),
-                                }
-                            }
+                    let read_res: Result<Value, proxy::RpcError> = match arg_type.as_str() {
+                        "u8" => rpc_device.get::<u8>(&name).map(|v| json!(v)),
+                        "u16" => rpc_device.get::<u16>(&name).map(|v| json!(v)),
+                        "u32" => rpc_device.get::<u32>(&name).map(|v| json!(v)),
+                        "u64" => rpc_device.get::<u64>(&name).map(|v| json!(v)),
+                        "i8" => rpc_device.get::<i8>(&name).map(|v| json!(v)),
+                        "i16" => rpc_device.get::<i16>(&name).map(|v| json!(v)),
+                        "i32" => rpc_device.get::<i32>(&name).map(|v| json!(v)),
+                        "i64" => rpc_device.get::<i64>(&name).map(|v| json!(v)),
+                        "f32" => rpc_device.get::<f32>(&name).map(|v| json!(v)),
+                        "f64" => rpc_device.get::<f64>(&name).map(|v| json!(v)),
+                        "string" => rpc_device.get::<String>(&name).map(|v| json!(v)),
+                        _ if arg_type.starts_with("string<") => {
+                            rpc_device.get::<String>(&name).map(|v| json!(v))
                         }
-                    }));
-
-                    if let Ok(call_result) = rpc_result {
-                        match call_result {
-                            Ok(value) => meta.value = Some(value),
-                            Err(proxy::RpcError::TypeError) => {
-                                meta.value = Some(Value::Null);
+                        _ => match rpc_device.raw_rpc(&name, &[]) {
+                            Ok(reply_bytes) => {
+                                Ok(util::bytes_to_json_value(&reply_bytes, &arg_type)
+                                    .unwrap_or(Value::Null))
                             }
-                            Err(_) => {}
+                            Err(e) => Err(e),
+                        },
+                    };
+
+                    match read_res {
+                        Ok(v) => meta.value = Some(v),
+                        Err(proxy::RpcError::TypeError) => {
+                            meta.value = Some(Value::Null);
+                        }
+                        Err(e) => {
+                            eprintln!("[{}]   -> Read '{}' failed: {:?}", self.url, name, e);
                         }
                     }
                 }
+
                 rpc_metas.push(meta);
             }
         }
+
         rpc_metas
     }
 
-    fn fetch_metadata(&self, data_device: &mut Device) -> (DeviceMeta, Vec<UiStream>) {
+    fn fetch_metadata(
+        &self,
+        data_device: &mut Device,
+    ) -> Result<(DeviceMeta, Vec<UiStream>), proxy::RpcError> {
         println!("[{}]   -> Fetching metadata...", self.url);
-        let metadata = data_device.get_metadata();
+        let metadata = data_device.get_metadata()?;
 
         let device_meta = DeviceMeta::from((*metadata.device).clone());
 
@@ -502,7 +531,7 @@ impl PortManager {
             })
             .collect();
         println!("[{}]   -> Fetched metadata!", self.url);
-        (device_meta, ui_streams)
+        Ok((device_meta, ui_streams))
     }
 
     fn set_state(&self, new_state: PortState) {
@@ -572,20 +601,16 @@ impl PortManager {
                 let mut tuple = entry.lock().unwrap();
                 let (device, _) = &mut *tuple;
 
-                let result = panic::catch_unwind(AssertUnwindSafe(|| device.drain()));
-
-                match result {
+                match device.drain() {
                     Ok(samples) => {
                         for sample in samples {
                             let sid = sample.device.session_id;
                             let sample_number = sample.n;
 
                             for col in &sample.columns {
-                                let val = match col.value {
-                                    twinleaf::data::ColumnData::Int(i) => i as f64,
-                                    twinleaf::data::ColumnData::UInt(u) => u as f64,
-                                    twinleaf::data::ColumnData::Float(f) => f,
-                                    _ => continue,
+                                let val = match col.value.try_as_f64() {
+                                    Some(v) => v,
+                                    None => continue,
                                 };
 
                                 let key = DataColumnId {
@@ -595,12 +620,10 @@ impl PortManager {
                                     column_index: col.desc.index,
                                 };
 
-                                let e = batched
-                                    .entry((key, sid))
-                                    .or_insert_with(|| BatchedEntry {
-                                        points: Vec::new(),
-                                        sample_numbers: Vec::new(),
-                                    });
+                                let e = batched.entry((key, sid)).or_insert_with(|| BatchedEntry {
+                                    points: Vec::new(),
+                                    sample_numbers: Vec::new(),
+                                });
 
                                 e.points.push(Point {
                                     x: sample.timestamp_end(),
@@ -614,10 +637,10 @@ impl PortManager {
                             }
                         }
                     }
-                    Err(_) => {
+                    Err(e) => {
                         println!(
-                            "[{}] Device '{}' unresponsive. Attempting to reinstate handler.",
-                            self.url, route
+                            "[{}] Device '{}' returned error ({:?}). Attempting to reinstate handler.",
+                            self.url, route, e
                         );
                         reinit_needed.insert(route.clone());
                     }
@@ -639,14 +662,13 @@ impl PortManager {
                         .points_inserted
                         .fetch_add(len, Ordering::Relaxed);
                 }
-                Err(TrySendError::Full(_cmd)) => {
+                Err(TrySendError::Full(_)) => {
                     self.counters
                         .dropped_batches
                         .fetch_add(1, Ordering::Relaxed);
                 }
-                Err(TrySendError::Disconnected(_cmd)) => {
-                    // capture thread died; bail
-                    break;
+                Err(TrySendError::Disconnected(_)) => {
+                    return;
                 }
             }
         }
@@ -657,11 +679,19 @@ impl PortManager {
                 for route in reinit_needed {
                     if let Some(device_entry) = devices_map.get(&route) {
                         let mut tuple = device_entry.lock().unwrap();
-                        tuple.0 = Device::open(&proxy_if, route.clone());
-                        println!(
-                            "[{}] Re-initialized TIO device for route '{}'.",
-                            self.url, route
-                        );
+                        match Device::open(&proxy_if, route.clone()) {
+                            Ok(new_dev) => {
+                                tuple.0 = new_dev;
+                                println!(
+                                    "[{}] Re-initialized TIO device for route '{}'.",
+                                    self.url, route
+                                );
+                            }
+                            Err(e) => eprintln!(
+                                "[{}] Failed to re-open device for route '{}': {:?}",
+                                self.url, route, e
+                            ),
+                        }
                     }
                 }
             }
@@ -685,21 +715,28 @@ impl PortManager {
 
                     let mut device_tuple = device_arc_clone.lock().unwrap();
                     let (data_device, ui_device) = &mut *device_tuple;
-                    let (new_meta, new_streams) = self_clone.fetch_metadata(data_device);
 
-                    self_clone.update_capture_state_with_stream_metadata(&route, &new_streams);
+                    match self_clone.fetch_metadata(data_device) {
+                        Ok((new_meta, new_streams)) => {
+                            self_clone
+                                .update_capture_state_with_stream_metadata(&route, &new_streams);
+                            ui_device.meta = new_meta;
+                            ui_device.streams = new_streams;
 
-                    ui_device.meta = new_meta;
-                    ui_device.streams = new_streams;
-
-                    if let Err(e) = self_clone
-                        .app
-                        .emit("device-metadata-updated", ui_device.clone())
-                    {
-                        eprintln!(
-                            "[{}] Failed to emit device-metadata-updated event: {}",
-                            self_clone.url, e
-                        );
+                            if let Err(e) = self_clone
+                                .app
+                                .emit("device-metadata-updated", ui_device.clone())
+                            {
+                                eprintln!(
+                                    "[{}] Failed to emit device-metadata-updated event: {}",
+                                    self_clone.url, e
+                                );
+                            }
+                        }
+                        Err(e) => eprintln!(
+                            "[{}] Failed to refresh metadata for '{}': {:?}",
+                            self_clone.url, route, e
+                        ),
                     }
                 });
             }
