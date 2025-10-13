@@ -561,9 +561,9 @@ impl ProcessingManager {
             .map_err(|e| e.to_string())?;
 
         if reset_capture_state {
-            if let Some(k) = upstream_stream_key {
-                self.clear_column(&k, true)?;
-            }
+            if let Some(k) = upstream_stream_key { self.clear_column(&k, true)?; }
+        } else {
+            let _ = cmd_tx.send(PipelineCommand::Hydrate);
         }
 
         Ok(())

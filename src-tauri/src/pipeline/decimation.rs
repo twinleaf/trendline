@@ -59,7 +59,7 @@ impl StreamingFpcsPipeline {
         self.last_retained_flag = FpcsLastRetained::None;
         self.window_max_point = None;
         self.window_min_point = None;
-        self.last_processed_time = 0.0;
+        self.last_processed_time = f64::NEG_INFINITY;
     }
 
     /// The core stateful algorithm, now private to the pipeline.
