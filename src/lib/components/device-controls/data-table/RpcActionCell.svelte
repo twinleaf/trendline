@@ -8,8 +8,9 @@
 	import * as Popover from '$lib/components/ui/popover/index.js';
 	import { TriangleAlert } from '@lucide/svelte';
 	import { untrack } from 'svelte';
-	import { onMount, onDestroy } from 'svelte';
     import { cn } from '$lib/utils';
+	import { onMount, onDestroy } from 'svelte';
+
 
 	let { rpc, device, isSmall }: { rpc: RpcMeta; device: UiDevice; isSmall: boolean } = $props();
 
@@ -149,6 +150,13 @@
 	function handleAction() {
 		executeRpc(null);
 	}
+
+	onMount(() => console.debug('[RpcActionCell] mount', rpc.name));
+	onDestroy(() => console.debug('[RpcActionCell] destroy', rpc.name));
+
+	onDestroy(() => {
+		if (observer) { observer.disconnect(); observer = null; }
+	});
 </script>
 
 {#if !rpc.readable && !rpc.writable}
@@ -201,6 +209,15 @@
 					aria-invalid={!!rpcError}
 					disabled={isLoading}
 					autocomplete="off"
+					autocorrect="off"
+					autocapitalize="off"
+					inputmode={
+						rpc.arg_type.includes('f')
+							? 'decimal'
+							: rpc.arg_type.includes('i') || rpc.arg_type.includes('u')
+							? 'numeric'
+							: 'text'
+					}
 				/>
 			</div>
 

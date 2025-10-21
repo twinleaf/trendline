@@ -40,7 +40,9 @@
 			return;
 		}
 
-		const requiredPoints = Math.ceil(maxRate * winSecs * 2);
+		const upperBound = Math.ceil(maxRate * winSecs * 2 * Math.max(1, numSeries));
+		const actualLen = rawPlotData?.timestamps.length ?? 0;
+		const requiredPoints = Math.max(upperBound, Math.ceil(actualLen * 1.25));
 		const needsReallocation =
 			uplotDataBuffers.length !== numSeries + 1 ||
 			(uplotDataBuffers.length > 0 && uplotDataBuffers[0].length < requiredPoints);
@@ -209,9 +211,12 @@
 			
 			uplotInstance.setData(data.views, isCurrentlyFFT);
 
-		} else if (plot.hasData) {
+		} else {
+			const backendEmpty = !rawPlotData || rawPlotData.timestamps.length === 0 || plot.series.length === 0;
+			if (backendEmpty && plot.hasData) {
 			uplotInstance.setData([[]], false);
 			plot.hasData = false;
+			}
 		}
 	});
 

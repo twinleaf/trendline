@@ -20,6 +20,7 @@
 	import { ChevronUp, FileType2, UserPen } from '@lucide/svelte';
 	import { cn } from '$lib/utils';
 	import { ScrollArea } from "$lib/components/ui/scroll-area/index.js";
+	import { prefixFilter } from './filtering';
 
 	type DataTableProps = {
 		columns: ColumnDef<TData, TValue>[];
@@ -29,12 +30,24 @@
 	};
 	let { data, columns, device, isSmall }: DataTableProps = $props();
 
-	let sorting = $state<SortingState>([{ id: 'name', desc: false }]);
+	let fuzzySearchInput = $state('');
 	let fuzzySearchValue = $state('');
+
+	$effect(() => {
+		const value = fuzzySearchInput;
+		const timeoutId = setTimeout(() => {
+			fuzzySearchValue = value;
+		}, 100);
+		return () => clearTimeout(timeoutId);
+	});
+
+
+	let sorting = $state<SortingState>([{ id: 'name', desc: false }]);
 	let toggleState = $state<string[]>(['header']);
 
 	let allPrefixes = $state<string[]>([]);
 	let selectedPrefixes = $state(new SvelteSet<string>());
+	const selectedPrefixesArray = $derived([...selectedPrefixes].sort());
 
 	const isHeaderVisible = $derived(toggleState.includes('header'));
 	const columnVisibility = $derived<VisibilityState>({
@@ -43,13 +56,17 @@
 	});
 	const columnFilters = $derived([
 		...(fuzzySearchValue ? [{ id: 'name', value: fuzzySearchValue }] : []),
-		{ id: 'name_prefix', value: [...selectedPrefixes] }
+		{ id: 'name_prefix', value: selectedPrefixesArray }
 	]);
+
 
 	const table = createSvelteTable({
 		get data() { return data; },
 		get columns() { return columns; },
 		meta: { get device() { return device; }, get isSmall() { return isSmall; } },
+		filterFns: {
+			prefix: prefixFilter
+		},
 		state: {
 			get sorting() { return sorting; },
 			get columnFilters() { return columnFilters; },
@@ -77,9 +94,13 @@
 		<div class="flex items-center p-4 border-b gap-4">
 			<Input
 				placeholder="Search RPCs..."
-				bind:value={fuzzySearchValue}
+				bind:value={fuzzySearchInput}
 				class="flex-1 max-w-[200px]"
 				autocomplete="off"
+				autocorrect="off"
+				autocapitalize="off"
+				inputmode="search"
+				spellcheck={false}
 			/>
 
 			<div class="ml-auto flex flex-nowrap items-center gap-4">

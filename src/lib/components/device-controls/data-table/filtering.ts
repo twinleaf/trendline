@@ -1,23 +1,21 @@
-import type { FilterFn, SortingFn } from '@tanstack/table-core';
+import type { FilterFn } from '@tanstack/table-core';
 import type { RpcMeta } from '$lib/bindings/RpcMeta';
-import { rankItem, compareItems, rankings } from '@tanstack/match-sorter-utils';
-import { sortingFns } from '@tanstack/table-core';
+import { rankItem, rankings } from '@tanstack/match-sorter-utils';
+import '@tanstack/table-core';
 
 type ItemRank = ReturnType<typeof rankItem>;
 
-type FuzzyFilterMeta = {
-	itemRank: ItemRank | null;
-};
-
 export const fuzzyFilter: FilterFn<RpcMeta> = (row, columnId, value, addMeta) => {
-    if (!value) {
+	if (!value) {
 		addMeta({ itemRank: null });
 		return true;
 	}
 	const text = String(row.getValue(columnId) ?? '');
 	const q = String(value);
 	if (text.toLowerCase().includes(q.toLowerCase())) {
-		addMeta({ itemRank: { rankedValue: text, rank: rankings.CASE_SENSITIVE_EQUAL, passed: true } as any });
+		addMeta({
+			itemRank: { rankedValue: text, rank: rankings.CASE_SENSITIVE_EQUAL, passed: true } as any
+		});
 		return true;
 	}
 	const itemRank = rankItem(text, q);
@@ -25,29 +23,23 @@ export const fuzzyFilter: FilterFn<RpcMeta> = (row, columnId, value, addMeta) =>
 	return itemRank.passed;
 };
 
-export const fuzzySort: SortingFn<RpcMeta> = (rowA, rowB, columnId) => {
-	const itemRankA = (rowA.columnFiltersMeta[columnId] as FuzzyFilterMeta)?.itemRank;
-	const itemRankB = (rowB.columnFiltersMeta[columnId] as FuzzyFilterMeta)?.itemRank;
-
-	if (itemRankA && itemRankB) {
-		return compareItems(itemRankA, itemRankB);
-	}
-
-	return sortingFns.alphanumeric(rowA, rowB, columnId);
-};
+const prefixSetCache = new Map<string, Set<string>>();
 
 export const prefixFilter: FilterFn<RpcMeta> = (row, columnId, value: string[]) => {
-	if (!value || value.length === 0) return false;
+  if (!value || value.length === 0) return true;
 
-	const key = value.join('|');
-	let cached = prefixSetCache.get(key);
-	if (!cached) {
-		cached = new Set(value);
-		prefixSetCache.set(key, cached);
-	}
-	const prefix = row.getValue<string>(columnId);
+  const key = value.join('|');
+  let cached = prefixSetCache.get(key);
 
-	return cached.has(prefix);
+  if (!cached) {
+    cached = new Set(value);
+    if (prefixSetCache.size > 50) {
+      prefixSetCache.clear();
+	  console.log("[DeviceControls] Cleared prefixSetCache")
+    }
+    prefixSetCache.set(key, cached);
+  }
+
+  const prefix = row.getValue<string>(columnId);
+  return cached.has(prefix);
 };
-
-const prefixSetCache = new Map<string, Set<string>>();

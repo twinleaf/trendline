@@ -4,7 +4,7 @@ import type { RpcMeta } from '$lib/bindings/RpcMeta';
 import { renderComponent } from "$lib/components/ui/data-table";
 import RpcActionCell from "./RpcActionCell.svelte";
 import DataTableSortHeader from "./DataTableSortHeader.svelte";
-import { fuzzyFilter, fuzzySort, prefixFilter } from './filtering';
+import { fuzzyFilter, prefixFilter } from './filtering';
 
 
 export type RpcTableMeta = {
@@ -24,7 +24,6 @@ export const columns: ColumnDef<RpcMeta>[] = [
         });
 		},
     filterFn: fuzzyFilter,
-    sortingFn: fuzzySort,
   },
   {
     id: 'name_prefix',
