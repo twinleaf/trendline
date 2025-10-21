@@ -323,9 +323,8 @@ impl ProcessingManager {
         let mut data_to_merge = Vec::with_capacity(managed_plot.output_pipeline_ids.len());
         for id in &managed_plot.output_pipeline_ids {
             if let Some(p) = self.pipelines.get(id) {
-                if let Ok(pipeline) = p.try_lock() {
-                    data_to_merge.push(pipeline.get_output());
-                }
+                let pipeline = p.lock().unwrap();
+                data_to_merge.push(pipeline.get_output());
             }
         }
         if data_to_merge.is_empty() {
