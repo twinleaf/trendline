@@ -57,14 +57,6 @@ This document outlines the current bugs, desired features, and code quality impr
 
 [X] StreamMonitor: Make stream monitor show number of NaNs to stream
 
-## Code Quality & Refactoring
-
-[X] Reactive Data Flow:
-
-Goal: Transition from a polling-based model to a reactive, event-driven architecture.
-
-Implementation Idea: Instead of a single confirm_selection command, use atomic backend events (connect_stream, disconnect_stream). The frontend plots would subscribe to the relevant data streams, and the backend would push updates. This decouples the UI from managing connection state logic.
-
 ## Things to refactor
 
 [ ] Move serialize `match rpc_type` into helper inside `twinleaf` crate
