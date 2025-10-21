@@ -162,14 +162,14 @@ impl Pipeline for StreamingFpcsPipeline {
                 self.last_sample_number,
                 batch.sample_numbers.first().copied(),
             ) {
-                if first_sn <= prev_sn {
+                if first_sn < prev_sn {
                     need_reset = true;
                 }
             }
         }
 
         // Reset if (for any reason) time went backwards.
-        if !need_reset && batch.t_max <= self.last_processed_time {
+        if !need_reset && batch.t_max < self.last_processed_time {
             need_reset = true;
         }
 
@@ -233,7 +233,9 @@ impl Pipeline for StreamingFpcsPipeline {
                     for point in points {
                         self.process_point(*point);
                     }
-                    self.last_processed_time = latest_time;
+                    if let Some(last) = points.last() {
+                        self.last_processed_time = last.x;
+                    }
                 }
             }
             _ => {}

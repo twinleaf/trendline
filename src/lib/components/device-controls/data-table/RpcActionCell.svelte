@@ -151,9 +151,6 @@
 		executeRpc(null);
 	}
 
-	onMount(() => console.debug('[RpcActionCell] mount', rpc.name));
-	onDestroy(() => console.debug('[RpcActionCell] destroy', rpc.name));
-
 	onDestroy(() => {
 		if (observer) { observer.disconnect(); observer = null; }
 	});
