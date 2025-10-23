@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
     - Use `try_as_f64()` in `Sample`
     - Add error handling from `Device`
     - Remove `panic_unwind` from handling lost proxy connection
-- Debounce search input for RPC items
+- Debounce search input for RPC items and remove autocorrect
 - Use lock() when fetching Pipeline data instead of try_lock()
 - Explicitly remove observer from RpcActionCell onDestroy
 
