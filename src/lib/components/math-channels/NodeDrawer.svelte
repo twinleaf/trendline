@@ -27,14 +27,13 @@
 	});
 	let snapbackPos = $state({ x: 0, y: 0 });
 	const posComp = Compartment.of(() => position({ current: snapbackPos }));
-	// --- End unchanged logic ---
 
-	const CLICK_THRESHOLD = 5;
+	let draggingNode = $state<string | null>(null);
+	let hasDragged = $state(false);
+	let drawerContentRef: HTMLDivElement | null = $state(null);
+
 	const CASCADE_OFFSET = 5;
 
-	/**
-	 * Checks if a position is occupied and finds the next available "cascaded" spot.
-	 */
 	function getOffsetPosition(targetPos: XYPosition, allNodes: Node[]): XYPosition {
 		const collision = allNodes.find(
 			(node) => node.position.x === targetPos.x && node.position.y === targetPos.y
@@ -51,17 +50,18 @@
 		return targetPos;
 	}
 
-	const handleDragEnd = (data: DragEventData, nodeType: string) => {
-		const dragDistance = Math.sqrt(data.offset.x ** 2 + data.offset.y ** 2);
-		const isClick = dragDistance < CLICK_THRESHOLD;
-
-		let initialPosition: XYPosition;
+	const handleDragEnd = (nodeType: string) => {
+		const isClick = !hasDragged;
 
 		const flowPane = document.querySelector<HTMLDivElement>('.svelte-flow__pane');
 		if (!flowPane) {
 			snapbackPos = { x: 0, y: 0 };
+			draggingNode = null;
 			return;
 		}
+
+		let initialPosition: XYPosition;
+		const allNodes = nodesStore.current;
 
 		if (isClick) {
 			const flowRect = flowPane.getBoundingClientRect();
@@ -70,8 +70,23 @@
 			initialPosition = screenToFlowPosition({ x: centerX, y: centerY });
 		} else {
 			const { x, y } = lastPointerPos;
-			const flowRect = flowPane.getBoundingClientRect();
 
+			if (drawerContentRef) {
+				const drawerRect = drawerContentRef.getBoundingClientRect();
+				const isOverDrawer =
+					x >= drawerRect.left &&
+					x <= drawerRect.right &&
+					y >= drawerRect.top &&
+					y <= drawerRect.bottom;
+
+				if (isOverDrawer) {
+					snapbackPos = { x: 0, y: 0 };
+					draggingNode = null;
+					return;
+				}
+			}
+
+			const flowRect = flowPane.getBoundingClientRect();
 			const isOverFlow =
 				x >= flowRect.left &&
 				x <= flowRect.right &&
@@ -80,12 +95,12 @@
 
 			if (!isOverFlow) {
 				snapbackPos = { x: 0, y: 0 };
+				draggingNode = null;
 				return;
 			}
+
 			initialPosition = screenToFlowPosition({ x, y });
 		}
-
-		const allNodes = nodesStore.current;
 
 		const finalPosition = getOffsetPosition(initialPosition, allNodes);
 
@@ -99,6 +114,7 @@
 
 		nodesStore.update((currentNodes) => [...currentNodes, newNode]);
 		snapbackPos = { x: 0, y: 0 };
+		draggingNode = null;
 	};
 </script>
 
@@ -115,20 +131,28 @@
 		</div>
 		<Collapsible.Content class="mt-2 flex justify-center">
 			<div
-				class="rounded-xl border bg-popover text-popover-foreground shadow-lg
-backdrop-blur p-3"
+				class="rounded-xl border bg-popover text-popover-foreground shadow-lg backdrop-blur p-3"
+				bind:this={drawerContentRef}
 			>
 				<div class="grid grid-cols-[auto_auto_auto] gap-4">
 					<section class="flex flex-col items-center">
 						<h4 class="text-[11px] uppercase tracking-wide opacity-70 mb-1">Sources</h4>
 						<div class="flex flex-wrap gap-2 justify-center">
 							<div
-								class="select-none cursor-grab rounded border px-3 py-1 text-xs font-medium hover:bg-muted"
+								class="relative select-none cursor-grab rounded border px-3 py-1 text-xs font-medium hover:bg-muted"
+								class:z-50={draggingNode === 'input'}
 								{@attach
 									draggable(() => [
 										posComp,
 										events({
-											onDragEnd: (data) => handleDragEnd(data, 'input')
+											onDragStart: () => {
+												draggingNode = 'input';
+												hasDragged = false;
+											},
+											onDrag: () => {
+												hasDragged = true;
+											},
+											onDragEnd: () => handleDragEnd('input')
 										})
 									])}
 							>
@@ -141,12 +165,20 @@ backdrop-blur p-3"
 						<h4 class="text-[11px] uppercase tracking-wide opacity-70 mb-1">Transforms</h4>
 						<div class="flex flex-wrap gap-2 justify-center">
 							<div
-								class="select-none cursor-grab rounded border px-3 py-1 text-xs font-medium hover:bg-muted"
+								class="relative select-none cursor-grab rounded border px-3 py-1 text-xs font-medium hover:bg-muted"
+								class:z-50={draggingNode === 'default'}
 								{@attach
 									draggable(() => [
 										posComp,
 										events({
-											onDragEnd: (data) => handleDragEnd(data, 'default')
+											onDragStart: () => {
+												draggingNode = 'default';
+												hasDragged = false;
+											},
+											onDrag: () => {
+												hasDragged = true;
+											},
+											onDragEnd: () => handleDragEnd('default')
 										})
 									])}
 							>
@@ -159,12 +191,20 @@ backdrop-blur p-3"
 						<h4 class="text-[11px] uppercase tracking-wide opacity-70 mb-1">Sinks</h4>
 						<div class="flex flex-wrap gap-2 justify-center">
 							<div
-								class="select-none cursor-grab rounded border px-3 py-1 text-xs font-medium hover:bg-muted"
+								class="relative select-none cursor-grab rounded border px-3 py-1 text-xs font-medium hover:bg-muted"
+								class:z-50={draggingNode === 'output'}
 								{@attach
 									draggable(() => [
 										posComp,
 										events({
-											onDragEnd: (data) => handleDragEnd(data, 'output')
+											onDragStart: () => {
+												draggingNode = 'output';
+												hasDragged = false;
+											},
+											onDrag: () => {
+												hasDragged = true;
+											},
+											onDragEnd: () => handleDragEnd('output')
 										})
 									])}
 							>

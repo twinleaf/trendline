@@ -11,13 +11,18 @@
 		getOutgoers,
 		getConnectedEdges,
 		type Edge,
-    type SnapGrid
+    type SnapGrid,
+    MarkerType
 	} from '@xyflow/svelte';
 	import NodeDrawer from './NodeDrawer.svelte';
 	import '@xyflow/svelte/dist/style.css';
 
 	let nodes = $state.raw<Node[]>([]);
 	let edges = $state.raw<Edge[]>([]);
+
+  const defaultEdgeOptions = {
+		markerEnd: { type: MarkerType.ArrowClosed }
+	};
 
 	const onbeforedelete: OnBeforeDelete = async ({ nodes: deletedNodes }) => {
 		let remainingNodes = [...nodes];
@@ -33,7 +38,8 @@
 						.map(({ id: target }) => ({
 							id: `reconnect:${source}->${target}:${crypto.randomUUID?.() ?? Math.random()}`,
 							source,
-							target
+							target,
+              markerEnd: { type: MarkerType.ArrowClosed }
 						}))
 						.filter((e) => !existing.has(`${e.source}->${e.target}`))
 				);
@@ -53,6 +59,7 @@
 		fitView
     snapGrid = {[20, 20] satisfies SnapGrid}
 		{onbeforedelete}
+    {defaultEdgeOptions}
 		>
 		<Panel position="top-center" class="pointer-events-none z-50">
 			<NodeDrawer />

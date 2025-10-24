@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Publish time aligned data and session ID to pipelines
 - Add explicit `Idle` if-branch to `StatusFooter` and no selection state
 - Add `device-reconnected` emit event from `PortManager` for `DeviceState`
+- Add graph visualizer for math channels using Svelte Flow
 
 ### Changed
 - Stop clearing device selection on any state change (only when `PortState` becomes `Disconnected`)
