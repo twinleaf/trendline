@@ -29,6 +29,8 @@ This document outlines the current bugs, desired features, and code quality impr
 
 [ ] Fix plot NaNs: Fix the fact that the FFT currently zeros on NaN inputs.
 
+[ ] Node Palette: Fix dragging from very edge not picking up node but still tracking
+
 ## Features
 
 [X] Scalar Data Viewer: Implement exponential moving average and a boxed display for scalar values

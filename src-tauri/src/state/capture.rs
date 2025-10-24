@@ -1,4 +1,4 @@
-use crate::shared::{DataColumnId, PlotData, Point};
+use crate::shared::{DataColumnId, PipelineId, PlotData, Point};
 use crossbeam::channel::{bounded, Receiver, Sender};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
@@ -88,6 +88,7 @@ pub struct BatchedData {
 pub struct Inner {
     pub buffers: DashMap<DataColumnId, DashMap<SessionId, Buffer>>,
     pub streams: DashMap<DataColumnId, StreamState>,
+    pub virtual_streams: DashMap<DataColumnId, PipelineId>,
     pub paused_snapshots: DashMap<String, PlotData>,
     pub active: DashMap<DataColumnId, ()>,
     pub command_tx: Sender<CaptureCommand>,
@@ -144,6 +145,7 @@ impl CaptureState {
         let inner = Arc::new(Inner {
             buffers: DashMap::new(),
             streams: DashMap::new(),
+            virtual_streams: DashMap::new(),
             paused_snapshots: DashMap::new(),
             active: DashMap::new(),
             command_tx,
@@ -562,5 +564,18 @@ impl CaptureState {
             .streams
             .get(&key.stream_key())
             .map(|stream_state_entry| stream_state_entry.value().effective_sampling_rate)
+    }
+
+    pub fn register_virtual_stream(&self, virtual_key: DataColumnId, producer_id: PipelineId) {
+        self.inner.virtual_streams.insert(virtual_key.clone(), producer_id);
+        // Virtual streams are always "active"
+        self.inner.active.insert(virtual_key.clone(), ());
+        println!("[Capture] Registered virtual stream {:?} from pipeline {:?}", virtual_key, producer_id);
+    }
+    
+    pub fn unregister_virtual_stream(&self, virtual_key: &DataColumnId) {
+        self.inner.virtual_streams.remove(virtual_key);
+        self.inner.active.remove(virtual_key);
+        println!("[Capture] Unregistered virtual stream {:?}", virtual_key);
     }
 }
