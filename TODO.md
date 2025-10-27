@@ -29,7 +29,9 @@ This document outlines the current bugs, desired features, and code quality impr
 
 [ ] Fix plot NaNs: Fix the fact that the FFT currently zeros on NaN inputs.
 
-[ ] Node Palette: Fix dragging from very edge not picking up node but still tracking
+[X] Node Palette: Fix dragging from very edge not picking up node but still tracking
+
+[ ] Input Node: Fix search bar not working
 
 ## Features
 
