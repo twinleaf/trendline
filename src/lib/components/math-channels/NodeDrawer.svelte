@@ -50,8 +50,9 @@
 		return targetPos;
 	}
 
-	const handleDragEnd = (nodeType: string) => {
-		const isClick = !hasDragged;
+  const handleDragEnd = (nodeType: string, data: DragEventData) => {
+		const isClick =
+      Math.round(data.offset.x) === 0 && Math.round(data.offset.y) === 0;
 
 		const flowPane = document.querySelector<HTMLDivElement>('.svelte-flow__pane');
 		if (!flowPane) {
@@ -63,7 +64,7 @@
 		let initialPosition: XYPosition;
 		const allNodes = nodesStore.current;
 
-		if (isClick) {
+		if (isClick && !hasDragged) {
 			const flowRect = flowPane.getBoundingClientRect();
 			const centerX = flowRect.left + flowRect.width / 2;
 			const centerY = flowRect.top + flowRect.height / 2;
@@ -82,6 +83,7 @@
 				if (isOverDrawer) {
 					snapbackPos = { x: 0, y: 0 };
 					draggingNode = null;
+          hasDragged = false;
 					return;
 				}
 			}
@@ -96,6 +98,7 @@
 			if (!isOverFlow) {
 				snapbackPos = { x: 0, y: 0 };
 				draggingNode = null;
+        hasDragged = false;
 				return;
 			}
 
@@ -115,6 +118,7 @@
 		nodesStore.update((currentNodes) => [...currentNodes, newNode]);
 		snapbackPos = { x: 0, y: 0 };
 		draggingNode = null;
+    hasDragged = false;
 	};
 </script>
 
@@ -152,7 +156,7 @@
 											onDrag: () => {
 												hasDragged = true;
 											},
-											onDragEnd: () => handleDragEnd('input')
+                      onDragEnd: (d: DragEventData) => handleDragEnd('input', d)
 										})
 									])}
 							>
@@ -178,7 +182,7 @@
 											onDrag: () => {
 												hasDragged = true;
 											},
-											onDragEnd: () => handleDragEnd('default')
+											onDragEnd: (d: DragEventData) => handleDragEnd('default', d)
 										})
 									])}
 							>
@@ -204,7 +208,7 @@
 											onDrag: () => {
 												hasDragged = true;
 											},
-											onDragEnd: () => handleDragEnd('output')
+											onDragEnd: (d: DragEventData) => handleDragEnd('output', d)
 										})
 									])}
 							>

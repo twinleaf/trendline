@@ -15,7 +15,13 @@
     MarkerType
 	} from '@xyflow/svelte';
 	import NodeDrawer from './NodeDrawer.svelte';
+  import InputNode from './nodes/InputNode.svelte';
+  import TransformNode from './nodes/TransformNode.svelte';
+  import OutputNode from './nodes/OutputNode.svelte';
 	import '@xyflow/svelte/dist/style.css';
+	import './node-overrides.css';
+  import { invoke } from '@tauri-apps/api/core';
+  import { mathState } from '$lib/states/mathState.svelte';
 
 	let nodes = $state.raw<Node[]>([]);
 	let edges = $state.raw<Edge[]>([]);
@@ -23,6 +29,12 @@
   const defaultEdgeOptions = {
 		markerEnd: { type: MarkerType.ArrowClosed }
 	};
+
+  const nodeTypes = {
+    input: InputNode,
+    default: TransformNode,
+    output: OutputNode,
+  };
 
 	const onbeforedelete: OnBeforeDelete = async ({ nodes: deletedNodes }) => {
 		let remainingNodes = [...nodes];
@@ -56,10 +68,10 @@
 	<SvelteFlow
 		bind:nodes
 		bind:edges
-		fitView
     snapGrid = {[20, 20] satisfies SnapGrid}
 		{onbeforedelete}
     {defaultEdgeOptions}
+    {nodeTypes}
 		>
 		<Panel position="top-center" class="pointer-events-none z-50">
 			<NodeDrawer />
