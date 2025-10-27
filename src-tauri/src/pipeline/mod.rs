@@ -32,4 +32,5 @@ pub mod fft;
 pub mod manager;
 pub mod passthrough;
 pub mod statistics;
-pub mod math_channel;
+pub mod arithmetic;
+pub mod filtering;

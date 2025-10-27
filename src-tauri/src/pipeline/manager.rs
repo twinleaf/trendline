@@ -3,15 +3,18 @@ use super::detrend::DetrendPipeline;
 use super::fft::FftPipeline;
 use super::passthrough::PassthroughPipeline;
 use super::{Pipeline, PipelineCommand};
+use crate::pipeline::arithmetic::ArithmeticProducer;
+use crate::pipeline::filtering::BiquadProducer;
 use crate::pipeline::statistics::StreamingStatisticsProvider;
 use crate::pipeline::StatisticsProvider;
 use crate::shared::{
-    ColumnStatistics, DataColumnId, DecimationMethod, FftConfig, PipelineId, PlotData,
-    SharedPlotConfig, TimeseriesConfig, ViewConfig,
+    ColumnStatistics, DataColumnId, DecimationMethod, FftConfig, MathChannelConfig, PipelineId, PlotData, SharedPlotConfig, TimeseriesConfig, ViewConfig
 };
 use crate::state::capture::{CaptureCommand, CaptureState};
 use crate::util::k_way_merge_plot_data;
 use crossbeam::channel::{bounded, select, Sender};
+use twinleaf::tio::proto::DeviceRoute;
+use uuid::Uuid;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -37,6 +40,8 @@ enum ThreadType {
     Derived {
         source_key: DataColumnId,
     },
+    ProducerMono { sub_id: usize, source_key: DataColumnId, output_key: DataColumnId },
+    ProducerBi   { sub_id_a: usize, sub_id_b: usize, source_a: DataColumnId, source_b: DataColumnId, output_key: DataColumnId }
 }
 
 struct PipelineThreadHandle {
@@ -124,6 +129,13 @@ impl ProcessingManager {
         }
 
         manager
+    }
+
+    fn new_virtual_key() -> (String, DataColumnId) {
+        let port_url = format!("virtual://math/{}", Uuid::new_v4());
+        let route = DeviceRoute::from_str("").expect("empty route works for virtual");
+        let key = DataColumnId { port_url: port_url.clone(), device_route: route, stream_id: 0, column_index: 0 };
+        (port_url, key)
     }
 
     fn spawn_root_pipeline<P>(&mut self, pipeline: P, source_key: DataColumnId) -> PipelineId
@@ -217,6 +229,115 @@ impl ProcessingManager {
             },
         );
         (id, data_tx)
+    }
+
+    fn spawn_producer_mono<P>(
+        &mut self,
+        pipeline: P,
+        source_key: DataColumnId,
+        output_key: DataColumnId,
+    ) -> PipelineId
+    where
+        P: Pipeline + 'static,
+    {
+        let id = pipeline.id();
+        let pipeline_arc = Arc::new(Mutex::new(pipeline));
+        self.pipelines.insert(id, pipeline_arc.clone());
+
+        let sub_id = self.next_sub_id.fetch_add(1, Ordering::Relaxed);
+        let (data_tx, data_rx) = bounded(128);
+        let (cmd_tx, cmd_rx) = bounded(16);
+
+        self.capture_cmd_tx.send(CaptureCommand::Subscribe {
+            key: source_key.clone(),
+            id: sub_id,
+            tx: data_tx,
+        }).unwrap();
+
+        let capture_clone = self.capture_state.clone();
+        let handle = thread::Builder::new()
+            .name(format!("pipeline-producer-mono-{:?}", id))
+            .spawn(move || loop {
+                select! {
+                    recv(data_rx) -> msg => match msg {
+                        Ok(batch) => pipeline_arc.lock().unwrap().process_batch(batch),
+                        Err(_) => break,
+                    },
+                    recv(cmd_rx) -> msg => match msg {
+                        Ok(cmd) => {
+                            if matches!(cmd, PipelineCommand::Shutdown) { break; }
+                            pipeline_arc.lock().unwrap().process_command(cmd, &capture_clone);
+                        },
+                        Err(_) => break,
+                    }
+                }
+            })
+            .unwrap();
+
+        self.pipeline_threads.insert(id, PipelineThreadHandle {
+            cmd_tx, handle,
+            thread_type: ThreadType::ProducerMono { sub_id, source_key, output_key },
+        });
+        id
+    }
+
+    fn spawn_producer_bi<P>(
+        &mut self,
+        pipeline: P,
+        source_a: DataColumnId,
+        source_b: DataColumnId,
+        output_key: DataColumnId,
+    ) -> PipelineId
+    where
+        P: Pipeline + 'static,
+    {
+        let id = pipeline.id();
+        let pipeline_arc = Arc::new(Mutex::new(pipeline));
+        self.pipelines.insert(id, pipeline_arc.clone());
+
+        let sub_id_a = self.next_sub_id.fetch_add(1, Ordering::Relaxed);
+        let sub_id_b = self.next_sub_id.fetch_add(1, Ordering::Relaxed);
+
+        let (a_tx, a_rx) = bounded(128);
+        let (b_tx, b_rx) = bounded(128);
+        let (cmd_tx, cmd_rx) = bounded(16);
+
+        self.capture_cmd_tx.send(CaptureCommand::Subscribe {
+            key: source_a.clone(), id: sub_id_a, tx: a_tx
+        }).unwrap();
+        self.capture_cmd_tx.send(CaptureCommand::Subscribe {
+            key: source_b.clone(), id: sub_id_b, tx: b_tx
+        }).unwrap();
+
+        let capture_clone = self.capture_state.clone();
+        let handle = thread::Builder::new()
+            .name(format!("pipeline-producer-bi-{:?}", id))
+            .spawn(move || loop {
+                select! {
+                    recv(a_rx) -> msg => match msg {
+                        Ok(batch) => pipeline_arc.lock().unwrap().process_batch(batch),
+                        Err(_) => break,
+                    },
+                    recv(b_rx) -> msg => match msg {
+                        Ok(batch) => pipeline_arc.lock().unwrap().process_batch(batch),
+                        Err(_) => break,
+                    },
+                    recv(cmd_rx) -> msg => match msg {
+                        Ok(cmd) => {
+                            if matches!(cmd, PipelineCommand::Shutdown) { break; }
+                            pipeline_arc.lock().unwrap().process_command(cmd, &capture_clone);
+                        },
+                        Err(_) => break,
+                    }
+                }
+            })
+            .unwrap();
+
+        self.pipeline_threads.insert(id, PipelineThreadHandle {
+            cmd_tx, handle,
+            thread_type: ThreadType::ProducerBi { sub_id_a, sub_id_b, source_a, source_b, output_key },
+        });
+        id
     }
 
     pub fn apply_plot_config(
@@ -401,6 +522,27 @@ impl ProcessingManager {
         id
     }
 
+    pub fn create_math_channel(&mut self, spec: MathChannelConfig) -> Result<(PipelineId, DataColumnId), String> {
+        let (_port, out_key) = Self::new_virtual_key();
+        let pid = match spec {
+            MathChannelConfig::Arithmetic { a, op, b } => {
+                let p = ArithmeticProducer::new(a.clone(), b.clone(), op, out_key.clone(), self.capture_cmd_tx.clone());
+                self.spawn_producer_bi(p, a, b, out_key.clone())
+            }
+            MathChannelConfig::Biquad { src, kind, params } => {
+                let p = BiquadProducer::new(src.clone(), kind, params, out_key.clone(), self.capture_cmd_tx.clone());
+                self.spawn_producer_mono(p, src, out_key.clone())
+            }
+        };
+
+        // register virtual stream and hydrate
+        self.capture_state.register_virtual_stream(out_key.clone(), pid);
+        if let Some(h) = self.pipeline_threads.get(&pid) {
+            let _ = h.cmd_tx.send(PipelineCommand::Hydrate);
+        }
+        Ok((pid, out_key))
+    }
+
     pub fn destroy(&mut self, id: PipelineId) {
         if let Some(handle) = self.pipeline_threads.remove(&id) {
             match &handle.thread_type {
@@ -423,6 +565,13 @@ impl ProcessingManager {
                 ThreadType::Derived { .. } => {
                     println!("[Pipeline] Destroying derived pipeline {:?}.", id);
                 }
+                ThreadType::ProducerMono { sub_id, source_key, output_key: _ } => {
+                    let _ = self.capture_cmd_tx.send(CaptureCommand::Unsubscribe { key: source_key.clone(), id: *sub_id });
+                }
+                ThreadType::ProducerBi { sub_id_a, sub_id_b, source_a, source_b, output_key: _ } => {
+                    let _ = self.capture_cmd_tx.send(CaptureCommand::Unsubscribe { key: source_a.clone(), id: *sub_id_a });
+                    let _ = self.capture_cmd_tx.send(CaptureCommand::Unsubscribe { key: source_b.clone(), id: *sub_id_b });
+                }
             }
 
             let _ = handle.cmd_tx.send(PipelineCommand::Shutdown);
@@ -443,6 +592,14 @@ impl ProcessingManager {
             );
         }
     }
+
+    pub fn destroy_virtual_stream(&mut self, key: &DataColumnId) {
+        if let Some(pid) = self.capture_state.inner.virtual_streams.get(key).map(|v| *v.value()) {
+            self.destroy(pid);
+        }
+        self.capture_state.unregister_virtual_stream(key);
+    }
+
     pub fn clear_column(
         &mut self,
         column_key: &DataColumnId,
@@ -455,8 +612,14 @@ impl ProcessingManager {
             match &handle.thread_type {
                 ThreadType::Root { source_key, .. }
                 | ThreadType::Statistics { source_key, .. }
-                | ThreadType::Derived { source_key } => {
+                | ThreadType::Derived { source_key }
+                | ThreadType::ProducerMono { source_key, .. } => {
                     if source_key == column_key {
+                        let _ = handle.cmd_tx.send(PipelineCommand::ResetSelf);
+                    }
+                }
+                ThreadType::ProducerBi { source_a, source_b, .. } => {
+                    if source_a == column_key || source_b == column_key {
                         let _ = handle.cmd_tx.send(PipelineCommand::ResetSelf);
                     }
                 }
@@ -482,13 +645,26 @@ impl ProcessingManager {
         // Snapshot the column keys in this stream (from all pipeline threads).
         let mut column_keys: Vec<DataColumnId> = Vec::new();
         for handle in self.pipeline_threads.values() {
-            let source_key = match &handle.thread_type {
+            match &handle.thread_type {
                 ThreadType::Root { source_key, .. }
                 | ThreadType::Statistics { source_key, .. }
-                | ThreadType::Derived { source_key } => source_key,
-            };
-            if source_key.stream_key() == stream_key && !column_keys.contains(source_key) {
-                column_keys.push(source_key.clone());
+                | ThreadType::Derived { source_key }
+                | ThreadType::ProducerMono { source_key, .. } => {
+                    if source_key.stream_key() == stream_key
+                        && !column_keys.contains(source_key)
+                    {
+                        column_keys.push(source_key.clone());
+                    }
+                }
+                ThreadType::ProducerBi { source_a, source_b, .. } => {
+                    for src in [source_a, source_b] {
+                        if src.stream_key() == stream_key
+                            && !column_keys.contains(src)
+                        {
+                            column_keys.push(src.clone());
+                        }
+                    }
+                }
             }
         }
 
@@ -509,15 +685,25 @@ impl ProcessingManager {
         let mut stream_keys: Vec<DataColumnId> = Vec::new();
 
         for handle in self.pipeline_threads.values() {
-            let source_key = match &handle.thread_type {
+            let mut maybe_sources: Vec<&DataColumnId> = Vec::new();
+            match &handle.thread_type {
                 ThreadType::Root { source_key, .. }
                 | ThreadType::Statistics { source_key, .. }
-                | ThreadType::Derived { source_key } => source_key,
+                | ThreadType::Derived { source_key }
+                | ThreadType::ProducerMono { source_key, .. } => {
+                    maybe_sources.push(source_key);
+                }
+                ThreadType::ProducerBi { source_a, source_b, .. } => {
+                    maybe_sources.push(source_a);
+                    maybe_sources.push(source_b);
+                }
             };
-            if source_key.device_key() == device_key {
-                let sk = source_key.stream_key();
-                if !stream_keys.iter().any(|k| k.stream_key() == sk) {
-                    stream_keys.push(sk);
+            for src in maybe_sources {
+                if src.device_key() == device_key {
+                    let sk = src.stream_key();
+                    if !stream_keys.iter().any(|k| k.stream_key() == sk) {
+                        stream_keys.push(sk);
+                    }
                 }
             }
         }
@@ -544,23 +730,27 @@ impl ProcessingManager {
         id: PipelineId,
         reset_capture_state: bool,
     ) -> Result<(), String> {
-        let (cmd_tx, upstream_stream_key): (Sender<PipelineCommand>, Option<DataColumnId>) = {
+        let (cmd_tx, upstream_stream_keys): (Sender<PipelineCommand>, Vec<DataColumnId>) = {
             let h = self.pipeline_threads.get(&id).ok_or("Pipeline not found")?;
-            let key_opt = match &h.thread_type {
-                ThreadType::Root { source_key, .. } | ThreadType::Statistics { source_key, .. } => {
-                    Some(source_key.clone())
+            let keys: Vec<DataColumnId> = match &h.thread_type {
+                ThreadType::Root { source_key, .. }
+                | ThreadType::Statistics { source_key, .. } => vec![source_key.clone()],
+                ThreadType::Derived { .. } => vec![],
+                ThreadType::ProducerMono { source_key, .. } => vec![source_key.clone()],
+                ThreadType::ProducerBi { source_a, source_b, .. } => {
+                    vec![source_a.clone(), source_b.clone()]
                 }
-                ThreadType::Derived { .. } => None,
             };
-            (h.cmd_tx.clone(), key_opt)
+            (h.cmd_tx.clone(), keys)
         };
-
         cmd_tx
             .send(PipelineCommand::ResetSelf)
             .map_err(|e| e.to_string())?;
 
         if reset_capture_state {
-            if let Some(k) = upstream_stream_key { self.clear_column(&k, true)?; }
+            for k in upstream_stream_keys {
+                self.clear_column(&k, true)?;
+            }
         } else {
             let _ = cmd_tx.send(PipelineCommand::Hydrate);
         }
@@ -583,4 +773,4 @@ impl ProcessingManager {
         );
         self.statistics_channels.insert(provider_id, channel);
     }
-}
+    }
