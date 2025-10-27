@@ -13,14 +13,13 @@ use crate::shared::{
 use crate::state::capture::{CaptureCommand, CaptureState};
 use crate::util::k_way_merge_plot_data;
 use crossbeam::channel::{bounded, select, Sender};
-use twinleaf::tio::proto::DeviceRoute;
-use uuid::Uuid;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
+static NEXT_MATH_STREAM_ID: AtomicU8 = AtomicU8::new(1);
 
 pub struct ManagedPlotPipeline {
     pub config: SharedPlotConfig,
@@ -132,9 +131,15 @@ impl ProcessingManager {
     }
 
     fn new_virtual_key() -> (String, DataColumnId) {
-        let port_url = format!("virtual://math/{}", Uuid::new_v4());
-        let route = DeviceRoute::from_str("").expect("empty route works for virtual");
-        let key = DataColumnId { port_url: port_url.clone(), device_route: route, stream_id: 0, column_index: 0 };
+        let port_url = "virtual://math".to_string();
+        let route = twinleaf::tio::proto::DeviceRoute::from_str("").unwrap();
+        let stream_id = NEXT_MATH_STREAM_ID.fetch_add(1, Ordering::Relaxed);
+        let key = DataColumnId {
+            port_url: port_url.clone(),
+            device_route: route,
+            stream_id,
+            column_index: 0,
+        };
         (port_url, key)
     }
 
