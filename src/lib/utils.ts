@@ -1,7 +1,7 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import type { AlignedData } from 'uplot';
 import type { UiDevice } from '$lib/bindings/UiDevice';
+import type { DataColumnId } from '$lib/bindings/DataColumnId';
 
 export function cn(...inputs: ClassValue[]) {
 	return twMerge(clsx(inputs));
@@ -52,121 +52,6 @@ export function sortUiDevicesByRoute(a: UiDevice, b: UiDevice): number {
     return partsA.length - partsB.length;
 }
 
-/**
- * A Ring Buffer specifically designed for uPlot time-series data.
- * It stores a fixed number of data points and efficiently overwrites the oldest
- * points once the buffer's capacity is reached.
- */
-export class TimeSeriesRingBuffer {
-  private capacity: number;
-  private numSeries: number;
-  private head: number = 0; // Points to the next slot to be written
-  private size: number = 0; // Number of elements currently in the buffer
-
-  // Data is stored in uPlot's expected format: [timestamps, series1, series2, ...]
-  private buffer: Float64Array[];
-  private lastSeenTimestamp: number = -Infinity;
-
-  constructor(capacity: number, numSeries: number) {
-    if (capacity <= 0 || numSeries < 0) {
-      throw new Error("Capacity and numSeries must be positive.");
-    }
-    this.capacity = capacity;
-    this.numSeries = numSeries;
-
-    // Allocate all arrays upfront. +1 for the timestamps array.
-    this.buffer = Array.from({ length: numSeries + 1 }, () => new Float64Array(capacity));
-  }
-
-  /**
-   * Appends a chunk of new data. `newData` should be in uPlot's AlignedData format.
-   * This is the primary method for adding delta updates.
-   * @param newData The new data to append, as [timestamps, series1, ...]
-   */
-  public appendBulk(newData: AlignedData): void {
-    const newTimestamps = newData[0];
-    const newPointsCount = newTimestamps.length;
-
-    if (newPointsCount === 0 || !newTimestamps) return;
-
-    for (let seriesIdx = 0; seriesIdx < this.numSeries + 1; seriesIdx++) {
-      const sourceSeries = newData[seriesIdx];
-      const targetSeries = this.buffer[seriesIdx];
-
-      if (!sourceSeries) continue;
-
-      const normalizedSource = Float64Array.from(
-        sourceSeries as ArrayLike<number | null | undefined>,
-        v => v ?? NaN
-      );
-
-      const spaceToEnd = this.capacity - this.head;
-
-      if (newPointsCount <= spaceToEnd) {
-        targetSeries.set(normalizedSource, this.head);
-      } else {
-        const part1 = normalizedSource.subarray(0, spaceToEnd);
-        targetSeries.set(part1, this.head);
-
-        const part2 = normalizedSource.subarray(spaceToEnd);
-        targetSeries.set(part2, 0);
-      }
-    }
-
-    this.head = (this.head + newPointsCount) % this.capacity;
-    this.size = Math.min(this.capacity, this.size + newPointsCount);
-
-    const latestInChunk = newTimestamps[newPointsCount - 1];
-    if (typeof latestInChunk === 'number' && latestInChunk > this.lastSeenTimestamp) {
-      this.lastSeenTimestamp = latestInChunk;
-    }
-  }
-
-  /**
-   * Retrieves the latest timestamp seen by the buffer.
-   * Used for the `since_timestamp` parameter in `get_decimated_delta`.
-   */
-  public getLastTimestamp(): number {
-    return this.lastSeenTimestamp;
-  }
-
-  /**
-   * Returns the data in a sorted, contiguous format suitable for uPlot.
-   * This is necessary because the ring buffer's internal storage is not
-   * guaranteed to be in chronological order after the head wraps around.
-   */
-  public getAlignedData(): Float64Array[] {
-    const alignedData: Float64Array[] = Array.from(
-      { length: this.numSeries + 1 },
-      () => new Float64Array(this.size)
-    );
-
-    if (this.size === 0) {
-      return alignedData;
-    }
-
-
-    const start = this.size < this.capacity ? 0 : this.head;
-    const end = this.head;
-
-    if (start < end) {
-      for (let i = 0; i < this.numSeries + 1; i++) {
-        alignedData[i].set(this.buffer[i].subarray(start, end));
-      }
-    } else { 
-      for (let i = 0; i < this.numSeries + 1; i++) {
-        const tail = this.buffer[i].subarray(start);
-        alignedData[i].set(tail, 0);
-
-        const headPart = this.buffer[i].subarray(0, end);
-        alignedData[i].set(headPart, tail.length);
-      }
-    }
-    return alignedData;
-  }
-}
-
-
 export function lerp(x1: number, y1: number, x2: number, y2: number, x: number): number {
     if (Math.abs(x2 - x1) < 1e-9) return y1; // Avoid division by zero
     return y1 + (y2 - y1) * (x - x1) / (x2 - x1);
@@ -184,4 +69,40 @@ export function findTimestampIndex(timestamps: Float64Array | number[], targetTi
         }
     }
     return low;
+}
+
+export const isVirtualUrl = (url: string) => url.startsWith('virtual://');
+export const isVirtualKey = (k: DataColumnId) => isVirtualUrl(k.port_url);
+
+export type ChannelCaps = {
+  // high-level intent flags used by different views
+  showInDeviceSelector: boolean;
+  showInRpcPanel: boolean;
+  showInStreamHealth: boolean;
+  plottable: boolean;
+  badge?: 'virtual';
+};
+
+export function capsForDevice(d: UiDevice): ChannelCaps {
+  const v = isVirtualUrl(d.url);
+  const hasRpcs = (d.rpcs?.length ?? 0) > 0;
+  return {
+    showInDeviceSelector: !v,    // Device picker should not list virtual
+    showInRpcPanel: !v && hasRpcs,
+    showInStreamHealth: !v,      // default policy: exclude virtual
+    plottable: true,
+    badge: v ? 'virtual' : undefined,
+  };
+}
+
+// When you only have a column key (e.g., tables, monitors):
+export function capsForKey(k: DataColumnId): ChannelCaps {
+  const v = isVirtualKey(k);
+  return {
+    showInDeviceSelector: !v,
+    showInRpcPanel: !v,
+    showInStreamHealth: !v,
+    plottable: true,
+    badge: v ? 'virtual' : undefined,
+  };
 }
