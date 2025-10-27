@@ -8,8 +8,9 @@
 	import { ScrollArea } from '$lib/components/ui/scroll-area/index.js';
 	import SplitButton from '$lib/components/chart-area/SplitButton.svelte';
 	import type { UiStream } from '$lib/bindings/UiStream';
+	import type { UiDevice } from '$lib/bindings/UiDevice';
 	import type { ColumnMeta } from '$lib/bindings/ColumnMeta';
-	import { sortUiDevicesByRoute } from '$lib/utils';
+	import { sortUiDevicesByRoute, isVirtualUrl } from '$lib/utils';
 	import { onDestroy } from 'svelte';
 	import * as ContextMenu from '$lib/components/ui/context-menu/index.js';
 	import {
@@ -37,9 +38,23 @@
 	let treeData = $derived.by((): TreeRow[] => {
 		const topLevelNodes: TreeRow[] = [];
 
-		const devicesForTree = deviceState.selectedDevices.length
-			? [...deviceState.selectedDevices]
-			: [];
+		const selected = deviceState.selectedDevices as UiDevice[];
+		const allVirtual: UiDevice[] = (() => {
+			 const out: UiDevice[] = [];
+			 for (const entry of deviceState.devices) {
+				for (const d of entry.devices) {
+					if (isVirtualUrl(d.url)) out.push(d);
+				}
+			}
+			return out;
+		})();
+
+		const devicesForTree: UiDevice[] = [...selected];
+		for (const v of allVirtual) {
+			if (!devicesForTree.some(d => d.url === v.url && d.route === v.route)) {
+				devicesForTree.push(v);
+			}
+		}
 
 		const sortedDevices = devicesForTree.sort(sortUiDevicesByRoute);
 

@@ -5,8 +5,11 @@
 	import * as Accordion from '$lib/components/ui/accordion/index.js';
 	import DataTable from './data-table/DataTable.svelte';
 	import { columns } from './data-table/column';
+	import { capsForDevice } from '$lib/utils';
 
-	let selectedDevices: UiDevice[] = $derived(deviceState.selectedDevices);
+	let selectedDevices: UiDevice[] = $derived(
+		deviceState.selectedDevices.filter(d => capsForDevice(d).showInRpcPanel)
+	)
 
 	let accordionContainerEl: HTMLDivElement | undefined = $state(undefined);
 	let contentHeight = $state(0);

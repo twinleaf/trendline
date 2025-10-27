@@ -9,7 +9,7 @@
   import type { UiDevice } from '$lib/bindings/UiDevice';
   import { deviceState } from '$lib/states/deviceState.svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { deviceDomId } from '$lib/utils';
+  import { deviceDomId, capsForDevice } from '$lib/utils';
 
   type DeviceWithChildren = UiDevice & { children: UiDevice[] };
 
@@ -28,6 +28,10 @@
       console.error('refresh_port failed', e);
     }
   }
+
+  const filteredDevices = $derived(
+    devices.filter(d => capsForDevice(d).showInDeviceSelector)
+)
 </script>
 
 <RadioGroup.Root
@@ -35,7 +39,7 @@
   orientation="vertical"
   class="relative focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md"
 >
-  {#each devices as root (root.url)}
+  {#each filteredDevices as root (root.url)}
     <Collapsible.Root class="w-full" aria-busy={root.state === 'Discovery' || root.state === 'Reconnecting'}>
       <div class="flex items-center justify-between px-2 py-1.5">
         <div class="flex items-center space-x-2">

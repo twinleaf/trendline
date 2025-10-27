@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { deviceState } from '$lib/states/deviceState.svelte';
 	import { streamMonitorState } from '$lib/states/streamMonitorState.svelte';
-	import { sortUiDevicesByRoute } from '$lib/utils';
+	import { isVirtualUrl, sortUiDevicesByRoute } from '$lib/utils';
 	import type { UiStream } from '$lib/bindings/UiStream';
 	import type { ColumnMeta } from '$lib/bindings/ColumnMeta';
 	import type { TreeRow } from '$lib/components/chart-area/data-table/column';
@@ -24,6 +24,7 @@
 	let isInitialSelectionDone = false;
 	let isWipeDialogOpen = $state(false);
 	let showDesc = $state(true);
+	let includeVirtual = $state(false);
 
 	onMount(() => {
 		streamMonitorState.init();
@@ -50,9 +51,23 @@
 	let treeData = $derived.by((): TreeRow[] => {
 		const topLevelNodes: TreeRow[] = [];
 
-		const devicesForTree = deviceState.selectedDevices.length
-			? [...deviceState.selectedDevices]
-			: [];
+		const selected = deviceState.selectedDevices as UiDevice[];
+		const virtuals: UiDevice[] = (() => {
+			if (!includeVirtual) return [];
+			const out: UiDevice[] = [];
+			for (const entry of deviceState.devices) {
+				for (const d of entry.devices) {
+					if (isVirtualUrl(d.url)) out.push(d);
+				}
+			}
+			return out;
+		})();
+		const devicesForTree: UiDevice[] = [...selected];
+		for (const v of virtuals) {
+			if (!devicesForTree.some(d => d.url === v.url && d.route === v.route)) {
+				devicesForTree.push(v);
+			}
+		}
 
 		const sortedDevices = devicesForTree.sort(sortUiDevicesByRoute);
 
@@ -130,6 +145,7 @@
 		for (const key of leafNodeKeys) {
 			try {
 				const dataKey = JSON.parse(key);
+				if (!includeVirtual && isVirtualUrl(dataKey.port_url)) continue;
 				const device = deviceState.getDevice(dataKey.port_url, dataKey.device_route);
 				const stream = device?.streams.find((s) => s.meta.stream_id === dataKey.stream_id);
 				const column = stream?.columns.find((c) => c.index === dataKey.column_index);
@@ -245,7 +261,11 @@
 						<h3 class="mb-2 px-1 font-semibold">Channel Selection</h3>
 						<div class="mb-2 px-1 flex items-center gap-1">
 							<Checkbox id="terms" bind:checked={showDesc}/>
-							<Label>Descriptive names</Label>
+							<Label for="terms">Descriptive names</Label>
+						</div>
+						<div class="mb-2 px-1 flex items-center gap-1">
+							<Checkbox id="virt" bind:checked={includeVirtual}/>
+							<Label for="virt">Virtual channels</Label>
 						</div>
 					</div>
 					<ScrollArea class="h-full">

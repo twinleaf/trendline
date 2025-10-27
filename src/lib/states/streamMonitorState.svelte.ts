@@ -5,6 +5,7 @@ import type { ColumnStatistics } from '$lib/bindings/ColumnStatistics';
 import type { DataColumnId } from '$lib/bindings/DataColumnId';
 import { SvelteMap } from 'svelte/reactivity';
 import { untrack } from 'svelte';
+import { isVirtualKey } from '$lib/utils';
 
 class StreamMonitorState {
 	// --- Public State ---
@@ -55,6 +56,7 @@ class StreamMonitorState {
 		for (const keyStr of keysToAdd) {
 			try {
 				const dataKey: DataColumnId = JSON.parse(keyStr);
+				if (isVirtualKey(dataKey)) continue;
 				const pipelineId = await invoke<PipelineId>('create_statistics_provider', { sourceKey: dataKey, windowSeconds: 1.0 });
 
 				this.#pipelineIds.set(keyStr, pipelineId);
