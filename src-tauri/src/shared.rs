@@ -498,3 +498,42 @@ pub struct ColumnStatistics {
     pub persistent_health: HealthSet,
     pub window_health: HealthSet,
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum MathOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum BiquadKind {
+    Lowpass,
+    Highpass,
+    Bandpass,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct BiquadParams {
+    pub cutoff_hz: f64,
+    pub q: f64, // for BPF: bandwidth via Q
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum MathChannelConfig {
+    Arithmetic {
+        a: DataColumnId,
+        op: MathOp,
+        b: DataColumnId,
+    },
+    Biquad {
+        src: DataColumnId,
+        kind: BiquadKind,
+        params: BiquadParams,
+    },
+}
