@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::{
     pipeline::manager::ProcessingManager,
-    shared::{ColumnStatistics, DataColumnId, PipelineId, PlotData, SharedPlotConfig},
+    shared::{ColumnStatistics, DataColumnId, MathChannelConfig, PipelineId, PlotData, SharedPlotConfig},
 };
 use tauri::{ipc::Channel, State};
 
@@ -37,6 +37,14 @@ pub fn create_statistics_provider(
 }
 
 #[tauri::command]
+pub fn create_math_channel(
+    spec: MathChannelConfig,
+    manager: State<Arc<Mutex<ProcessingManager>>>,
+) -> Result<(PipelineId, DataColumnId), String> {
+    manager.lock().unwrap().create_math_channel(spec)
+}
+
+#[tauri::command]
 pub async fn listen_to_plot_data(
     plot_id: String,
     on_event: Channel<PlotData>,
@@ -65,6 +73,16 @@ pub async fn listen_to_statistics(
 #[tauri::command]
 pub fn destroy_processor(id: PipelineId, manager: State<Arc<Mutex<ProcessingManager>>>) {
     manager.lock().unwrap().destroy(id);
+}
+
+#[tauri::command]
+pub fn destroy_math_channel(
+    output_key: DataColumnId,
+    manager: State<Arc<Mutex<ProcessingManager>>>,
+) -> Result<(), String> {
+    // Need separate because otherwise tears down math_channel alongside visualization plots
+    manager.lock().unwrap().destroy_virtual_stream(&output_key);
+    Ok(())
 }
 
 #[tauri::command]
