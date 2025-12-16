@@ -124,7 +124,7 @@
   }
 </script>
 
-<div class="rounded-md border bg-card text-card-foreground shadow p-3 w-[280px]">
+<div class="rounded-md border bg-card text-card-foreground shadow p-3 min-w-[280px]">
   <div class="flex items-center justify-between mb-3">
     <div class="text-xs font-semibold">Input</div>
     {#if data.key}
@@ -193,8 +193,6 @@
 
   <div class="mt-3 pt-3 border-t">
     <div class="text-[10px] text-muted-foreground text-center mb-1">Output</div>
-    <div class="flex justify-center h-3">
       <Handle type="source" position={Position.Bottom} />
-    </div>
   </div>
 </div>

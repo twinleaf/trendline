@@ -82,7 +82,7 @@
   const arithmeticOps = [
     { value: "", label: "Select op..." },
     { value: "Add", label: "Add (+)" },
-    { value: "Sub", label: "Subtract (−)" },
+    { value: "Sub", label: "Subtract (-)" },
     { value: "Mul", label: "Multiply (×)" },
     { value: "Div", label: "Divide (÷)" }
   ];
@@ -118,15 +118,23 @@
   });
 </script>
 
-<div class="rounded-md border bg-card text-card-foreground shadow p-3 w-[280px]">
-  <div class="flex justify-around items-center mb-3 h-3">
+<div class="rounded-md border bg-card text-card-foreground shadow p-3 min-w-[280px]">
+  <div class="flex justify-around items-center mb-3 px-8">
     <div class="flex flex-col items-center">
-      <Handle type="target" position={Position.Top} id="a" />
-      <div class="text-[10px] text-muted-foreground mt-1">A</div>
+      <Handle 
+        type="target" 
+        position={Position.Top} 
+        id="a"
+      />
+      <div class="text-[10px] text-muted-foreground mt-1 text-center">A</div>
     </div>
     <div class="flex flex-col items-center">
-      <Handle type="target" position={Position.Top} id="b" />
-      <div class="text-[10px] text-muted-foreground mt-1">B</div>
+      <Handle 
+        type="target" 
+        position={Position.Top} 
+        id="b"
+      />
+      <div class="text-[10px] text-muted-foreground mt-1 text-center">B</div>
     </div>
   </div>
 
@@ -278,8 +286,6 @@
 
   <div class="mt-3 pt-3 border-t">
     <div class="text-[10px] text-muted-foreground text-center mb-1">Output</div>
-    <div class="flex justify-center h-3">
       <Handle type="source" position={Position.Bottom} id="out" />
-    </div>
   </div>
 </div>

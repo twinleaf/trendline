@@ -8,6 +8,7 @@
   box-shadow: none !important;
   /* Keep nodes at low z-index */
   z-index: 1 !important;
+  overflow: visible !important;
 }
 
 /* Remove default node body styling */
@@ -18,53 +19,39 @@
   border: none !important;
   padding: 0 !important;
   box-shadow: none !important;
+  width: fit-content !important;
+  height: fit-content !important;
 }
 
-/* Ensure handles are properly positioned and visible */
 .svelte-flow__handle {
-  width: 12px !important;
-  height: 12px !important;
-  background: hsl(var(--primary)) !important;
-  border: 2px solid hsl(var(--background)) !important;
-  opacity: 1 !important;
-  /* Handles should be above edges */
-  z-index: 15 !important;
-  position: absolute !important;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box; 
+  background: #3b82f6;
+  border: 2px solid white;
+  border-radius: 50%;
+  position: relative;
+  z-index: 1000;
+  pointer-events: all;
 }
-
 .svelte-flow__handle:hover {
-  background: hsl(var(--primary) / 0.8) !important;
-  transform: scale(1.2);
+  background: hsl(142 76% 36%); /* green */
 }
 
-/* When connecting, show valid connection targets */
-.svelte-flow__handle-valid {
-  background: hsl(142.1 76.2% 36.3%) !important; /* green-600 */
+.svelte-flow__handle.valid {
+  background: hsl(142 76% 36%); /* green */
 }
 
-.svelte-flow__handle-connecting {
-  background: hsl(var(--primary) / 0.6) !important;
+.svelte-flow__handle.connecting {
+  background: hsl(0 84% 60%); /* red */
 }
 
-/* Edges should be above nodes always */
-.svelte-flow__edge {
-  z-index: 10 !important;
+.svelte-flow__edges {
+  z-index: 2;
+  pointer-events: none;
 }
 
-/* Selected edges should be even higher */
-.svelte-flow__edge.selected {
-  z-index: 11 !important;
-}
-
-/* Style for selected nodes - keep below edges */
 .svelte-flow__node.selected {
-  /* Add a subtle glow effect to the entire node when selected */
-  filter: drop-shadow(0 0 8px hsl(var(--primary) / 0.5));
-  /* Keep same z-index so edges stay on top */
-  z-index: 1 !important;
-}
-
-/* Ensure the node content gets pointer events */
-.svelte-flow__node > div {
-  pointer-events: auto;
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
 }

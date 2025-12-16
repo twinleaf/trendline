@@ -33,6 +33,7 @@
 	let drawerContentRef: HTMLDivElement | null = $state(null);
 
 	const CASCADE_OFFSET = 5;
+	const DRAG_THRESHOLD = 5;
 
 	function getOffsetPosition(targetPos: XYPosition, allNodes: Node[]): XYPosition {
 		const collision = allNodes.find(
@@ -51,13 +52,14 @@
 	}
 
   const handleDragEnd = (nodeType: string, data: DragEventData) => {
-		const isClick =
-      Math.round(data.offset.x) === 0 && Math.round(data.offset.y) === 0;
+		const CLICK_THRESHOLD = 5;
+		const isClick = (data.offset.x ** 2 + data.offset.y ** 2) < CLICK_THRESHOLD ** 2;
 
 		const flowPane = document.querySelector<HTMLDivElement>('.svelte-flow__pane');
 		if (!flowPane) {
 			snapbackPos = { x: 0, y: 0 };
 			draggingNode = null;
+			hasDragged = false;
 			return;
 		}
 
@@ -120,6 +122,24 @@
 		draggingNode = null;
     hasDragged = false;
 	};
+
+	function createDragEvents(nodeType: string) {
+		return events({
+			onDragStart: () => {
+				hasDragged = false;
+			},
+			onDrag: (d: DragEventData) => {
+				if (!hasDragged) {
+					const distance = Math.sqrt(d.offset.x ** 2 + d.offset.y ** 2);
+					if (distance > DRAG_THRESHOLD) {
+						hasDragged = true;
+						draggingNode = nodeType;
+					}
+				}
+			},
+			onDragEnd: (d: DragEventData) => handleDragEnd(nodeType, d)
+		});
+	}
 </script>
 
 <div class="pointer-events-auto">
@@ -143,21 +163,12 @@
 						<h4 class="text-[11px] uppercase tracking-wide opacity-70 mb-1">Sources</h4>
 						<div class="flex flex-wrap gap-2 justify-center">
 							<div
-								class="relative select-none cursor-grab rounded border px-3 py-1 text-xs font-medium hover:bg-muted"
-								class:z-50={draggingNode === 'input'}
+								class="node-drawer-item relative select-none cursor-grab rounded border px-3 py-1 text-xs font-medium hover:bg-muted"
+								class:dragging={draggingNode === 'input'}
 								{@attach
 									draggable(() => [
 										posComp,
-										events({
-											onDragStart: () => {
-												draggingNode = 'input';
-												hasDragged = false;
-											},
-											onDrag: () => {
-												hasDragged = true;
-											},
-                      onDragEnd: (d: DragEventData) => handleDragEnd('input', d)
-										})
+										createDragEvents('input')
 									])}
 							>
 								Input
@@ -169,21 +180,12 @@
 						<h4 class="text-[11px] uppercase tracking-wide opacity-70 mb-1">Transforms</h4>
 						<div class="flex flex-wrap gap-2 justify-center">
 							<div
-								class="relative select-none cursor-grab rounded border px-3 py-1 text-xs font-medium hover:bg-muted"
-								class:z-50={draggingNode === 'default'}
+								class="node-drawer-item relative select-none cursor-grab rounded border px-3 py-1 text-xs font-medium hover:bg-muted"
+								class:dragging={draggingNode === 'default'}
 								{@attach
 									draggable(() => [
 										posComp,
-										events({
-											onDragStart: () => {
-												draggingNode = 'default';
-												hasDragged = false;
-											},
-											onDrag: () => {
-												hasDragged = true;
-											},
-											onDragEnd: (d: DragEventData) => handleDragEnd('default', d)
-										})
+										createDragEvents('default')
 									])}
 							>
 								Default
@@ -195,21 +197,12 @@
 						<h4 class="text-[11px] uppercase tracking-wide opacity-70 mb-1">Sinks</h4>
 						<div class="flex flex-wrap gap-2 justify-center">
 							<div
-								class="relative select-none cursor-grab rounded border px-3 py-1 text-xs font-medium hover:bg-muted"
-								class:z-50={draggingNode === 'output'}
+								class="node-drawer-item relative select-none cursor-grab rounded border px-3 py-1 text-xs font-medium hover:bg-muted"
+								class:dragging={draggingNode === 'output'}
 								{@attach
 									draggable(() => [
 										posComp,
-										events({
-											onDragStart: () => {
-												draggingNode = 'output';
-												hasDragged = false;
-											},
-											onDrag: () => {
-												hasDragged = true;
-											},
-											onDragEnd: (d: DragEventData) => handleDragEnd('output', d)
-										})
+										createDragEvents('output')
 									])}
 							>
 								Output
@@ -221,3 +214,13 @@
 		</Collapsible.Content>
 	</Collapsible.Root>
 </div>
+
+<style>
+	.node-drawer-item {
+		z-index: 10;
+	}
+
+	.node-drawer-item.dragging {
+		z-index: 9999;
+	}
+</style>

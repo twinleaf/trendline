@@ -72,6 +72,9 @@
 		{onbeforedelete}
     {defaultEdgeOptions}
     {nodeTypes}
+		nodesDraggable={true}
+		nodesConnectable={true}
+		elementsSelectable={true}
 		>
 		<Panel position="top-center" class="pointer-events-none z-50">
 			<NodeDrawer />

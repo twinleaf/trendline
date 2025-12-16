@@ -22,10 +22,10 @@
   }
 </script>
 
-<div class="rounded-md border bg-card text-card-foreground shadow p-3 w-[220px]">
-  <div class="flex justify-center h-3 mb-3">
-    <div class="text-[10px] text-muted-foreground text-center">Input</div>
+<div class="rounded-md border bg-card text-card-foreground shadow p-3 min-w-[220px]">
+    <div class="mb-3">
     <Handle type="target" position={Position.Top} />
+    <div class="text-[10px] text-muted-foreground text-center">Input</div>
   </div>
 
   <div class="pt-3 border-t">
