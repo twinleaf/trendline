@@ -349,6 +349,32 @@ impl ProcessingManager {
         &mut self,
         config: SharedPlotConfig,
     ) -> Result<Vec<PipelineId>, String> {
+        if config.max_sampling_rate <= 0.0 || !config.max_sampling_rate.is_finite() {
+            return Err(format!(
+                "Refusing to create plot '{}' with invalid max sampling rate: {}",
+                config.plot_id, config.max_sampling_rate
+            ));
+        }
+
+        for key in &config.data_keys {
+            let rate = self
+                .capture_state
+                .get_effective_sampling_rate(key)
+                .ok_or_else(|| {
+                    format!(
+                        "No effective sampling rate available for key (url='{}', route='{}', stream_id={}, column_index={}).",
+                        key.port_url, key.device_route, key.stream_id, key.column_index
+                    )
+                })?;
+
+            if rate <= 0.0 || !rate.is_finite() {
+                return Err(format!(
+                    "Invalid effective sampling rate ({}) for key (url='{}', route='{}', stream_id={}, column_index={}).",
+                    rate, key.port_url, key.device_route, key.stream_id, key.column_index
+                ));
+            }
+        }
+
         if self.managed_plots.contains_key(&config.plot_id) {
             self._destroy_plot_components(&config.plot_id);
         }
