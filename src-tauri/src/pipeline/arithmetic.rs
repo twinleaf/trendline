@@ -1,7 +1,7 @@
 use super::{Pipeline, PipelineCommand};
 use crate::shared::{DataColumnId, MathOp, PipelineId, PlotData, Point};
-use crate::state::capture::{BatchedData, CaptureState};
 use crate::state::capture::CaptureCommand;
+use crate::state::capture::{BatchedData, CaptureState};
 use crossbeam::channel::Sender;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -35,7 +35,11 @@ impl ArithmeticProducer {
     ) -> Self {
         Self {
             id: PipelineId(Uuid::new_v4()),
-            a, b, op, out_key, capture_tx,
+            a,
+            b,
+            op,
+            out_key,
+            capture_tx,
             buf_a: VecDeque::with_capacity(BUF_CAP),
             buf_b: VecDeque::with_capacity(BUF_CAP),
             last_session_a: None,
@@ -46,13 +50,17 @@ impl ArithmeticProducer {
 
     fn ingest(buf: &mut VecDeque<Point>, pts: &[Point]) {
         for p in pts {
-            if buf.len() >= BUF_CAP { buf.pop_front(); }
+            if buf.len() >= BUF_CAP {
+                buf.pop_front();
+            }
             buf.push_back(*p);
         }
     }
 
     fn interp(buf: &VecDeque<Point>, t: f64) -> Option<f64> {
-        if buf.is_empty() { return None; }
+        if buf.is_empty() {
+            return None;
+        }
 
         // Find last p where p.x <= t
         let mut last: Option<Point> = None;
@@ -76,8 +84,8 @@ impl ArithmeticProducer {
             (Some(p1), Some(p2)) if (p2.x - p1.x).abs() > 1e-12 => {
                 Some(p1.y + (p2.y - p1.y) * (t - p1.x) / (p2.x - p1.x))
             }
-            (Some(p1), _) => Some(p1.y),   // hold-last
-            (_, Some(p2)) => Some(p2.y),   // hold-next (startup)
+            (Some(p1), _) => Some(p1.y), // hold-last
+            (_, Some(p2)) => Some(p2.y), // hold-next (startup)
             _ => None,
         }
     }
@@ -88,16 +96,16 @@ impl ArithmeticProducer {
             MathOp::Sub => a - b,
             MathOp::Mul => a * b,
             MathOp::Div => {
-                if b.abs() < 1e-15 { f64::NAN } else { a / b }
+                if b.abs() < 1e-15 {
+                    f64::NAN
+                } else {
+                    a / b
+                }
             }
         }
     }
 
-    fn process_side(
-        &mut self,
-        incoming_key: &DataColumnId,
-        batch: Arc<BatchedData>,
-    ) {
+    fn process_side(&mut self, incoming_key: &DataColumnId, batch: Arc<BatchedData>) {
         let pts = &*batch.points;
         let sns = &*batch.sample_numbers;
 
@@ -109,7 +117,9 @@ impl ArithmeticProducer {
             }
             Self::ingest(&mut self.buf_a, pts);
             // produce using B
-            if self.buf_b.is_empty() { return; }
+            if self.buf_b.is_empty() {
+                return;
+            }
             let mut out_pts = Vec::with_capacity(pts.len());
             let mut out_sns = Vec::with_capacity(pts.len());
             for (i, p) in pts.iter().enumerate() {
@@ -135,7 +145,9 @@ impl ArithmeticProducer {
                 self.last_session_b = Some(batch.session_id);
             }
             Self::ingest(&mut self.buf_b, pts);
-            if self.buf_a.is_empty() { return; }
+            if self.buf_a.is_empty() {
+                return;
+            }
             let mut out_pts = Vec::with_capacity(pts.len());
             for p in pts.iter() {
                 if let Some(a_y) = Self::interp(&self.buf_a, p.x) {
@@ -157,14 +169,20 @@ impl ArithmeticProducer {
 }
 
 impl Pipeline for ArithmeticProducer {
-    fn id(&self) -> PipelineId { self.id }
+    fn id(&self) -> PipelineId {
+        self.id
+    }
 
     // Producer pipelines don't emit PlotData directly.
-    fn get_output(&self) -> PlotData { PlotData::empty() }
+    fn get_output(&self) -> PlotData {
+        PlotData::empty()
+    }
 
     fn process_batch(&mut self, batch: Arc<BatchedData>) {
         let is_relevant = batch.key == self.a || batch.key == self.b;
-        if !is_relevant { return; }
+        if !is_relevant {
+            return;
+        }
         let incoming_key = batch.key.clone();
         self.process_side(&incoming_key, batch);
     }

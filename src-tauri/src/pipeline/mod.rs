@@ -26,11 +26,11 @@ pub trait StatisticsProvider: Send + Sync {
     fn process_batch(&mut self, batch: Arc<BatchedData>);
     fn reset(&mut self);
 }
+pub mod arithmetic;
 pub mod decimation;
 pub mod detrend;
 pub mod fft;
+pub mod filtering;
 pub mod manager;
 pub mod passthrough;
 pub mod statistics;
-pub mod arithmetic;
-pub mod filtering;

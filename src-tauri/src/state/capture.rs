@@ -567,12 +567,17 @@ impl CaptureState {
     }
 
     pub fn register_virtual_stream(&self, virtual_key: DataColumnId, producer_id: PipelineId) {
-        self.inner.virtual_streams.insert(virtual_key.clone(), producer_id);
+        self.inner
+            .virtual_streams
+            .insert(virtual_key.clone(), producer_id);
         // Virtual streams are always "active"
         self.inner.active.insert(virtual_key.clone(), ());
-        println!("[Capture] Registered virtual stream {:?} from pipeline {:?}", virtual_key, producer_id);
+        println!(
+            "[Capture] Registered virtual stream {:?} from pipeline {:?}",
+            virtual_key, producer_id
+        );
     }
-    
+
     pub fn unregister_virtual_stream(&self, virtual_key: &DataColumnId) {
         self.inner.virtual_streams.remove(virtual_key);
         self.inner.active.remove(virtual_key);

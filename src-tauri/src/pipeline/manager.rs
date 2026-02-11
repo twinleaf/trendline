@@ -8,13 +8,14 @@ use crate::pipeline::filtering::BiquadProducer;
 use crate::pipeline::statistics::StreamingStatisticsProvider;
 use crate::pipeline::StatisticsProvider;
 use crate::shared::{
-    ColumnStatistics, DataColumnId, DecimationMethod, FftConfig, MathChannelConfig, PipelineId, PlotData, SharedPlotConfig, TimeseriesConfig, ViewConfig
+    ColumnStatistics, DataColumnId, DecimationMethod, FftConfig, MathChannelConfig, PipelineId,
+    PlotData, SharedPlotConfig, TimeseriesConfig, ViewConfig,
 };
 use crate::state::capture::{CaptureCommand, CaptureState};
 use crate::util::k_way_merge_plot_data;
 use crossbeam::channel::{bounded, select, Sender};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -39,8 +40,18 @@ enum ThreadType {
     Derived {
         source_key: DataColumnId,
     },
-    ProducerMono { sub_id: usize, source_key: DataColumnId, output_key: DataColumnId },
-    ProducerBi   { sub_id_a: usize, sub_id_b: usize, source_a: DataColumnId, source_b: DataColumnId, output_key: DataColumnId }
+    ProducerMono {
+        sub_id: usize,
+        source_key: DataColumnId,
+        output_key: DataColumnId,
+    },
+    ProducerBi {
+        sub_id_a: usize,
+        sub_id_b: usize,
+        source_a: DataColumnId,
+        source_b: DataColumnId,
+        output_key: DataColumnId,
+    },
 }
 
 struct PipelineThreadHandle {
@@ -253,11 +264,13 @@ impl ProcessingManager {
         let (data_tx, data_rx) = bounded(128);
         let (cmd_tx, cmd_rx) = bounded(16);
 
-        self.capture_cmd_tx.send(CaptureCommand::Subscribe {
-            key: source_key.clone(),
-            id: sub_id,
-            tx: data_tx,
-        }).unwrap();
+        self.capture_cmd_tx
+            .send(CaptureCommand::Subscribe {
+                key: source_key.clone(),
+                id: sub_id,
+                tx: data_tx,
+            })
+            .unwrap();
 
         let capture_clone = self.capture_state.clone();
         let handle = thread::Builder::new()
@@ -279,10 +292,18 @@ impl ProcessingManager {
             })
             .unwrap();
 
-        self.pipeline_threads.insert(id, PipelineThreadHandle {
-            cmd_tx, handle,
-            thread_type: ThreadType::ProducerMono { sub_id, source_key, output_key },
-        });
+        self.pipeline_threads.insert(
+            id,
+            PipelineThreadHandle {
+                cmd_tx,
+                handle,
+                thread_type: ThreadType::ProducerMono {
+                    sub_id,
+                    source_key,
+                    output_key,
+                },
+            },
+        );
         id
     }
 
@@ -307,12 +328,20 @@ impl ProcessingManager {
         let (b_tx, b_rx) = bounded(128);
         let (cmd_tx, cmd_rx) = bounded(16);
 
-        self.capture_cmd_tx.send(CaptureCommand::Subscribe {
-            key: source_a.clone(), id: sub_id_a, tx: a_tx
-        }).unwrap();
-        self.capture_cmd_tx.send(CaptureCommand::Subscribe {
-            key: source_b.clone(), id: sub_id_b, tx: b_tx
-        }).unwrap();
+        self.capture_cmd_tx
+            .send(CaptureCommand::Subscribe {
+                key: source_a.clone(),
+                id: sub_id_a,
+                tx: a_tx,
+            })
+            .unwrap();
+        self.capture_cmd_tx
+            .send(CaptureCommand::Subscribe {
+                key: source_b.clone(),
+                id: sub_id_b,
+                tx: b_tx,
+            })
+            .unwrap();
 
         let capture_clone = self.capture_state.clone();
         let handle = thread::Builder::new()
@@ -338,10 +367,20 @@ impl ProcessingManager {
             })
             .unwrap();
 
-        self.pipeline_threads.insert(id, PipelineThreadHandle {
-            cmd_tx, handle,
-            thread_type: ThreadType::ProducerBi { sub_id_a, sub_id_b, source_a, source_b, output_key },
-        });
+        self.pipeline_threads.insert(
+            id,
+            PipelineThreadHandle {
+                cmd_tx,
+                handle,
+                thread_type: ThreadType::ProducerBi {
+                    sub_id_a,
+                    sub_id_b,
+                    source_a,
+                    source_b,
+                    output_key,
+                },
+            },
+        );
         id
     }
 
@@ -553,21 +592,37 @@ impl ProcessingManager {
         id
     }
 
-    pub fn create_math_channel(&mut self, spec: MathChannelConfig) -> Result<(PipelineId, DataColumnId), String> {
+    pub fn create_math_channel(
+        &mut self,
+        spec: MathChannelConfig,
+    ) -> Result<(PipelineId, DataColumnId), String> {
         let (_port, out_key) = Self::new_virtual_key();
         let pid = match spec {
             MathChannelConfig::Arithmetic { a, op, b } => {
-                let p = ArithmeticProducer::new(a.clone(), b.clone(), op, out_key.clone(), self.capture_cmd_tx.clone());
+                let p = ArithmeticProducer::new(
+                    a.clone(),
+                    b.clone(),
+                    op,
+                    out_key.clone(),
+                    self.capture_cmd_tx.clone(),
+                );
                 self.spawn_producer_bi(p, a, b, out_key.clone())
             }
             MathChannelConfig::Biquad { src, kind, params } => {
-                let p = BiquadProducer::new(src.clone(), kind, params, out_key.clone(), self.capture_cmd_tx.clone());
+                let p = BiquadProducer::new(
+                    src.clone(),
+                    kind,
+                    params,
+                    out_key.clone(),
+                    self.capture_cmd_tx.clone(),
+                );
                 self.spawn_producer_mono(p, src, out_key.clone())
             }
         };
 
         // register virtual stream and hydrate
-        self.capture_state.register_virtual_stream(out_key.clone(), pid);
+        self.capture_state
+            .register_virtual_stream(out_key.clone(), pid);
         if let Some(h) = self.pipeline_threads.get(&pid) {
             let _ = h.cmd_tx.send(PipelineCommand::Hydrate);
         }
@@ -596,12 +651,31 @@ impl ProcessingManager {
                 ThreadType::Derived { .. } => {
                     println!("[Pipeline] Destroying derived pipeline {:?}.", id);
                 }
-                ThreadType::ProducerMono { sub_id, source_key, output_key: _ } => {
-                    let _ = self.capture_cmd_tx.send(CaptureCommand::Unsubscribe { key: source_key.clone(), id: *sub_id });
+                ThreadType::ProducerMono {
+                    sub_id,
+                    source_key,
+                    output_key: _,
+                } => {
+                    let _ = self.capture_cmd_tx.send(CaptureCommand::Unsubscribe {
+                        key: source_key.clone(),
+                        id: *sub_id,
+                    });
                 }
-                ThreadType::ProducerBi { sub_id_a, sub_id_b, source_a, source_b, output_key: _ } => {
-                    let _ = self.capture_cmd_tx.send(CaptureCommand::Unsubscribe { key: source_a.clone(), id: *sub_id_a });
-                    let _ = self.capture_cmd_tx.send(CaptureCommand::Unsubscribe { key: source_b.clone(), id: *sub_id_b });
+                ThreadType::ProducerBi {
+                    sub_id_a,
+                    sub_id_b,
+                    source_a,
+                    source_b,
+                    output_key: _,
+                } => {
+                    let _ = self.capture_cmd_tx.send(CaptureCommand::Unsubscribe {
+                        key: source_a.clone(),
+                        id: *sub_id_a,
+                    });
+                    let _ = self.capture_cmd_tx.send(CaptureCommand::Unsubscribe {
+                        key: source_b.clone(),
+                        id: *sub_id_b,
+                    });
                 }
             }
 
@@ -625,7 +699,13 @@ impl ProcessingManager {
     }
 
     pub fn destroy_virtual_stream(&mut self, key: &DataColumnId) {
-        if let Some(pid) = self.capture_state.inner.virtual_streams.get(key).map(|v| *v.value()) {
+        if let Some(pid) = self
+            .capture_state
+            .inner
+            .virtual_streams
+            .get(key)
+            .map(|v| *v.value())
+        {
             self.destroy(pid);
         }
         self.capture_state.unregister_virtual_stream(key);
@@ -649,7 +729,9 @@ impl ProcessingManager {
                         let _ = handle.cmd_tx.send(PipelineCommand::ResetSelf);
                     }
                 }
-                ThreadType::ProducerBi { source_a, source_b, .. } => {
+                ThreadType::ProducerBi {
+                    source_a, source_b, ..
+                } => {
                     if source_a == column_key || source_b == column_key {
                         let _ = handle.cmd_tx.send(PipelineCommand::ResetSelf);
                     }
@@ -681,17 +763,15 @@ impl ProcessingManager {
                 | ThreadType::Statistics { source_key, .. }
                 | ThreadType::Derived { source_key }
                 | ThreadType::ProducerMono { source_key, .. } => {
-                    if source_key.stream_key() == stream_key
-                        && !column_keys.contains(source_key)
-                    {
+                    if source_key.stream_key() == stream_key && !column_keys.contains(source_key) {
                         column_keys.push(source_key.clone());
                     }
                 }
-                ThreadType::ProducerBi { source_a, source_b, .. } => {
+                ThreadType::ProducerBi {
+                    source_a, source_b, ..
+                } => {
                     for src in [source_a, source_b] {
-                        if src.stream_key() == stream_key
-                            && !column_keys.contains(src)
-                        {
+                        if src.stream_key() == stream_key && !column_keys.contains(src) {
                             column_keys.push(src.clone());
                         }
                     }
@@ -724,7 +804,9 @@ impl ProcessingManager {
                 | ThreadType::ProducerMono { source_key, .. } => {
                     maybe_sources.push(source_key);
                 }
-                ThreadType::ProducerBi { source_a, source_b, .. } => {
+                ThreadType::ProducerBi {
+                    source_a, source_b, ..
+                } => {
                     maybe_sources.push(source_a);
                     maybe_sources.push(source_b);
                 }
@@ -764,11 +846,14 @@ impl ProcessingManager {
         let (cmd_tx, upstream_stream_keys): (Sender<PipelineCommand>, Vec<DataColumnId>) = {
             let h = self.pipeline_threads.get(&id).ok_or("Pipeline not found")?;
             let keys: Vec<DataColumnId> = match &h.thread_type {
-                ThreadType::Root { source_key, .. }
-                | ThreadType::Statistics { source_key, .. } => vec![source_key.clone()],
+                ThreadType::Root { source_key, .. } | ThreadType::Statistics { source_key, .. } => {
+                    vec![source_key.clone()]
+                }
                 ThreadType::Derived { .. } => vec![],
                 ThreadType::ProducerMono { source_key, .. } => vec![source_key.clone()],
-                ThreadType::ProducerBi { source_a, source_b, .. } => {
+                ThreadType::ProducerBi {
+                    source_a, source_b, ..
+                } => {
                     vec![source_a.clone(), source_b.clone()]
                 }
             };
@@ -804,4 +889,4 @@ impl ProcessingManager {
         );
         self.statistics_channels.insert(provider_id, channel);
     }
-    }
+}

@@ -8,13 +8,17 @@ use uuid::Uuid;
 
 #[derive(Clone, Copy)]
 struct Biquad {
-    b0: f64, b1: f64, b2: f64,
-    a1: f64, a2: f64,
-    z1: f64, z2: f64,
+    b0: f64,
+    b1: f64,
+    b2: f64,
+    a1: f64,
+    a2: f64,
+    z1: f64,
+    z2: f64,
 }
 impl Biquad {
     fn new(kind: BiquadKind, params: &BiquadParams, fs: f64) -> Self {
-        let f0 = params.cutoff_hz.max(1e-9).min(0.49*fs); // avoid Nyquist weirdness
+        let f0 = params.cutoff_hz.max(1e-9).min(0.49 * fs); // avoid Nyquist weirdness
         let w0 = 2.0 * std::f64::consts::PI * (f0 / fs);
         let (sin, cos) = w0.sin_cos();
         let q = params.q.max(1e-6);
@@ -23,11 +27,25 @@ impl Biquad {
         let (mut b0, mut b1, mut b2, a0, mut a1, mut a2) = match kind {
             BiquadKind::Lowpass => {
                 let k = 1.0 - cos;
-                ((k/2.0), k, (k/2.0), 1.0 + alpha, -2.0 * cos, 1.0 - alpha)
+                (
+                    (k / 2.0),
+                    k,
+                    (k / 2.0),
+                    1.0 + alpha,
+                    -2.0 * cos,
+                    1.0 - alpha,
+                )
             }
             BiquadKind::Highpass => {
                 let k = 1.0 + cos;
-                ((k/2.0), -k, (k/2.0), 1.0 + alpha, -2.0 * cos, 1.0 - alpha)
+                (
+                    (k / 2.0),
+                    -k,
+                    (k / 2.0),
+                    1.0 + alpha,
+                    -2.0 * cos,
+                    1.0 - alpha,
+                )
             }
             BiquadKind::Bandpass => {
                 let b0 = alpha;
@@ -36,22 +54,35 @@ impl Biquad {
         };
 
         // normalize
-        b0 /= a0; b1 /= a0; b2 /= a0; a1 /= a0; a2 /= a0;
+        b0 /= a0;
+        b1 /= a0;
+        b2 /= a0;
+        a1 /= a0;
+        a2 /= a0;
 
-        Self { b0, b1, b2, a1, a2, z1: 0.0, z2: 0.0 }
+        Self {
+            b0,
+            b1,
+            b2,
+            a1,
+            a2,
+            z1: 0.0,
+            z2: 0.0,
+        }
     }
 
     #[inline]
     fn process(&mut self, x: f64) -> f64 {
         // Transposed Direct Form II
-        let y = self.b0*x + self.z1;
-        self.z1 = self.b1*x - self.a1*y + self.z2;
-        self.z2 = self.b2*x - self.a2*y;
+        let y = self.b0 * x + self.z1;
+        self.z1 = self.b1 * x - self.a1 * y + self.z2;
+        self.z2 = self.b2 * x - self.a2 * y;
         y
     }
 
     fn reset(&mut self) {
-        self.z1 = 0.0; self.z2 = 0.0;
+        self.z1 = 0.0;
+        self.z2 = 0.0;
     }
 }
 
@@ -77,8 +108,14 @@ impl BiquadProducer {
     ) -> Self {
         Self {
             id: PipelineId(Uuid::new_v4()),
-            src, out_key, kind, params,
-            biquad: None, fs: None, last_session: None, capture_tx,
+            src,
+            out_key,
+            kind,
+            params,
+            biquad: None,
+            fs: None,
+            last_session: None,
+            capture_tx,
         }
     }
 
@@ -94,18 +131,28 @@ impl BiquadProducer {
 }
 
 impl Pipeline for BiquadProducer {
-    fn id(&self) -> PipelineId { self.id }
-    fn get_output(&self) -> PlotData { PlotData::empty() }
+    fn id(&self) -> PipelineId {
+        self.id
+    }
+    fn get_output(&self) -> PlotData {
+        PlotData::empty()
+    }
 
     fn process_batch(&mut self, batch: Arc<BatchedData>) {
-        if batch.key != self.src { return; }
+        if batch.key != self.src {
+            return;
+        }
         if self.last_session != Some(batch.session_id) {
-            if let Some(bq) = self.biquad.as_mut() { bq.reset(); }
+            if let Some(bq) = self.biquad.as_mut() {
+                bq.reset();
+            }
             self.last_session = Some(batch.session_id);
         }
 
         self.ensure_biquad();
-        let Some(bq) = self.biquad.as_mut() else { return; };
+        let Some(bq) = self.biquad.as_mut() else {
+            return;
+        };
 
         let pts = &*batch.points;
         let sns = &*batch.sample_numbers;
@@ -142,7 +189,9 @@ impl Pipeline for BiquadProducer {
                 }
             }
             PipelineCommand::ResetSelf => {
-                if let Some(bq) = self.biquad.as_mut() { bq.reset(); }
+                if let Some(bq) = self.biquad.as_mut() {
+                    bq.reset();
+                }
             }
             _ => {}
         }

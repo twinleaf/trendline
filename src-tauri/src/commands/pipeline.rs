@@ -2,7 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::{
     pipeline::manager::ProcessingManager,
-    shared::{ColumnStatistics, DataColumnId, MathChannelConfig, PipelineId, PlotData, SharedPlotConfig},
+    shared::{
+        ColumnStatistics, DataColumnId, MathChannelConfig, PipelineId, PlotData, SharedPlotConfig,
+    },
 };
 use tauri::{ipc::Channel, State};
 
