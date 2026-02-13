@@ -39,7 +39,9 @@
 <ModeWatcher />
 <Toaster richColors />
 
-<div class="flex h-screen flex-col gap-1 bg-background p-4 text-foreground">
+<div
+    class="flex h-screen flex-col gap-1 bg-secondary p-4 text-foreground dark:bg-background"
+>
     <!-- <header>
 		<MenubarHeader />
 	</header> -->
