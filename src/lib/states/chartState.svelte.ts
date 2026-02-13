@@ -13,7 +13,7 @@ import type { SharedPlotConfig } from "$lib/bindings/SharedPlotConfig";
 
 export type ChartLayout = "carousel" | "vertical" | "horizontal";
 export type StreamLayout = "grouped" | "vertical" | "horizontal";
-const TIMESERIES_RESOLUTION_BASELINE_MULTIPLIER = 2;
+const TIMESERIES_RESOLUTION_BASELINE_MULTIPLIER = 4;
 
 export interface PlotSeries {
   dataKey: DataColumnId;
