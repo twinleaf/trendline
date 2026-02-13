@@ -1,55 +1,71 @@
 <script lang="ts">
-	import type { PlotConfig } from '$lib/states/chartState.svelte';
-	import { columns, type TreeRow } from '$lib/components/chart-area/data-table/column';
-	import DataTable from '$lib/components/chart-area/data-table/DataTable.svelte';
-	import PlotSettings from '$lib/components/chart-area/PlotSettings.svelte';
-	import { Button } from '$lib/components/ui/button/';
-	import * as Popover from '$lib/components/ui/popover';
-	import { ScrollArea } from '$lib/components/ui/scroll-area/index.js';
-	import * as Tabs from '$lib/components/ui/tabs';
-	import { Settings } from '@lucide/svelte';
+    import type { PlotConfig } from "$lib/states/chartState.svelte";
+    import {
+        columns,
+        type TreeRow,
+    } from "$lib/components/chart-area/data-table/column";
+    import DataTable from "$lib/components/chart-area/data-table/DataTable.svelte";
+    import PlotSettings from "$lib/components/chart-area/PlotSettings.svelte";
+    import { Button } from "$lib/components/ui/button/";
+    import * as Popover from "$lib/components/ui/popover";
+    import { ScrollArea } from "$lib/components/ui/scroll-area/index.js";
+    import * as Tabs from "$lib/components/ui/tabs";
+    import { Settings } from "@lucide/svelte";
 
-	type Props = {
-		plot: PlotConfig;
-		treeData: TreeRow[];
-	};
+    type Props = {
+        plot: PlotConfig;
+        treeData: TreeRow[];
+    };
 
-	let { plot = $bindable(), treeData }: Props = $props();
+    let { plot = $bindable(), treeData }: Props = $props();
+    let isPlotSettingsOpen = $state(false);
 </script>
 
-<Popover.Root>
-	<Popover.Trigger>
-		<Button variant="ghost" size="icon" aria-label="Plot settings">
-			<Settings class="size-5 text-muted-foreground" />
-		</Button>
-	</Popover.Trigger>
-	<Popover.Content class="w-[600px] p-0" onCloseAutoFocus={(e) => e.preventDefault()}>
-		<Tabs.Root bind:value={plot.activeTab} class="w-full p-2 flex flex-col bg-background">
-			<Tabs.List class="grid w-full grid-cols-2">
-				<Tabs.Trigger value="selection">Plot Selection</Tabs.Trigger>
-				<Tabs.Trigger value="settings">Plot Settings</Tabs.Trigger>
-			</Tabs.List>
+<Popover.Root bind:open={isPlotSettingsOpen}>
+    <Popover.Trigger>
+        <Button
+            variant="ghost"
+            size="icon"
+            class={isPlotSettingsOpen
+                ? "text-primary hover:text-primary"
+                : "text-muted-foreground hover:text-foreground"}
+            aria-label="Plot settings"
+        >
+            <Settings class="size-5" />
+        </Button>
+    </Popover.Trigger>
+    <Popover.Content
+        class="w-[600px] overflow-hidden p-0 pt-1"
+        onCloseAutoFocus={(e) => e.preventDefault()}
+    >
+        <Tabs.Root bind:value={plot.activeTab} class="flex w-full flex-col p-2">
+            <Tabs.List class="grid w-full grid-cols-2">
+                <Tabs.Trigger value="selection">Plot Selection</Tabs.Trigger>
+                <Tabs.Trigger value="settings">Plot Settings</Tabs.Trigger>
+            </Tabs.List>
 
-			<Tabs.Content value="selection" class="mt-2 flex-1 min-h-0">
-				<ScrollArea class="h-full">
-					<div class="p-2 h-[40vh]">
-						<DataTable
-							{columns}
-							data={treeData}
-							getSubRows={(row: TreeRow) => row.subRows}
-							bind:expanded={plot.expansion}
-							bind:rowSelection={plot.rowSelection}
-						/>
-					</div>
-				</ScrollArea>
-			</Tabs.Content>
-			<Tabs.Content value="settings" class="mt-2 flex-1 min-h-0">
-				<ScrollArea class="h-full">
-					<div class="p-2 max-h-[40vh]">
-						<PlotSettings bind:plot />
-					</div>
-				</ScrollArea>
-			</Tabs.Content>
-		</Tabs.Root>
-	</Popover.Content>
+            <Tabs.Content value="selection" class="mt-2 min-h-0">
+                <div class="h-[40vh] min-h-0">
+                    <ScrollArea class="h-full">
+                        <DataTable
+                            {columns}
+                            data={treeData}
+                            getSubRows={(row: TreeRow) => row.subRows}
+                            bind:expanded={plot.expansion}
+                            bind:rowSelection={plot.rowSelection}
+                        />
+                    </ScrollArea>
+                </div>
+            </Tabs.Content>
+            <Tabs.Content value="settings" class="mt-2 min-h-0">
+                <div class="h-[40vh] min-h-0">
+                    <ScrollArea class="h-full">
+                        <div class="p-2">
+                            <PlotSettings bind:plot />
+                        </div>
+                    </ScrollArea>
+                </div>
+            </Tabs.Content>
+        </Tabs.Root>
+    </Popover.Content>
 </Popover.Root>

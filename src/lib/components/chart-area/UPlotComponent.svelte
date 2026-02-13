@@ -1,164 +1,245 @@
 <script lang="ts">
-	import uPlot from 'uplot';
-	import 'uplot/dist/uPlot.min.css';
-	import { chartState } from '$lib/states/chartState.svelte';
-	import type { PlotConfig } from '$lib/states/chartState.svelte';
-	import CustomLegend from '$lib/components/chart-area/legend/CustomLegend.svelte';
-	import { findTimestampIndex, lerp } from '$lib/utils';
+    import uPlot from "uplot";
+    import "uplot/dist/uPlot.min.css";
+    import { chartState } from "$lib/states/chartState.svelte";
+    import type { PlotConfig } from "$lib/states/chartState.svelte";
+    import CustomLegend from "$lib/components/chart-area/legend/CustomLegend.svelte";
+    import { findTimestampIndex, lerp } from "$lib/utils";
+    import { mode } from "mode-watcher";
 
-	// --- Props ---
-	let { plot, latestTimestamp = $bindable() }: { plot: PlotConfig; latestTimestamp?: number } = $props();
+    // --- Props ---
+    let {
+        plot,
+        latestTimestamp = $bindable(),
+    }: { plot: PlotConfig; latestTimestamp?: number } = $props();
 
-	// --- Component State ---
-	let chartContainer: HTMLDivElement;
-	let uplot = $state.raw<uPlot | undefined>(undefined);
-	let legendState = $state({
-		isActive: false,
-		relativeTime: null as number | null,
-		frequency: null as number | null,
-		values: [] as (number | null)[],
-		cursorLeft: null as number | null,
-		cursorTop: null as number | null,
-		chartBounds: null as DOMRect | null
-	});
+    // --- Component State ---
+    let chartContainer: HTMLDivElement;
+    let uplot = $state.raw<uPlot | undefined>(undefined);
+    let legendState = $state({
+        isActive: false,
+        relativeTime: null as number | null,
+        frequency: null as number | null,
+        values: [] as (number | null)[],
+        cursorLeft: null as number | null,
+        cursorTop: null as number | null,
+        chartBounds: null as DOMRect | null,
+    });
 
-	// --- Primary Derived State (from props and global state) ---
-	const options = $derived(plot.uPlotOptions);
-	const isFFT = $derived(plot.viewType === 'fft');
-	const isEffectivelyPaused = $derived(plot.isPaused);
-	const rawPlotData = $derived(chartState.plotsData.get(plot.id));
+    // --- Primary Derived State (from props and global state) ---
+    const options = $derived(plot.uPlotOptions);
+    const currentMode = $derived(mode.current ?? "light");
+    const themedOptions = $derived.by(() => {
+        const isDark = currentMode === "dark";
+        // Typical plotting contrast: subtle guide lines for both grid and ticks.
+        const axisGridColor = isDark ? "#2e3a35" : "#d8e1dc";
+        const axisLabelFallbackColor = isDark ? "#d1ddd5" : "#2c3732";
 
-	// --- Buffer Management ---
-	let uplotDataBuffers = $state.raw<Float64Array[]>([]);
-	$effect(() => {
-		const numSeries = plot.series.length;
-		const maxRate = plot.maxSamplingRate;
-		const winSecs = plot.windowSeconds;
+        return {
+            ...options,
+            axes: options.axes?.map((axis) => {
+                const resolvedGridStroke = axisGridColor;
+                const resolvedAxisStroke =
+                    axis.stroke ?? axisLabelFallbackColor;
+                const resolvedTickStroke = axisGridColor;
 
-		if (numSeries === 0 || maxRate <= 0 || winSecs <= 0) {
-			if (uplotDataBuffers.length > 0) uplotDataBuffers = [];
-			return;
-		}
+                return {
+                    ...axis,
+                    stroke: resolvedAxisStroke,
+                    grid: {
+                        ...axis.grid,
+                        stroke: resolvedGridStroke,
+                    },
+                    ticks: {
+                        ...axis.ticks,
+                        stroke: resolvedTickStroke,
+                    },
+                };
+            }),
+        } as uPlot.Options;
+    });
+    const isFFT = $derived(plot.viewType === "fft");
+    const isEffectivelyPaused = $derived(plot.isPaused);
+    const rawPlotData = $derived(chartState.plotsData.get(plot.id));
 
-		const upperBound = Math.ceil(maxRate * winSecs * 2 * Math.max(1, numSeries));
-		const actualLen = rawPlotData?.timestamps.length ?? 0;
-		const requiredPoints = Math.max(upperBound, Math.ceil(actualLen * 1.25));
-		const needsReallocation =
-			uplotDataBuffers.length !== numSeries + 1 ||
-			(uplotDataBuffers.length > 0 && uplotDataBuffers[0].length < requiredPoints);
+    // --- Buffer Management ---
+    let uplotDataBuffers = $state.raw<Float64Array[]>([]);
+    $effect(() => {
+        const numSeries = plot.series.length;
+        const maxRate = plot.maxSamplingRate;
+        const winSecs = plot.windowSeconds;
 
-		if (needsReallocation) {
-			console.log(`[Buffer] Reallocating for ${numSeries} series.`);
-			const newBuffers = [new Float64Array(requiredPoints)];
-			for (let i = 0; i < numSeries; i++) newBuffers.push(new Float64Array(requiredPoints));
-			uplotDataBuffers = newBuffers;
-		}
-	});
+        if (numSeries === 0 || maxRate <= 0 || winSecs <= 0) {
+            if (uplotDataBuffers.length > 0) uplotDataBuffers = [];
+            return;
+        }
 
-	// --- Data Preparation Logic ---
-	const preparedData = $derived.by((): { views: Float64Array[]; latestTimestamp: number } | null => {
-		const dataToRender = rawPlotData;
-		const numSeries = plot.series.length;
+        const upperBound = Math.ceil(
+            maxRate * winSecs * 2 * Math.max(1, numSeries),
+        );
+        const actualLen = rawPlotData?.timestamps.length ?? 0;
+        const requiredPoints = Math.max(
+            upperBound,
+            Math.ceil(actualLen * 1.25),
+        );
+        const needsReallocation =
+            uplotDataBuffers.length !== numSeries + 1 ||
+            (uplotDataBuffers.length > 0 &&
+                uplotDataBuffers[0].length < requiredPoints);
 
-		if (!dataToRender || dataToRender.timestamps.length === 0 || numSeries === 0) return null;
+        if (needsReallocation) {
+            console.log(`[Buffer] Reallocating for ${numSeries} series.`);
+            const newBuffers = [new Float64Array(requiredPoints)];
+            for (let i = 0; i < numSeries; i++)
+                newBuffers.push(new Float64Array(requiredPoints));
+            uplotDataBuffers = newBuffers;
+        }
+    });
 
-		const isFFTView = isFFT;
-		let finalTimestamps = dataToRender.timestamps;
-		let finalSeriesData = dataToRender.series_data;
+    // --- Data Preparation Logic ---
+    const preparedData = $derived.by(
+        (): { views: Float64Array[]; latestTimestamp: number } | null => {
+            const dataToRender = rawPlotData;
+            const numSeries = plot.series.length;
 
-		if (isFFTView && finalTimestamps.length > 1) {
-			finalTimestamps = finalTimestamps.slice(1);
-			finalSeriesData = finalSeriesData.map((series) => series.slice(1));
-		}
+            if (
+                !dataToRender ||
+                dataToRender.timestamps.length === 0 ||
+                numSeries === 0
+            )
+                return null;
 
-		const finalDataLength = finalTimestamps.length;
-		if (finalDataLength === 0) return null;
+            const isFFTView = isFFT;
+            let finalTimestamps = dataToRender.timestamps;
+            let finalSeriesData = dataToRender.series_data;
 
-		if (uplotDataBuffers.length !== numSeries + 1 || uplotDataBuffers[0].length < finalDataLength) return null;
+            if (isFFTView && finalTimestamps.length > 1) {
+                finalTimestamps = finalTimestamps.slice(1);
+                finalSeriesData = finalSeriesData.map((series) =>
+                    series.slice(1),
+                );
+            }
 
-		const latestAbsTimestamp = dataToRender.timestamps[dataToRender.timestamps.length - 1];
+            const finalDataLength = finalTimestamps.length;
+            if (finalDataLength === 0) return null;
 
-		if (!isFFTView) {
-			const relativeXValues = uplotDataBuffers[0];
-			for (let i = 0; i < finalDataLength; i++) {
-				relativeXValues[i] = finalTimestamps[i] - latestAbsTimestamp;
-			}
-		} else {
-			uplotDataBuffers[0].set(finalTimestamps);
-		}
+            if (
+                uplotDataBuffers.length !== numSeries + 1 ||
+                uplotDataBuffers[0].length < finalDataLength
+            )
+                return null;
 
-		finalSeriesData.forEach((series, i) => {
-			const buffer = uplotDataBuffers[i + 1];
-			if (buffer) {
-				for (let j = 0; j < series.length; j++) {
-					const value = series[j];
-					buffer[j] = value === null ? NaN : value;
-				}
-			}
-		});
+            const latestAbsTimestamp =
+                dataToRender.timestamps[dataToRender.timestamps.length - 1];
 
-		const finalDataViews = uplotDataBuffers.map((buffer) => buffer.subarray(0, finalDataLength));
-		return { views: finalDataViews, latestTimestamp: latestAbsTimestamp };
-	});
+            if (!isFFTView) {
+                const relativeXValues = uplotDataBuffers[0];
+                for (let i = 0; i < finalDataLength; i++) {
+                    relativeXValues[i] =
+                        finalTimestamps[i] - latestAbsTimestamp;
+                }
+            } else {
+                uplotDataBuffers[0].set(finalTimestamps);
+            }
 
-	// --- Legend Interpolation Logic ---
-	const interpolatedValues = $derived.by((): (number | null)[] => {
-		const relTime = legendState.relativeTime;
-		const data = rawPlotData;
+            finalSeriesData.forEach((series, i) => {
+                const buffer = uplotDataBuffers[i + 1];
+                if (buffer) {
+                    for (let j = 0; j < series.length; j++) {
+                        const value = series[j];
+                        buffer[j] = value === null ? NaN : value;
+                    }
+                }
+            });
 
-		if (relTime === null || isFFT || !legendState.isActive || !data || data.timestamps.length === 0) return [];
+            const finalDataViews = uplotDataBuffers.map((buffer) =>
+                buffer.subarray(0, finalDataLength),
+            );
+            return {
+                views: finalDataViews,
+                latestTimestamp: latestAbsTimestamp,
+            };
+        },
+    );
 
-		const latestAbsTimestamp = data.timestamps[data.timestamps.length - 1];
-		const targetTime = latestAbsTimestamp + relTime;
-		const idx = findTimestampIndex(data.timestamps, targetTime);
+    // --- Legend Interpolation Logic ---
+    const interpolatedValues = $derived.by((): (number | null)[] => {
+        const relTime = legendState.relativeTime;
+        const data = rawPlotData;
 
-		if (idx === 0 || idx >= data.timestamps.length) return plot.series.map(() => null);
+        if (
+            relTime === null ||
+            isFFT ||
+            !legendState.isActive ||
+            !data ||
+            data.timestamps.length === 0
+        )
+            return [];
 
-		const t1 = data.timestamps[idx - 1];
-		const t2 = data.timestamps[idx];
+        const latestAbsTimestamp = data.timestamps[data.timestamps.length - 1];
+        const targetTime = latestAbsTimestamp + relTime;
+        const idx = findTimestampIndex(data.timestamps, targetTime);
 
-		return data.series_data.map((series) => {
-			const y1 = series[idx - 1];
-			const y2 = series[idx];
-			return lerp(t1, y1, t2, y2, targetTime);
-		});
-	});
+        if (idx === 0 || idx >= data.timestamps.length)
+            return plot.series.map(() => null);
 
-	// --- uPlot Instantiation and Lifecycle ---
-	$effect(() => {
-		if (!chartContainer) return;
+        const t1 = data.timestamps[idx - 1];
+        const t2 = data.timestamps[idx];
 
-		const legendPlugin: uPlot.Plugin = {
-			hooks: {
-				setCursor: (u) => {
-					const { left, top, idx } = u.cursor;
-					if (left === undefined || left < 0 || idx === undefined || idx === null || top === undefined) {
-						legendState.isActive = false;
-						return;
-					}
-					legendState.isActive = true;
-					legendState.cursorLeft = left;
-					legendState.cursorTop = top;
-					legendState.chartBounds = chartContainer.getBoundingClientRect();
-					if (isFFT) {
-						legendState.frequency = u.data[0][idx];
-						legendState.values = u.data.slice(1).map((d) => d[idx] ?? null);
-						legendState.relativeTime = null;
-					} else {
-						legendState.relativeTime = u.posToVal(left, 'x');
-						legendState.frequency = null;
-					}
-				},
-				setSeries: (u, seriesIdx) => {
-					if (seriesIdx === null) {
-						legendState.isActive = false;
-						legendState.relativeTime = null;
-					}
-				}
-			}
-		};
+        return data.series_data.map((series) => {
+            const y1 = series[idx - 1];
+            const y2 = series[idx];
+            return lerp(t1, y1, t2, y2, targetTime);
+        });
+    });
 
-		const finalOptions: uPlot.Options = { ...options, plugins: [legendPlugin] };
+    // --- uPlot Instantiation and Lifecycle ---
+    $effect(() => {
+        if (!chartContainer) return;
+
+        const legendPlugin: uPlot.Plugin = {
+            hooks: {
+                setCursor: (u) => {
+                    const { left, top, idx } = u.cursor;
+                    if (
+                        left === undefined ||
+                        left < 0 ||
+                        idx === undefined ||
+                        idx === null ||
+                        top === undefined
+                    ) {
+                        legendState.isActive = false;
+                        return;
+                    }
+                    legendState.isActive = true;
+                    legendState.cursorLeft = left;
+                    legendState.cursorTop = top;
+                    legendState.chartBounds =
+                        chartContainer.getBoundingClientRect();
+                    if (isFFT) {
+                        legendState.frequency = u.data[0][idx];
+                        legendState.values = u.data
+                            .slice(1)
+                            .map((d) => d[idx] ?? null);
+                        legendState.relativeTime = null;
+                    } else {
+                        legendState.relativeTime = u.posToVal(left, "x");
+                        legendState.frequency = null;
+                    }
+                },
+                setSeries: (u, seriesIdx) => {
+                    if (seriesIdx === null) {
+                        legendState.isActive = false;
+                        legendState.relativeTime = null;
+                    }
+                },
+            },
+        };
+
+        const finalOptions: uPlot.Options = {
+            ...themedOptions,
+            plugins: [legendPlugin],
+        };
         const uplotInstance = new uPlot(finalOptions, [[]], chartContainer);
         uplot = uplotInstance;
 
@@ -175,67 +256,71 @@
         };
     });
 
-	// Sync plot configuration with the backend
-	$effect(() => {
-		const _fingerprint = {
-			series: plot.series,
-			viewType: plot.viewType,
-			decimationMethod: plot.decimationMethod,
-			windowSeconds: plot.windowSeconds,
-			resolutionMultiplier: plot.resolutionMultiplier,
-			fftSeconds: plot.fftSeconds,
-			fftDetrendMethod: plot.fftDetrendMethod
-		};
-		chartState.syncPlotWithBackend(plot);
-	});
+    // Sync plot configuration with the backend
+    $effect(() => {
+        const _fingerprint = {
+            series: plot.series,
+            viewType: plot.viewType,
+            decimationMethod: plot.decimationMethod,
+            windowSeconds: plot.windowSeconds,
+            resolutionMultiplier: plot.resolutionMultiplier,
+            fftSeconds: plot.fftSeconds,
+            fftDetrendMethod: plot.fftDetrendMethod,
+        };
+        chartState.syncPlotWithBackend(plot);
+    });
 
-	// Reactive effect for updating uPlot data
-	$effect(() => {
-		const uplotInstance = uplot;
-		if (!uplotInstance) return;
+    // Reactive effect for updating uPlot data
+    $effect(() => {
+        const uplotInstance = uplot;
+        if (!uplotInstance) return;
 
-		const data = preparedData;
-		const isPaused = isEffectivelyPaused;
-		const currentWindow = plot.windowSeconds;
+        const data = preparedData;
+        const isPaused = isEffectivelyPaused;
+        const currentWindow = plot.windowSeconds;
         const isCurrentlyFFT = isFFT;
 
-		if (data) {
-			plot.hasData = true;
+        if (data) {
+            plot.hasData = true;
 
-			if (!isPaused) {
-				latestTimestamp = data.latestTimestamp;
-				if (!isCurrentlyFFT) {
-					uplotInstance.setScale('x', { min: -currentWindow, max: 0 });
-				}
-			}
-			
-			uplotInstance.setData(data.views, isCurrentlyFFT);
+            if (!isPaused) {
+                latestTimestamp = data.latestTimestamp;
+                if (!isCurrentlyFFT) {
+                    uplotInstance.setScale("x", {
+                        min: -currentWindow,
+                        max: 0,
+                    });
+                }
+            }
 
-		} else {
-			const backendEmpty = !rawPlotData || rawPlotData.timestamps.length === 0 || plot.series.length === 0;
-			if (backendEmpty && plot.hasData) {
-			uplotInstance.setData([[]], false);
-			plot.hasData = false;
-			}
-		}
-	});
-
+            uplotInstance.setData(data.views, isCurrentlyFFT);
+        } else {
+            const backendEmpty =
+                !rawPlotData ||
+                rawPlotData.timestamps.length === 0 ||
+                plot.series.length === 0;
+            if (backendEmpty && plot.hasData) {
+                uplotInstance.setData([[]], false);
+                plot.hasData = false;
+            }
+        }
+    });
 </script>
 
 <div class="relative h-full w-full">
-	<div bind:this={chartContainer} class="min-h-0 h-full w-full"></div>
+    <div bind:this={chartContainer} class="min-h-0 h-full w-full"></div>
 </div>
 
 {#if legendState.isActive && legendState.chartBounds}
-	<CustomLegend
-		isActive={legendState.isActive}
-		viewType={plot.viewType}
-		relativeTime={legendState.relativeTime}
-		frequency={legendState.frequency}
-		series={plot.series}
-		values={isFFT ? legendState.values : interpolatedValues}
-		cursorLeft={legendState.cursorLeft}
-		cursorTop={legendState.cursorTop}
-		chartBounds={legendState.chartBounds}
-	/>
+    <CustomLegend
+        isActive={legendState.isActive}
+        viewType={plot.viewType}
+        relativeTime={legendState.relativeTime}
+        frequency={legendState.frequency}
+        series={plot.series}
+        values={isFFT ? legendState.values : interpolatedValues}
+        cursorLeft={legendState.cursorLeft}
+        cursorTop={legendState.cursorTop}
+        chartBounds={legendState.chartBounds}
+    />
 {/if}

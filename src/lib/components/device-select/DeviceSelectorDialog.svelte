@@ -1,157 +1,190 @@
 <script lang="ts">
-	import { deviceState } from '$lib/states/deviceState.svelte';
-	import * as AlertDialog from '$lib/components/ui/alert-dialog';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import { Input } from '$lib/components/ui/input';
-	import { Button } from '$lib/components/ui/button';
-	import { uiState } from '$lib/states/uiState.svelte';
-	import { LoaderCircleIcon, PlusIcon } from '@lucide/svelte/icons';
-	import DeviceList from '$lib/components/device-select/DeviceList.svelte';
-	import { invoke } from '@tauri-apps/api/core';
-	import { X } from '@lucide/svelte/icons';
+    import { deviceState } from "$lib/states/deviceState.svelte";
+    import * as AlertDialog from "$lib/components/ui/alert-dialog";
+    import * as Dialog from "$lib/components/ui/dialog";
+    import { Input } from "$lib/components/ui/input";
+    import { Button } from "$lib/components/ui/button";
+    import { uiState } from "$lib/states/uiState.svelte";
+    import { LoaderCircleIcon, PlusIcon } from "@lucide/svelte/icons";
+    import DeviceList from "$lib/components/device-select/DeviceList.svelte";
+    import { invoke } from "@tauri-apps/api/core";
+    import { X } from "@lucide/svelte/icons";
+    import { mode } from "mode-watcher";
 
-	let devices = $derived(deviceState.deviceTree);
-	let selectedParent = $state('');
-	let manualUrl = $state('tcp://localhost');
+    let devices = $derived(deviceState.deviceTree);
+    let selectedParent = $state("");
+    let manualUrl = $state("tcp://localhost");
+    const currentMode = $derived(mode.current ?? "light");
+    const logoSrc = $derived(
+        currentMode === "dark"
+            ? "/Twinleaf-Logo-White.svg"
+            : "/Twinleaf-Logo-Black.svg",
+    );
 
-	// We need this state variable to control the manual connect dialog
-	let manualConnectDialogOpen = $state(false);
-	let confirmButton: HTMLButtonElement | null = $state(null);
+    // We need this state variable to control the manual connect dialog
+    let manualConnectDialogOpen = $state(false);
+    let confirmButton: HTMLButtonElement | null = $state(null);
 
-	let isConfirmDisabled = $derived.by(() => {
-		if (deviceState.deviceTree.length === 0) {
-			return true;
-		}
-		const portInfo = deviceState.getPort(selectedParent);
-		if (!portInfo) {
-			return true;
-		}
-		if (portInfo.state == 'Streaming') {
-			confirmButton?.focus();
-			return false;
-		}
-		return true
-	});
+    let isConfirmDisabled = $derived.by(() => {
+        if (deviceState.deviceTree.length === 0) {
+            return true;
+        }
+        const portInfo = deviceState.getPort(selectedParent);
+        if (!portInfo) {
+            return true;
+        }
+        if (portInfo.state == "Streaming") {
+            confirmButton?.focus();
+            return false;
+        }
+        return true;
+    });
 
-	$effect(() => {
-		if (devices.length > 0 && !selectedParent) {
-			selectedParent = devices[0].url;
-		}
-	});
+    $effect(() => {
+        if (devices.length > 0 && !selectedParent) {
+            selectedParent = devices[0].url;
+        }
+    });
 
-	// Simplified function: fire-and-forget without toast notifications.
-	function handleManualConnect() {
-		if (!manualUrl) return;
-		invoke('connect_to_port', { portUrl: manualUrl });
-		manualConnectDialogOpen = false;
-	}
+    // Simplified function: fire-and-forget without toast notifications.
+    function handleManualConnect() {
+        if (!manualUrl) return;
+        invoke("connect_to_port", { portUrl: manualUrl });
+        manualConnectDialogOpen = false;
+    }
 
-	function confirm(event: SubmitEvent) {
-		event.preventDefault();
-		if (!selectedParent) {
-			console.warn('No parent device selected.');
-			return;
-		}
-		const selectedChildren = deviceState.childrenSelections.get(selectedParent) ?? new Set<string>();
+    function confirm(event: SubmitEvent) {
+        event.preventDefault();
+        if (!selectedParent) {
+            console.warn("No parent device selected.");
+            return;
+        }
+        const selectedChildren =
+            deviceState.childrenSelections.get(selectedParent) ??
+            new Set<string>();
 
-		const payload = {
-			portUrl: selectedParent,
-			childrenRoutes: Array.from(selectedChildren)
-		};
+        const payload = {
+            portUrl: selectedParent,
+            childrenRoutes: Array.from(selectedChildren),
+        };
 
-		deviceState.selection = payload;
-		console.log(`[DeviceSelectorDialog] Made selection for ${selectedParent} with length ${Array.from(selectedChildren).length}`)
-		invoke('confirm_selection', payload);
-		uiState.close();
-		manualConnectDialogOpen = false;
-	}
+        deviceState.selection = payload;
+        console.log(
+            `[DeviceSelectorDialog] Made selection for ${selectedParent} with length ${Array.from(selectedChildren).length}`,
+        );
+        invoke("confirm_selection", payload);
+        uiState.close();
+        manualConnectDialogOpen = false;
+    }
 </script>
 
-<AlertDialog.Root open={uiState.is('discovery')} onOpenChange={(isOpen) => {
+<AlertDialog.Root
+    open={uiState.is("discovery")}
+    onOpenChange={(isOpen) => {
         if (!isOpen) {
             uiState.close();
         }
-    }}>
-	<AlertDialog.Content
-		class="fixed left-1/2 top-1/2 z-50 w-[32rem] max-w-[95vw] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-card p-6 shadow-lg"
-	>
-		<AlertDialog.Cancel>
-			{#snippet child({ props })}
-				<button
-				{...props}
-				type="button"
-				class="absolute right-3 top-3 inline-grid place-items-center rounded-md p-1 text-muted-foreground hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-				aria-label="Close"
-				>
-				<X class="h-4 w-4" />
-				</button>
-			{/snippet}
-		</AlertDialog.Cancel>
+    }}
+>
+    <AlertDialog.Content
+        class="fixed left-1/2 top-1/2 z-50 w-[32rem] max-w-[95vw] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-card p-6 shadow-lg"
+    >
+        <AlertDialog.Cancel>
+            {#snippet child({ props })}
+                <button
+                    {...props}
+                    type="button"
+                    class="absolute right-3 top-3 inline-grid place-items-center rounded-md p-1 text-muted-foreground hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label="Close"
+                >
+                    <X class="h-4 w-4" />
+                </button>
+            {/snippet}
+        </AlertDialog.Cancel>
 
-		<AlertDialog.Header class="flex flex-col items-center space-y-2 text-center">
-			<img src="/Twinleaf-Logo-Black.svg" alt="Twinleaf Logo" class="mb-4 h-12" />
-			<AlertDialog.Title class="text-lg font-semibold text-zinc-900">
-				Device Status
-			</AlertDialog.Title>
-			<AlertDialog.Description class="text-sm text-zinc-500">
-				Please select a unique serial device to stream from.
-			</AlertDialog.Description>
-		</AlertDialog.Header>
+        <AlertDialog.Header
+            class="flex flex-col items-center space-y-2 text-center"
+        >
+            <img src={logoSrc} alt="Twinleaf Logo" class="mb-4 h-12" />
+            <AlertDialog.Title class="text-lg font-semibold text-foreground">
+                Device Status
+            </AlertDialog.Title>
+            <AlertDialog.Description class="text-sm text-muted-foreground">
+                Please select a unique serial device to stream from.
+            </AlertDialog.Description>
+        </AlertDialog.Header>
 
-		<div class="min-h-48">
-			{#if devices.length === 0}
-				<div class="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
-					<LoaderCircleIcon class="size-6 animate-spin" />
-					<span>Scanning for devices...</span>
-				</div>
-			{:else}
-				<form id="device-select-form" onsubmit={confirm}>
-					<DeviceList devices={deviceState.deviceTree} bind:selectedParent={selectedParent} />
-					<button type="submit" class="hidden" aria-hidden="true" tabindex="-1"></button>
-				</form>
-			{/if}
-		</div>
-		<AlertDialog.Footer>
-			<div class="flex w-full justify-between">
-				<Button
-					variant="outline"
-					class="p-2"
-					aria-label="Add network device"
-					onclick={() => (manualConnectDialogOpen = true)}
-				>
-					<PlusIcon class="size-4" />
-				</Button>
+        <div class="min-h-48">
+            {#if devices.length === 0}
+                <div
+                    class="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground"
+                >
+                    <LoaderCircleIcon class="size-6 animate-spin" />
+                    <span>Scanning for devices...</span>
+                </div>
+            {:else}
+                <form id="device-select-form" onsubmit={confirm}>
+                    <DeviceList
+                        devices={deviceState.deviceTree}
+                        bind:selectedParent
+                    />
+                    <button
+                        type="submit"
+                        class="hidden"
+                        aria-hidden="true"
+                        tabindex="-1"
+                    ></button>
+                </form>
+            {/if}
+        </div>
+        <AlertDialog.Footer>
+            <div class="flex w-full justify-between">
+                <Button
+                    variant="outline"
+                    class="p-2"
+                    aria-label="Add network device"
+                    onclick={() => (manualConnectDialogOpen = true)}
+                >
+                    <PlusIcon class="size-4" />
+                </Button>
 
-				<AlertDialog.Action type="submit" form="device-select-form" disabled={isConfirmDisabled} bind:ref={confirmButton}>
-					Confirm
-				</AlertDialog.Action>
-			</div>
-		</AlertDialog.Footer>
-	</AlertDialog.Content>
+                <AlertDialog.Action
+                    type="submit"
+                    form="device-select-form"
+                    disabled={isConfirmDisabled}
+                    bind:ref={confirmButton}
+                >
+                    Confirm
+                </AlertDialog.Action>
+            </div>
+        </AlertDialog.Footer>
+    </AlertDialog.Content>
 </AlertDialog.Root>
 
 <Dialog.Root bind:open={manualConnectDialogOpen}>
-	<Dialog.Overlay />
-	<Dialog.Content>
-		<Dialog.Header>
-			<Dialog.Title>Connect to Network Device</Dialog.Title>
-			<Dialog.Description>Enter the URL of the device you want to connect to.</Dialog.Description>
-		</Dialog.Header>
-		<form onsubmit={handleManualConnect} class="py-4">
-			<Input
-				id="manual-url"
-				placeholder="e.g., tcp://localhost"
-				bind:value={manualUrl}
-				class="font-mono"
-			/>
+    <Dialog.Overlay />
+    <Dialog.Content>
+        <Dialog.Header>
+            <Dialog.Title>Connect to Network Device</Dialog.Title>
+            <Dialog.Description
+                >Enter the URL of the device you want to connect to.</Dialog.Description
+            >
+        </Dialog.Header>
+        <form onsubmit={handleManualConnect} class="py-4">
+            <Input
+                id="manual-url"
+                placeholder="e.g., tcp://localhost"
+                bind:value={manualUrl}
+                class="font-mono"
+            />
 
-			<Dialog.Footer class="mt-4">
-				<Dialog.Close>
-					{#snippet child({ props })}
-						<Button {...props} type="submit">Connect</Button>
-					{/snippet}
-				</Dialog.Close>
-			</Dialog.Footer>
-		</form>
-	</Dialog.Content>
+            <Dialog.Footer class="mt-4">
+                <Dialog.Close>
+                    {#snippet child({ props })}
+                        <Button {...props} type="submit">Connect</Button>
+                    {/snippet}
+                </Dialog.Close>
+            </Dialog.Footer>
+        </form>
+    </Dialog.Content>
 </Dialog.Root>

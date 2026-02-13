@@ -2,11 +2,12 @@
     import "uplot/dist/uPlot.min.css";
     import "../app.css";
     import StatusFooter from "$lib/components/StatusFooter.svelte";
-    import { ModeWatcher } from "mode-watcher";
+    import { ModeWatcher, setMode } from "mode-watcher";
 
     import DeviceSelectorDialog from "$lib/components/device-select/DeviceSelectorDialog.svelte";
 
     import { uiState } from "$lib/states/uiState.svelte";
+    import { listen } from "@tauri-apps/api/event";
     import { onMount } from "svelte";
     import type { Snippet } from "svelte";
     import { Toaster } from "$lib/components/ui/sonner/index.js";
@@ -15,6 +16,23 @@
 
     onMount(() => {
         uiState.open("discovery");
+
+        let unlistenTheme: (() => void) | undefined;
+        void listen<string>("theme-mode-selected", ({ payload }) => {
+            if (
+                payload === "system" ||
+                payload === "light" ||
+                payload === "dark"
+            ) {
+                setMode(payload);
+            }
+        }).then((unlisten) => {
+            unlistenTheme = unlisten;
+        });
+
+        return () => {
+            unlistenTheme?.();
+        };
     });
 </script>
 
