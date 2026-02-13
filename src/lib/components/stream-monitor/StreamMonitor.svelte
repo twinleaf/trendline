@@ -237,16 +237,21 @@
     }
 
     $effect(() => {
-        if (treeData.length > 0 && !isInitialSelectionDone) {
-            const { selection, expansion } = getAllSelectableIds(treeData);
-            const initialSelection: RowSelectionState = {};
-            for (const id of selection) initialSelection[id] = true;
-            streamMonitorState.rowSelection = initialSelection;
-            const initialExpansion: ExpandedState = {};
-            for (const id of expansion) initialExpansion[id] = true;
-            streamMonitorState.expansion = initialExpansion;
-            isInitialSelectionDone = true;
-        }
+        if (isInitialSelectionDone) return;
+
+        const { selection, expansion } = getAllSelectableIds(treeData);
+        const hasSelectableColumns = selection.some((id) => id.startsWith("{"));
+        if (!hasSelectableColumns) return;
+
+        const initialSelection: RowSelectionState = {};
+        for (const id of selection) initialSelection[id] = true;
+        streamMonitorState.rowSelection = initialSelection;
+
+        const initialExpansion: ExpandedState = {};
+        for (const id of expansion) initialExpansion[id] = true;
+        streamMonitorState.expansion = initialExpansion;
+
+        isInitialSelectionDone = true;
     });
 </script>
 
