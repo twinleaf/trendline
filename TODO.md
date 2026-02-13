@@ -25,6 +25,8 @@ This document outlines the current bugs, desired features, and code quality impr
 
 [X] Fix Platform Fonts: Fonts were not being bundled across platforms and thus would fall back to system fonts
 
+[X] RPC Search Bar: Fix search bar slowing down over time and not accepting hotkeys (e.g. select all)
+
 [ ] Decouple rAF and ingestion: Fix the fact that alt tabbing currently builds up a backlog of frames to render. Should just jump to the newest frame.
 
 [ ] Fix plot NaNs: Fix the fact that the FFT currently zeros on NaN inputs.

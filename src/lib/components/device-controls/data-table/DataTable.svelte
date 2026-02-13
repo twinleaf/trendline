@@ -41,6 +41,20 @@
 		return () => clearTimeout(timeoutId);
 	});
 
+	function handleSearchInputKeyDown(event: KeyboardEvent) {
+		event.stopPropagation();
+		const input = event.currentTarget;
+		if (!(input instanceof HTMLInputElement)) return;
+
+		// Keep select-all behavior local to the search field across platforms.
+		const isSelectAllShortcut =
+			event.key.toLowerCase() === 'a' && (event.metaKey || event.ctrlKey) && !event.altKey;
+		if (isSelectAllShortcut) {
+			event.preventDefault();
+			input.select();
+		}
+	}
+
 
 	let sorting = $state<SortingState>([{ id: 'name', desc: false }]);
 	let toggleState = $state<string[]>(['header']);
@@ -96,6 +110,8 @@
 				placeholder="Search RPCs..."
 				bind:value={fuzzySearchInput}
 				class="flex-1 max-w-[200px]"
+				onclick={(event) => event.stopPropagation()}
+				onkeydown={handleSearchInputKeyDown}
 				autocomplete="off"
 				autocorrect="off"
 				autocapitalize="off"
@@ -138,7 +154,7 @@
 									{#snippet child({ props })}
 										<ToggleGroup.Item
 											{...props}
-											value="type" 
+											value="type"
 											aria-label="Toggle Type Column"
 										>
 											<FileType2 class="size-4" />
