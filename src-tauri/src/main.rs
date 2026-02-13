@@ -47,6 +47,7 @@ fn main() {
             // --- Port Management Commands ---
             commands::port::confirm_selection,
             commands::port::connect_to_port,
+            commands::port::disconnect_port,
             commands::port::refresh_port,
             // --- Capture Management Commands ---
             commands::capture::pause_plot,

@@ -4,13 +4,14 @@ use crate::proxy::port_manager::PortManager;
 use crate::shared::{DataColumnId, PortState};
 use crate::state::capture::CaptureState;
 use dashmap::mapref::entry::Entry;
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use std::sync::{Arc, RwLock};
 use tauri::{AppHandle, Emitter};
 
 pub struct ProxyRegister {
     pub ports: DashMap<String, Arc<PortManager>>,
     pub active_selections: DashMap<String, Vec<DataColumnId>>,
+    ignored_serial_ports: DashSet<String>,
     selected_port: RwLock<Option<String>>,
     capture: CaptureState,
     app: AppHandle,
@@ -21,6 +22,7 @@ impl ProxyRegister {
         Self {
             ports: DashMap::new(),
             active_selections: DashMap::new(),
+            ignored_serial_ports: DashSet::new(),
             selected_port: RwLock::new(None),
             app,
             capture,
@@ -35,10 +37,34 @@ impl ProxyRegister {
         self.selected_port.read().unwrap().clone()
     }
 
+    pub fn ignore_serial(&self, url: &str) {
+        if url.starts_with("serial://") {
+            self.ignored_serial_ports.insert(url.to_string());
+        }
+    }
+
+    pub fn allow_serial(&self, url: &str) {
+        if url.starts_with("serial://") {
+            self.ignored_serial_ports.remove(url);
+        }
+    }
+
+    pub fn is_serial_ignored(&self, url: &str) -> bool {
+        url.starts_with("serial://") && self.ignored_serial_ports.contains(url)
+    }
+
     fn is_selected(&self, url: &str) -> bool {
         match &*self.selected_port.read().unwrap() {
             None => true,
-            Some(sel) => sel == url,
+            Some(sel) => {
+                if sel.starts_with("serial://") && url.starts_with("serial://") {
+                    sel == url
+                } else if sel.starts_with("tcp://") && url.starts_with("serial://") {
+                    false
+                } else {
+                    true
+                }
+            }
         }
     }
 
@@ -56,8 +82,13 @@ impl ProxyRegister {
     }
 
     pub fn ensure(&self, url: String) {
-        if url.starts_with("serial://") && !self.is_selected(&url) {
-            return;
+        if url.starts_with("serial://") {
+            if self.is_serial_ignored(&url) {
+                return;
+            }
+            if !self.is_selected(&url) {
+                return;
+            }
         }
         let capture_tx = self.capture.inner.command_tx.clone();
         match self.ports.entry(url.clone()) {
@@ -66,13 +97,17 @@ impl ProxyRegister {
                 let state = pm.state.lock().unwrap().clone();
 
                 if matches!(state, PortState::Disconnected) {
-                    println!(
-                        "[Registry] Recreating PortManager for '{}' (was Disconnected).",
-                        url
-                    );
-                    pm.shutdown();
-                    let new_pm = PortManager::new(url.clone(), self.app.clone(), capture_tx);
-                    occ.insert(new_pm);
+                    if url.starts_with("serial://") {
+                        println!(
+                            "[Registry] Recreating PortManager for '{}' (was Disconnected).",
+                            url
+                        );
+                        pm.shutdown();
+                        let new_pm = PortManager::new(url.clone(), self.app.clone(), capture_tx);
+                        occ.insert(new_pm);
+                    } else {
+                        pm.connect();
+                    }
                 }
             }
             Entry::Vacant(v) => {

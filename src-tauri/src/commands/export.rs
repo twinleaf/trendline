@@ -55,8 +55,7 @@ fn format_plot_data_to_csv_string(
             .get(&data_col_id.device_route)
             .ok_or("Device not found")?;
         let device_tuple = device_entry.lock().unwrap();
-        let (_device, ui_device) = &*device_tuple;
-        let ui_stream = ui_device
+        let ui_stream = device_tuple
             .streams
             .iter()
             .find(|s| s.meta.stream_id == data_col_id.stream_id)

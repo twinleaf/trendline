@@ -35,9 +35,7 @@ pub fn get_all_devices(registry: State<Arc<ProxyRegister>>) -> Vec<UiDevice> {
                     continue;
                 }
             };
-
-            let (_device, ui_device) = &*device_tuple;
-            all_devices.push(ui_device.clone());
+            all_devices.push(device_tuple.clone());
         }
     }
 
