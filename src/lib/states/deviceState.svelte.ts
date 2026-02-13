@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { sortUiDevicesByRoute, isRootRoute } from "$lib/utils";
 
 type DeviceTreeItem = UiDevice & { children: UiDevice[] };
+const LOCAL_TCP_URL_PREFIX = "tcp://localhost";
 
 export interface Selection {
   portUrl: string;
@@ -59,7 +60,7 @@ class DeviceState {
       },
     );
 
-    listen<string>('device-removed', ({ payload: url }) => {
+    listen<string>("device-removed", ({ payload: url }) => {
       this.#removePort(url);
     });
 
@@ -69,7 +70,10 @@ class DeviceState {
         const set = new Set(childrenRoutes);
         deviceState.childrenSelections.set(portUrl, set);
 
-        if (!deviceState.selection || deviceState.selection.portUrl === portUrl) {
+        if (
+          !deviceState.selection ||
+          deviceState.selection.portUrl === portUrl
+        ) {
           deviceState.selection = { portUrl, childrenRoutes: Array.from(set) };
         }
 
@@ -148,36 +152,44 @@ class DeviceState {
     const prev = entry.state;
     this.#devicesMap.set(url, { ...entry, state });
 
-
     if (state === "Streaming") this.#setDefaultChildrenForPort(url);
   }
 
   #setDefaultChildrenForPort(url: string) {
     if (this.childrenSelections.has(url)) {
-      console.log(`[DeviceState] Already has childrenSelection ${url} inside setDefaultChildrenForPort`)
+      console.log(
+        `[DeviceState] Already has childrenSelection ${url} inside setDefaultChildrenForPort`,
+      );
       return;
     }
     const portData = this.#devicesMap.get(url);
     if (!portData || portData.devices.length === 0) {
-      console.log(`[DeviceState] Found no portData or devices inside setDefaultChildrenForPort`)
+      console.log(
+        `[DeviceState] Found no portData or devices inside setDefaultChildrenForPort`,
+      );
       return;
     }
     const allChildrenRoutes = new Set(
-      portData.devices.filter(d => !isRootRoute(d.route)).map(d => d.route),
+      portData.devices.filter((d) => !isRootRoute(d.route)).map((d) => d.route),
     );
     this.childrenSelections.set(url, allChildrenRoutes);
     this.#reconcileChildrenSelection(url);
 
     if (!this.selection) {
-      this.selection = { portUrl: url, childrenRoutes: Array.from(allChildrenRoutes) };
-      console.log(`[DeviceState] Set ${this.selection?.portUrl} inside setDefaultChildrenForPort`)
+      this.selection = {
+        portUrl: url,
+        childrenRoutes: Array.from(allChildrenRoutes),
+      };
+      console.log(
+        `[DeviceState] Set ${this.selection?.portUrl} inside setDefaultChildrenForPort`,
+      );
     }
   }
 
   #reconcileChildrenSelection(url: string) {
     const portData = this.#devicesMap.get(url);
     if (!portData) {
-      console.log(`[DeviceState] Found no portData reconcileChildrenSelection`)
+      console.log(`[DeviceState] Found no portData reconcileChildrenSelection`);
       return;
     }
     const allChildrenRoutes = portData.devices
@@ -188,13 +200,17 @@ class DeviceState {
     if (!set) {
       set = new Set(allChildrenRoutes);
       this.childrenSelections.set(url, set);
-      console.log(`[DeviceState] Set childrenSelections with set of ${this.selection?.portUrl} inside reconcileChildrenSelection`)
+      console.log(
+        `[DeviceState] Set childrenSelections with set of ${this.selection?.portUrl} inside reconcileChildrenSelection`,
+      );
     } else {
       for (const r of allChildrenRoutes) if (!set.has(r)) set.add(r);
       for (const r of Array.from(set))
         if (!allChildrenRoutes.includes(r)) set.delete(r);
       this.childrenSelections.set(url, set);
-      console.log(`[DeviceState] Set childrenSelections of ${this.selection?.portUrl} inside reconcileChildrenSelection`)
+      console.log(
+        `[DeviceState] Set childrenSelections of ${this.selection?.portUrl} inside reconcileChildrenSelection`,
+      );
     }
 
     if (this.selection?.portUrl === url) {
@@ -202,7 +218,9 @@ class DeviceState {
       for (const r of Array.from(cur)) if (!set!.has(r)) cur.delete(r);
       for (const r of set!) if (!cur.has(r)) cur.add(r);
       this.selection = { portUrl: url, childrenRoutes: Array.from(cur) };
-      console.log(`[DeviceState] Set ${this.selection?.portUrl} inside reconcileChildrenSelection`)
+      console.log(
+        `[DeviceState] Set ${this.selection?.portUrl} inside reconcileChildrenSelection`,
+      );
     }
   }
 
@@ -227,8 +245,20 @@ class DeviceState {
 
     for (const [url, { state, devices }] of this.#devicesMap.entries()) {
       const parent = devices.find((d) => isRootRoute(d.route));
+      const isErrorState =
+        typeof state === "object" && state !== null && "Error" in state;
+      const isLocalTcpUrl = url.startsWith(LOCAL_TCP_URL_PREFIX);
+      const isTransitionState =
+        state === "Connecting" ||
+        state === "Discovery" ||
+        state === "Reconnecting" ||
+        state === "Disconnected" ||
+        isErrorState;
+      const isMissingRootWhileActive = !parent && state !== "Idle";
+      const shouldRenderPlaceholder =
+        !isLocalTcpUrl && (isTransitionState || isMissingRootWhileActive);
 
-      if (state === "Discovery" || state === "Reconnecting") {
+      if (shouldRenderPlaceholder) {
         const placeholderDevice: DeviceTreeItem = {
           url,
           route: "",

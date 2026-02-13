@@ -41,7 +41,12 @@
     });
 
     $effect(() => {
-        if (devices.length > 0 && !selectedParent) {
+        if (devices.length === 0) {
+            selectedParent = "";
+            return;
+        }
+
+        if (!selectedParent || !devices.some((d) => d.url === selectedParent)) {
             selectedParent = devices[0].url;
         }
     });
