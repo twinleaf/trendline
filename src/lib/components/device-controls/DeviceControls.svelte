@@ -13,6 +13,7 @@
 
 	let accordionContainerEl: HTMLDivElement | undefined = $state(undefined);
 	let contentHeight = $state(0);
+	let openAccordionItem = $state<string | undefined>(undefined);
 
 	let containerWidth = $state(0);
 	let isSmall = $derived(containerWidth < 460);
@@ -76,12 +77,13 @@
 			<Accordion.Root
 				class="w-full h-full overflow-hidden"
 				type="single"
+				bind:value={openAccordionItem}
 				style={`--radix-accordion-content-height: ${contentHeight}px`}
 			>
 				{#each selectedDevices as device (device.url + device.route)}
 					<Accordion.Item value={device.url + device.route}>
 						<Accordion.Trigger
-							class="flex w-full flex-1 select-none items-center justify-between py-4 px-2 text-sm font-medium transition-all hover:underline [&[data-state=open]>svg]:rotate-180"
+							class="flex w-full flex-1 select-none items-center justify-between py-4 px-2 text-sm font-medium transition-all hover:underline focus-visible:ring-2 focus-visible:ring-inset [&[data-state=open]>svg]:rotate-180"
 						>
 							<div class="text-left">
 								<p class="font-semibold">{device.meta.name}</p>
@@ -90,7 +92,10 @@
 						</Accordion.Trigger>
 
 						<Accordion.Content class="p-0" forceMount>
-							<div class="h-[var(--radix-accordion-content-height)] box-border p-2">
+							<div
+								class="h-[var(--radix-accordion-content-height)] box-border p-2"
+								inert={openAccordionItem !== device.url + device.route}
+							>
 								<DataTable {columns} data={device.rpcs} {device} {isSmall} />
 							</div>
 						</Accordion.Content>
