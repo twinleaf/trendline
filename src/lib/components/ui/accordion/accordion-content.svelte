@@ -13,7 +13,7 @@
 <AccordionPrimitive.Content
 	bind:ref
 	data-slot="accordion-content"
-	class="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down overflow-hidden text-sm"
+	class="overflow-hidden text-sm transition-[height] duration-200 ease-linear data-[state=open]:h-[var(--radix-accordion-content-height)] data-[state=closed]:h-0"
 	{...restProps}
 >
 	<div class={cn("pb-4 pt-0", className)}>

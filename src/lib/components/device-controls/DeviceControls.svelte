@@ -21,15 +21,29 @@
 		if (!accordionContainerEl) return;
 		const containerHeight = accordionContainerEl.clientHeight;
 		const triggers = accordionContainerEl.querySelectorAll<HTMLElement>('[data-accordion-trigger]');
+		const items = accordionContainerEl.querySelectorAll<HTMLElement>('[data-slot="accordion-item"]');
 		let totalTriggersHeight = 0;
+		let totalItemBorderHeight = 0;
 		triggers.forEach((trigger) => {
 			totalTriggersHeight += trigger.offsetHeight;
+		});
+		items.forEach((item) => {
+			const styles = getComputedStyle(item);
+			totalItemBorderHeight += Number.parseFloat(styles.borderTopWidth);
+			totalItemBorderHeight += Number.parseFloat(styles.borderBottomWidth);
 		});
 		if (containerHeight === 0 || (triggers.length > 0 && totalTriggersHeight === 0)) {
 			return;
 		}
-		contentHeight = Math.max(0, containerHeight - totalTriggersHeight);
+		contentHeight = Math.max(0, containerHeight - totalTriggersHeight - totalItemBorderHeight);
 	};
+
+	$effect(() => {
+		selectedDevices.map((device) => device.url + device.route).join('|');
+		void tick().then(() => {
+			calculateHeight();
+		});
+	});
 
 	onMount(() => {
 		if (!accordionContainerEl) return;
@@ -43,15 +57,6 @@
 		});
 		resizeObserver.observe(accordionContainerEl);
 
-		const mutationObserver = new MutationObserver(() => {
-			calculateHeight();
-		});
-		mutationObserver.observe(accordionContainerEl!, {
-			attributes: true,
-			subtree: true,
-			attributeFilter: ['data-state']
-		});
-
 		const initialize = async () => {
 			await tick();
 			containerWidth = accordionContainerEl!.clientWidth;
@@ -61,16 +66,15 @@
 
 		return () => {
 			resizeObserver.disconnect();
-			mutationObserver.disconnect();
 		};
 	});
 </script>
 
 <div class="w-full h-full flex flex-col rounded-lg border bg-card text-card-foreground p-4">
-	<div class="flex-1 min-h-0 min-w-0" bind:this={accordionContainerEl}>
+	<div class="flex-1 min-h-0 min-w-0 overflow-hidden" bind:this={accordionContainerEl}>
 		{#if selectedDevices.length}
 			<Accordion.Root
-				class="w-full h-full"
+				class="w-full h-full overflow-hidden"
 				type="single"
 				style={`--radix-accordion-content-height: ${contentHeight}px`}
 			>
@@ -85,10 +89,8 @@
 							</div>
 						</Accordion.Trigger>
 
-						<Accordion.Content
-							class="overflow-hidden data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down p-2"
-						>
-							<div class="h-[var(--radix-accordion-content-height)]">
+						<Accordion.Content class="p-0" forceMount>
+							<div class="h-[var(--radix-accordion-content-height)] box-border p-2">
 								<DataTable {columns} data={device.rpcs} {device} {isSmall} />
 							</div>
 						</Accordion.Content>
