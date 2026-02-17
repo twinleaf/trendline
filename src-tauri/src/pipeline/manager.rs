@@ -711,14 +711,7 @@ impl ProcessingManager {
         self.capture_state.unregister_virtual_stream(key);
     }
 
-    pub fn clear_column(
-        &mut self,
-        column_key: &DataColumnId,
-        reset_capture_state: bool,
-    ) -> Result<(), String> {
-        if reset_capture_state {
-            self.capture_state.clear_column_by_key(column_key);
-        }
+    pub fn clear_column(&mut self, column_key: &DataColumnId) -> Result<(), String> {
         for handle in self.pipeline_threads.values() {
             match &handle.thread_type {
                 ThreadType::Root { source_key, .. }
@@ -748,11 +741,7 @@ impl ProcessingManager {
         Ok(())
     }
 
-    pub fn clear_stream(
-        &mut self,
-        any_key_in_stream: &DataColumnId,
-        reset_capture_state: bool,
-    ) -> Result<(), String> {
+    pub fn clear_stream(&mut self, any_key_in_stream: &DataColumnId) -> Result<(), String> {
         let stream_key = any_key_in_stream.stream_key();
 
         // Snapshot the column keys in this stream (from all pipeline threads).
@@ -780,17 +769,13 @@ impl ProcessingManager {
         }
 
         for ck in &column_keys {
-            self.clear_column(ck, reset_capture_state)?;
+            self.clear_column(ck)?;
         }
 
         Ok(())
     }
 
-    pub fn clear_device(
-        &mut self,
-        any_key_on_device: &DataColumnId,
-        reset_capture_state: bool,
-    ) -> Result<(), String> {
+    pub fn clear_device(&mut self, any_key_on_device: &DataColumnId) -> Result<(), String> {
         let device_key = any_key_on_device.device_key();
 
         let mut stream_keys: Vec<DataColumnId> = Vec::new();
@@ -821,55 +806,25 @@ impl ProcessingManager {
             }
         }
 
-        for e in self.capture_state.inner.streams.iter() {
-            let k = e.key();
-            if k.device_key() == device_key {
-                let sk = k.stream_key();
-                if !stream_keys.iter().any(|s| s.stream_key() == sk) {
-                    stream_keys.push(sk);
-                }
-            }
-        }
-
         for sk in &stream_keys {
-            self.clear_stream(sk, reset_capture_state)?;
+            self.clear_stream(sk)?;
         }
 
         Ok(())
     }
 
-    pub fn reset_by_pipeline_id(
-        &mut self,
-        id: PipelineId,
-        reset_capture_state: bool,
-    ) -> Result<(), String> {
-        let (cmd_tx, upstream_stream_keys): (Sender<PipelineCommand>, Vec<DataColumnId>) = {
-            let h = self.pipeline_threads.get(&id).ok_or("Pipeline not found")?;
-            let keys: Vec<DataColumnId> = match &h.thread_type {
-                ThreadType::Root { source_key, .. } | ThreadType::Statistics { source_key, .. } => {
-                    vec![source_key.clone()]
-                }
-                ThreadType::Derived { .. } => vec![],
-                ThreadType::ProducerMono { source_key, .. } => vec![source_key.clone()],
-                ThreadType::ProducerBi {
-                    source_a, source_b, ..
-                } => {
-                    vec![source_a.clone(), source_b.clone()]
-                }
-            };
-            (h.cmd_tx.clone(), keys)
-        };
+    pub fn reset_by_pipeline_id(&mut self, id: PipelineId) -> Result<(), String> {
+        let cmd_tx = self
+            .pipeline_threads
+            .get(&id)
+            .ok_or("Pipeline not found")?
+            .cmd_tx
+            .clone();
+
         cmd_tx
             .send(PipelineCommand::ResetSelf)
             .map_err(|e| e.to_string())?;
-
-        if reset_capture_state {
-            for k in upstream_stream_keys {
-                self.clear_column(&k, true)?;
-            }
-        } else {
-            let _ = cmd_tx.send(PipelineCommand::Hydrate);
-        }
+        let _ = cmd_tx.send(PipelineCommand::Hydrate);
 
         Ok(())
     }

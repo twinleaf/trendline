@@ -90,47 +90,31 @@ pub fn destroy_math_channel(
 #[tauri::command]
 pub fn reset_by_pipeline_id(
     id: PipelineId,
-    reset_capture_state: bool,
     manager: State<Arc<Mutex<ProcessingManager>>>,
 ) -> Result<(), String> {
-    manager
-        .lock()
-        .unwrap()
-        .reset_by_pipeline_id(id, reset_capture_state)
+    manager.lock().unwrap().reset_by_pipeline_id(id)
 }
 
 #[tauri::command]
 pub fn reset_by_column(
     manager: tauri::State<Arc<Mutex<ProcessingManager>>>,
     key: DataColumnId,
-    reset_capture_state: bool,
 ) -> Result<(), String> {
-    manager
-        .lock()
-        .unwrap()
-        .clear_column(&key, reset_capture_state)
+    manager.lock().unwrap().clear_column(&key)
 }
 
 #[tauri::command]
 pub fn reset_by_stream(
     manager: tauri::State<Arc<Mutex<ProcessingManager>>>,
     key: DataColumnId,
-    reset_capture_state: bool,
 ) -> Result<(), String> {
-    manager
-        .lock()
-        .unwrap()
-        .clear_stream(&key, reset_capture_state)
+    manager.lock().unwrap().clear_stream(&key)
 }
 
 #[tauri::command]
 pub fn reset_by_device(
     manager: tauri::State<Arc<Mutex<ProcessingManager>>>,
     key: DataColumnId,
-    reset_capture_state: bool,
 ) -> Result<(), String> {
-    manager
-        .lock()
-        .unwrap()
-        .clear_device(&key, reset_capture_state)
+    manager.lock().unwrap().clear_device(&key)
 }
