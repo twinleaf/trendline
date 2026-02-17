@@ -375,6 +375,8 @@ class ChartState {
   containerHeight = $state(0);
   /** A record of plot IDs to their user-defined heights in pixels, used only in 'manual' mode. */
   manualLayout = $state<Record<string, number>>({});
+  /** True when the user is actively dragging a resize handle between panes. */
+  isDragResizing = $state(false);
 
   // --- Private State ---
 
@@ -948,7 +950,7 @@ class ChartState {
    * @param percentages An array of numbers (0-100) representing the new size of each pane.
    */
   updateLayoutFromManualResize(percentages: number[]) {
-    if (this.#isActionLocked) return;
+    if (this.#isActionLocked || !this.isDragResizing) return;
     const currentPlots = untrack(() => this.plots);
     if (
       this.layoutMode !== "manual" ||

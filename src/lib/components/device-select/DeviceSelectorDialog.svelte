@@ -81,6 +81,22 @@
         uiState.close();
         manualConnectDialogOpen = false;
     }
+
+    $effect(() => {
+        const discoveryOpen = uiState.is("discovery");
+        invoke("set_discovery_polling", { enabled: discoveryOpen }).catch(
+            (e) => {
+                console.error("set_discovery_polling failed", e);
+            },
+        );
+
+        return () => {
+            if (!discoveryOpen) return;
+            invoke("set_discovery_polling", { enabled: false }).catch((e) => {
+                console.error("set_discovery_polling cleanup failed", e);
+            });
+        };
+    });
 </script>
 
 <AlertDialog.Root
