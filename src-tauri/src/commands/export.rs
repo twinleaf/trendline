@@ -1,6 +1,6 @@
 use crate::shared::{DataColumnId, PlotData};
-use crate::state::capture::CaptureState;
-use crate::state::proxy_register::ProxyRegister;
+use crate::state::comm_manager::{CommManager, CommMsg};
+use crate::state::port_manager::PortMsg;
 use csv::WriterBuilder;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -10,6 +10,8 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
+use twinleaf::data::{AlignedWindow, ColumnBatch};
+use twinleaf::tio::proto::identifiers::ColumnKey;
 
 #[derive(Deserialize)]
 pub struct FrontendPlotData {
@@ -23,10 +25,94 @@ struct CsvExportPayload {
     path: Option<String>,
 }
 
+fn data_column_id_to_column_key(id: &DataColumnId) -> ColumnKey {
+    ColumnKey::new(id.device_route.clone(), id.stream_id, id.column_index)
+}
+
+fn aligned_window_to_plot_data(window: &AlignedWindow, column_ids: &[DataColumnId]) -> PlotData {
+    let timestamps = window.timestamps.clone();
+    let series_data = column_ids
+        .iter()
+        .map(|id| {
+            let key = data_column_id_to_column_key(id);
+            match window.columns.get(&key) {
+                Some(ColumnBatch::F64(v)) => v.clone(),
+                Some(ColumnBatch::I64(v)) => v.iter().map(|&x| x as f64).collect(),
+                Some(ColumnBatch::U64(v)) => v.iter().map(|&x| x as f64).collect(),
+                None => vec![f64::NAN; timestamps.len()],
+            }
+        })
+        .collect();
+    PlotData {
+        timestamps,
+        series_data,
+    }
+}
+
+fn read_live_raw_plot_data(
+    data_column_ids: &[DataColumnId],
+    start_time: f64,
+    end_time: f64,
+    registry: &CommManager,
+) -> Result<PlotData, String> {
+    let first = data_column_ids.first().ok_or("No data columns provided.")?;
+
+    let port_manager = registry
+        .ask(|reply| CommMsg::GetPort {
+            port_url: first.port_url.clone(),
+            reply,
+        })
+        .map_err(|e| format!("Failed to query port manager: {}", e))?
+        .ok_or("Port not found")?;
+
+    let columns: Vec<ColumnKey> = data_column_ids
+        .iter()
+        .map(data_column_id_to_column_key)
+        .collect();
+
+    let window = port_manager
+        .ask(|reply| PortMsg::ReadTimeRange {
+            columns,
+            start_time,
+            end_time,
+            reply,
+        })
+        .map_err(|e| format!("Failed to read time range: {}", e))?
+        .map_err(|e| format!("Buffer read error: {:?}", e))?;
+
+    Ok(aligned_window_to_plot_data(&window, data_column_ids))
+}
+
+fn read_snapshot_plot_data(
+    plot_id: &str,
+    data_column_ids: &[DataColumnId],
+    registry: &CommManager,
+) -> Result<PlotData, String> {
+    let first = data_column_ids.first().ok_or("No data columns provided.")?;
+
+    let port_manager = registry
+        .ask(|reply| CommMsg::GetPort {
+            port_url: first.port_url.clone(),
+            reply,
+        })
+        .map_err(|e| format!("Failed to query port manager: {}", e))?
+        .ok_or("Port not found")?;
+
+    let window = port_manager
+        .ask(|reply| PortMsg::GetSnapshot {
+            id: plot_id.to_string(),
+            reply,
+        })
+        .map_err(|e| format!("Failed to query snapshot: {}", e))?
+        .ok_or("The snapshot for this paused plot was not found. Please un-pause and re-pause.")?;
+
+    Ok(aligned_window_to_plot_data(&window, data_column_ids))
+}
+
 fn format_plot_data_to_csv_string(
     plot_data: &PlotData,
     data_column_ids: &[DataColumnId],
-    registry: &ProxyRegister,
+    registry: &CommManager,
 ) -> Result<String, String> {
     if data_column_ids.is_empty() {
         return Err("No data columns provided for formatting.".to_string());
@@ -45,17 +131,22 @@ fn format_plot_data_to_csv_string(
 
     for data_col_id in data_column_ids {
         let port_manager = registry
-            .get(&data_col_id.port_url)
+            .ask(|reply| CommMsg::GetPort {
+                port_url: data_col_id.port_url.clone(),
+                reply,
+            })
+            .map_err(|e| format!("Failed to query port manager: {}", e))?
             .ok_or("Port not found")?;
-        let devices_map = port_manager
-            .devices
-            .read()
-            .map_err(|e| format!("Lock error: {}", e))?;
-        let device_entry = devices_map
-            .get(&data_col_id.device_route)
+
+        let device = port_manager
+            .ask(|reply| PortMsg::GetDevice {
+                route: data_col_id.device_route.clone(),
+                reply,
+            })
+            .map_err(|e| format!("Failed to query device: {}", e))?
             .ok_or("Device not found")?;
-        let device_tuple = device_entry.lock().unwrap();
-        let ui_stream = device_tuple
+
+        let ui_stream = device
             .streams
             .iter()
             .find(|s| s.meta.stream_id == data_col_id.stream_id)
@@ -113,7 +204,7 @@ pub async fn export_plot_data_to_clipboard(
     app_handle: AppHandle,
     plot_data: FrontendPlotData,
     data_column_ids: Vec<DataColumnId>,
-    registry: State<'_, Arc<ProxyRegister>>,
+    registry: State<'_, Arc<CommManager>>,
 ) -> Result<(), String> {
     let internal_plot_data = PlotData {
         timestamps: plot_data.timestamps,
@@ -154,7 +245,7 @@ pub async fn save_plot_data_to_file(
     plot_data: FrontendPlotData,
     data_column_ids: Vec<DataColumnId>,
     file_name_suggestion: String,
-    registry: State<'_, Arc<ProxyRegister>>,
+    registry: State<'_, Arc<CommManager>>,
 ) -> Result<(), String> {
     let internal_plot_data = PlotData {
         timestamps: plot_data.timestamps,
@@ -211,35 +302,12 @@ pub async fn save_raw_plot_data_to_file(
     end_time: f64,
     is_paused: bool,
     file_name_suggestion: String,
-    capture_state: State<'_, CaptureState>,
-    registry: State<'_, Arc<ProxyRegister>>,
+    registry: State<'_, Arc<CommManager>>,
 ) -> Result<(), String> {
     let raw_plot_data = if is_paused {
-        capture_state
-            .inner
-            .paused_snapshots
-            .get(&plot_id)
-            .map(|data_ref| data_ref.value().clone())
-            .ok_or_else(|| {
-                "The snapshot for this paused plot was not found. Please un-pause and re-pause."
-                    .to_string()
-            })?
+        read_snapshot_plot_data(&plot_id, &data_column_ids, &registry)?
     } else {
-        let raw_data_vecs =
-            capture_state.get_data_across_sessions_for_keys(&data_column_ids, start_time, end_time);
-        if raw_data_vecs.get(0).map_or(true, |v| v.is_empty()) {
-            return Err("The requested time range is no longer in the live data buffer. To save raw data, please act more quickly.".to_string());
-        }
-        let mut individual_plot_data = Vec::with_capacity(data_column_ids.len());
-        for points in raw_data_vecs {
-            let timestamps: Vec<f64> = points.iter().map(|p| p.x).collect();
-            let series_data: Vec<f64> = points.iter().map(|p| p.y).collect();
-            individual_plot_data.push(PlotData {
-                timestamps,
-                series_data: vec![series_data],
-            });
-        }
-        crate::util::k_way_merge_plot_data(individual_plot_data)
+        read_live_raw_plot_data(&data_column_ids, start_time, end_time, &registry)?
     };
 
     let csv_string = format_plot_data_to_csv_string(&raw_plot_data, &data_column_ids, &registry)?;
