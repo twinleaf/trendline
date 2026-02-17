@@ -14,8 +14,8 @@ use tauri::Manager;
 
 use trendline_lib::pipeline::manager::ProcessingManager;
 use trendline_lib::state::capture::CaptureState;
-use trendline_lib::state::proxy_register::ProxyRegister;
-use trendline_lib::{commands, menu, proxy};
+use trendline_lib::state::comm_manager::CommManager;
+use trendline_lib::{commands, menu};
 
 fn main() {
     tauri::Builder::default()
@@ -33,14 +33,12 @@ fn main() {
             });
 
             let capture = CaptureState::new();
-            let registry = Arc::new(ProxyRegister::new(app.handle().clone(), capture.clone()));
-            let processing_manager = ProcessingManager::new_with_ticker(capture.clone());
+            let registry = Arc::new(CommManager::new(app.handle().clone()));
+            let processing_manager = ProcessingManager::new_with_ticker(capture);
 
-            app.manage(capture);
             app.manage(registry.clone());
             app.manage(processing_manager);
 
-            proxy::discovery::spawn(registry);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -49,6 +47,7 @@ fn main() {
             commands::port::connect_to_port,
             commands::port::disconnect_port,
             commands::port::refresh_port,
+            commands::port::set_discovery_polling,
             // --- Capture Management Commands ---
             commands::capture::pause_plot,
             commands::capture::unpause_plot,
