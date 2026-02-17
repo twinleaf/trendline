@@ -1,41 +1,34 @@
 use serde_json::Value;
 use std::sync::Arc;
 use tauri::State;
+use twinleaf::tio::proto::DeviceRoute;
 
 use crate::shared::RpcError;
 use crate::shared::{PortState, UiDevice};
-use crate::state::proxy_register::ProxyRegister;
+use crate::state::comm_manager::{CommManager, CommMsg};
+use crate::state::port_manager::PortMsg;
 
 #[tauri::command]
-pub fn get_all_devices(registry: State<Arc<ProxyRegister>>) -> Vec<UiDevice> {
+pub fn get_all_devices(registry: State<Arc<CommManager>>) -> Vec<UiDevice> {
     let mut all_devices = Vec::new();
 
-    for entry in registry.ports.iter() {
-        let port_manager = entry.value();
+    let port_managers = match registry.ask(|reply| CommMsg::ListPorts { reply }) {
+        Ok(ports) => ports,
+        Err(e) => {
+            eprintln!("[Command] get_all_devices failed to query ports: {}", e);
+            return all_devices;
+        }
+    };
 
-        let devices_map = match port_manager.devices.read() {
-            Ok(guard) => guard,
+    for port_manager in port_managers {
+        match port_manager.ask(|reply| PortMsg::GetDevices { reply }) {
+            Ok(mut devices) => all_devices.append(&mut devices),
             Err(e) => {
                 eprintln!(
-                    "[{}] Could not acquire device lock for state hydration (poisoned: {}). Skipping.",
+                    "[{}] get_all_devices failed to query devices: {}",
                     port_manager.url, e
                 );
-                continue;
             }
-        };
-
-        for device_entry in devices_map.values() {
-            let device_tuple = match device_entry.lock() {
-                Ok(guard) => guard,
-                Err(e) => {
-                    eprintln!(
-                        "[{}] A device lock was poisoned during state hydration (poisoned: {}). Skipping device.",
-                        port_manager.url, e
-                    );
-                    continue;
-                }
-            };
-            all_devices.push(device_tuple.clone());
         }
     }
 
@@ -49,25 +42,18 @@ pub fn get_all_devices(registry: State<Arc<ProxyRegister>>) -> Vec<UiDevice> {
 #[tauri::command]
 pub fn get_port_state(
     port_url: String,
-    registry: State<'_, Arc<ProxyRegister>>,
+    registry: State<'_, Arc<CommManager>>,
 ) -> Result<PortState, String> {
-    if let Some(port_manager) = registry.get(&port_url) {
-        match port_manager.state.lock() {
-            Ok(guard) => Ok(guard.clone()),
-            Err(_poisoned) => {
-                eprintln!(
-                    "[{}] State lock was poisoned. Returning last known state.",
-                    port_url
-                );
-                Err(format!(
-                    "Port '{}' is in an inconsistent state (lock poisoned).",
-                    port_url
-                ))
-            }
-        }
-    } else {
-        Err(format!("Port manager for URL '{}' not found.", port_url))
-    }
+    let port_manager = registry
+        .ask(|reply| CommMsg::GetPort {
+            port_url: port_url.clone(),
+            reply,
+        })?
+        .ok_or_else(|| format!("Port manager for URL '{}' not found.", port_url))?;
+
+    port_manager
+        .ask(|reply| PortMsg::GetState { reply })
+        .map_err(|e| format!("Failed to query state for '{}': {}", port_url, e))
 }
 
 #[tauri::command]
@@ -76,11 +62,25 @@ pub async fn execute_rpc(
     device_route: String,
     name: String,
     args: Option<Value>,
-    registry: State<'_, Arc<ProxyRegister>>,
+    registry: State<'_, Arc<CommManager>>,
 ) -> Result<Value, RpcError> {
+    let route = DeviceRoute::from_str(&device_route)
+        .map_err(|_| RpcError::AppLogic(format!("Invalid device route '{}'.", device_route)))?;
+
     let port_manager = registry
-        .get(&port_url)
+        .ask(|reply| CommMsg::GetPort {
+            port_url: port_url.clone(),
+            reply,
+        })
+        .map_err(RpcError::AppLogic)?
         .ok_or_else(|| RpcError::AppLogic(format!("Port '{}' not found.", port_url)))?;
 
-    port_manager.execute_rpc(&device_route, &name, args).await
+    port_manager
+        .ask(|reply| PortMsg::ExecuteRpc {
+            route,
+            name,
+            args: args.unwrap_or(Value::Null),
+            reply,
+        })
+        .map_err(RpcError::AppLogic)?
 }
