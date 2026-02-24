@@ -8,8 +8,8 @@ use crate::pipeline::filtering::BiquadProducer;
 use crate::pipeline::statistics::StreamingStatisticsProvider;
 use crate::pipeline::StatisticsProvider;
 use crate::shared::{
-    ColumnStatistics, DataColumnId, DecimationMethod, FftConfig, MathChannelConfig, PipelineId,
-    PlotData, SharedPlotConfig, TimeseriesConfig, ViewConfig,
+    ColumnKey, ColumnStatistics, DecimationMethod, FftConfig, MathChannelConfig, PipelineId,
+    PlotData, PlotId, SharedPlotConfig, TimeseriesConfig, ViewConfig, VIRTUAL_ROUTE,
 };
 use crate::state::capture::{CaptureCommand, CaptureState};
 use crate::util::k_way_merge_plot_data;
@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
+use uuid::Uuid;
 static NEXT_MATH_STREAM_ID: AtomicU8 = AtomicU8::new(1);
 
 pub struct ManagedPlotPipeline {
@@ -31,26 +32,26 @@ pub struct ManagedPlotPipeline {
 enum ThreadType {
     Root {
         sub_id: usize,
-        source_key: DataColumnId,
+        source_key: ColumnKey,
     },
     Statistics {
         sub_id: usize,
-        source_key: DataColumnId,
+        source_key: ColumnKey,
     },
     Derived {
-        source_key: DataColumnId,
+        source_key: ColumnKey,
     },
     ProducerMono {
         sub_id: usize,
-        source_key: DataColumnId,
-        output_key: DataColumnId,
+        source_key: ColumnKey,
+        output_key: ColumnKey,
     },
     ProducerBi {
         sub_id_a: usize,
         sub_id_b: usize,
-        source_a: DataColumnId,
-        source_b: DataColumnId,
-        output_key: DataColumnId,
+        source_a: ColumnKey,
+        source_b: ColumnKey,
+        output_key: ColumnKey,
     },
 }
 
@@ -61,10 +62,10 @@ struct PipelineThreadHandle {
 }
 
 pub struct ProcessingManager {
-    pub managed_plots: HashMap<String, ManagedPlotPipeline>,
+    pub managed_plots: HashMap<PlotId, ManagedPlotPipeline>,
     pub pipelines: HashMap<PipelineId, Arc<Mutex<dyn Pipeline>>>,
     pub stat_providers: HashMap<PipelineId, Arc<Mutex<dyn StatisticsProvider>>>,
-    pub plot_channels: HashMap<String, Channel<PlotData>>,
+    pub plot_channels: HashMap<PlotId, Channel<PlotData>>,
     pub statistics_channels: HashMap<PipelineId, Channel<ColumnStatistics>>,
     pipeline_threads: HashMap<PipelineId, PipelineThreadHandle>,
     capture_state: CaptureState,
@@ -141,20 +142,12 @@ impl ProcessingManager {
         manager
     }
 
-    fn new_virtual_key() -> (String, DataColumnId) {
-        let port_url = "virtual://math".to_string();
-        let route = twinleaf::tio::proto::DeviceRoute::from_str("").unwrap();
+    fn new_virtual_key() -> ColumnKey {
         let stream_id = NEXT_MATH_STREAM_ID.fetch_add(1, Ordering::Relaxed);
-        let key = DataColumnId {
-            port_url: port_url.clone(),
-            device_route: route,
-            stream_id,
-            column_index: 0,
-        };
-        (port_url, key)
+        ColumnKey::new(VIRTUAL_ROUTE.clone(), stream_id, 0)
     }
 
-    fn spawn_root_pipeline<P>(&mut self, pipeline: P, source_key: DataColumnId) -> PipelineId
+    fn spawn_root_pipeline<P>(&mut self, pipeline: P, source_key: ColumnKey) -> PipelineId
     where
         P: Pipeline + 'static,
     {
@@ -205,7 +198,7 @@ impl ProcessingManager {
     fn spawn_derived_pipeline<P>(
         &mut self,
         pipeline: P,
-        source_key: DataColumnId,
+        source_key: ColumnKey,
     ) -> (PipelineId, Sender<(PlotData, f64)>)
     where
         P: Pipeline + 'static,
@@ -250,8 +243,8 @@ impl ProcessingManager {
     fn spawn_producer_mono<P>(
         &mut self,
         pipeline: P,
-        source_key: DataColumnId,
-        output_key: DataColumnId,
+        source_key: ColumnKey,
+        output_key: ColumnKey,
     ) -> PipelineId
     where
         P: Pipeline + 'static,
@@ -310,9 +303,9 @@ impl ProcessingManager {
     fn spawn_producer_bi<P>(
         &mut self,
         pipeline: P,
-        source_a: DataColumnId,
-        source_b: DataColumnId,
-        output_key: DataColumnId,
+        source_a: ColumnKey,
+        source_b: ColumnKey,
+        output_key: ColumnKey,
     ) -> PipelineId
     where
         P: Pipeline + 'static,
@@ -390,7 +383,7 @@ impl ProcessingManager {
     ) -> Result<Vec<PipelineId>, String> {
         if config.max_sampling_rate <= 0.0 || !config.max_sampling_rate.is_finite() {
             return Err(format!(
-                "Refusing to create plot '{}' with invalid max sampling rate: {}",
+                "Refusing to create plot '{:?}' with invalid max sampling rate: {}",
                 config.plot_id, config.max_sampling_rate
             ));
         }
@@ -401,15 +394,15 @@ impl ProcessingManager {
                 .get_effective_sampling_rate(key)
                 .ok_or_else(|| {
                     format!(
-                        "No effective sampling rate available for key (url='{}', route='{}', stream_id={}, column_index={}).",
-                        key.port_url, key.device_route, key.stream_id, key.column_index
+                        "No effective sampling rate available for key (route='{}', stream_id={}, column_id={}).",
+                        key.route, key.stream_id, key.column_id
                     )
                 })?;
 
             if rate <= 0.0 || !rate.is_finite() {
                 return Err(format!(
-                    "Invalid effective sampling rate ({}) for key (url='{}', route='{}', stream_id={}, column_index={}).",
-                    rate, key.port_url, key.device_route, key.stream_id, key.column_index
+                    "Invalid effective sampling rate ({}) for key (route='{}', stream_id={}, column_id={}).",
+                    rate, key.route, key.stream_id, key.column_id
                 ));
             }
         }
@@ -446,14 +439,37 @@ impl ProcessingManager {
         Ok(output_ids)
     }
 
-    pub fn destroy_plot_pipelines(&mut self, plot_id: &str) {
+    pub fn create_plot(&mut self) -> PlotId {
+        let id = PlotId(Uuid::new_v4());
+        self.managed_plots.insert(
+            id,
+            ManagedPlotPipeline {
+                config: SharedPlotConfig {
+                    plot_id: id,
+                    data_keys: vec![],
+                    max_sampling_rate: 0.0,
+                    view_config: ViewConfig::Timeseries(TimeseriesConfig::default()),
+                },
+                output_pipeline_ids: vec![],
+                all_component_ids: vec![],
+            },
+        );
+        id
+    }
+
+    pub fn destroy_plot(&mut self, plot_id: PlotId) {
+        self._destroy_plot_components(&plot_id);
+        self.plot_channels.remove(&plot_id);
+    }
+
+    pub fn destroy_plot_pipelines(&mut self, plot_id: &PlotId) {
         self._destroy_plot_components(plot_id);
         self.plot_channels.remove(plot_id);
     }
 
     fn _create_timeseries_for_plot(
         &mut self,
-        key: &DataColumnId,
+        key: &ColumnKey,
         config: &TimeseriesConfig,
         max_sr: f64,
     ) -> PipelineId {
@@ -475,7 +491,7 @@ impl ProcessingManager {
 
     fn _create_fft_chain_for_plot(
         &mut self,
-        key: &DataColumnId,
+        key: &ColumnKey,
         config: &FftConfig,
     ) -> Result<(PipelineId, PipelineId), String> {
         let detrend_pipeline = DetrendPipeline::new(
@@ -501,7 +517,7 @@ impl ProcessingManager {
         Ok((fft_id, detrend_id))
     }
 
-    fn _destroy_plot_components(&mut self, plot_id: &str) {
+    fn _destroy_plot_components(&mut self, plot_id: &PlotId) {
         if let Some(plot) = self.managed_plots.remove(plot_id) {
             for id in plot.all_component_ids.iter().rev() {
                 self.destroy(*id);
@@ -509,7 +525,7 @@ impl ProcessingManager {
         }
     }
 
-    pub fn get_merged_data_for_plot(&self, plot_id: &str) -> Option<PlotData> {
+    pub fn get_merged_data_for_plot(&self, plot_id: &PlotId) -> Option<PlotData> {
         let managed_plot = self.managed_plots.get(plot_id)?;
         let mut data_to_merge = Vec::with_capacity(managed_plot.output_pipeline_ids.len());
         for id in &managed_plot.output_pipeline_ids {
@@ -527,7 +543,7 @@ impl ProcessingManager {
 
     pub fn create_statistics_provider(
         &mut self,
-        source_key: DataColumnId,
+        source_key: ColumnKey,
         window_seconds: f64,
     ) -> PipelineId {
         let provider = StreamingStatisticsProvider::new(source_key.clone(), window_seconds);
@@ -540,8 +556,8 @@ impl ProcessingManager {
 
         let sub_id = self.next_sub_id.fetch_add(1, Ordering::Relaxed);
         println!(
-            "[Stats] Creating provider {:?} for stream (url={}, route={}, stream={}, col={}, window={:.2}s); sub_id={}",
-            id, source_key.port_url, source_key.device_route, source_key.stream_id, source_key.column_index, window_seconds, sub_id
+            "[Stats] Creating provider {:?} for stream (route={}, stream={}, col={}, window={:.2}s); sub_id={}",
+            id, source_key.route, source_key.stream_id, source_key.column_id, window_seconds, sub_id
         );
 
         self.capture_cmd_tx
@@ -595,8 +611,8 @@ impl ProcessingManager {
     pub fn create_math_channel(
         &mut self,
         spec: MathChannelConfig,
-    ) -> Result<(PipelineId, DataColumnId), String> {
-        let (_port, out_key) = Self::new_virtual_key();
+    ) -> Result<(PipelineId, ColumnKey), String> {
+        let out_key = Self::new_virtual_key();
         let pid = match spec {
             MathChannelConfig::Arithmetic { a, op, b } => {
                 let p = ArithmeticProducer::new(
@@ -633,8 +649,8 @@ impl ProcessingManager {
         if let Some(handle) = self.pipeline_threads.remove(&id) {
             match &handle.thread_type {
                 ThreadType::Statistics { sub_id, source_key } => {
-                    println!("[Pipeline] Destroying stats provider {:?} (unsub sub_id={} stream url={} route={} sid={}).",
-                        id, sub_id, source_key.port_url, source_key.device_route, source_key.stream_id);
+                    println!("[Pipeline] Destroying stats provider {:?} (unsub sub_id={} route={} sid={}).",
+                        id, sub_id, source_key.route, source_key.stream_id);
                     let _ = self.capture_cmd_tx.send(CaptureCommand::Unsubscribe {
                         key: source_key.clone(),
                         id: *sub_id,
@@ -698,7 +714,7 @@ impl ProcessingManager {
         }
     }
 
-    pub fn destroy_virtual_stream(&mut self, key: &DataColumnId) {
+    pub fn destroy_virtual_stream(&mut self, key: &ColumnKey) {
         if let Some(pid) = self
             .capture_state
             .inner
@@ -711,7 +727,7 @@ impl ProcessingManager {
         self.capture_state.unregister_virtual_stream(key);
     }
 
-    pub fn clear_column(&mut self, column_key: &DataColumnId) -> Result<(), String> {
+    pub fn clear_column(&mut self, column_key: &ColumnKey) -> Result<(), String> {
         for handle in self.pipeline_threads.values() {
             match &handle.thread_type {
                 ThreadType::Root { source_key, .. }
@@ -741,11 +757,11 @@ impl ProcessingManager {
         Ok(())
     }
 
-    pub fn clear_stream(&mut self, any_key_in_stream: &DataColumnId) -> Result<(), String> {
+    pub fn clear_stream(&mut self, any_key_in_stream: &ColumnKey) -> Result<(), String> {
         let stream_key = any_key_in_stream.stream_key();
 
         // Snapshot the column keys in this stream (from all pipeline threads).
-        let mut column_keys: Vec<DataColumnId> = Vec::new();
+        let mut column_keys: Vec<ColumnKey> = Vec::new();
         for handle in self.pipeline_threads.values() {
             match &handle.thread_type {
                 ThreadType::Root { source_key, .. }
@@ -775,13 +791,13 @@ impl ProcessingManager {
         Ok(())
     }
 
-    pub fn clear_device(&mut self, any_key_on_device: &DataColumnId) -> Result<(), String> {
+    pub fn clear_device(&mut self, any_key_on_device: &ColumnKey) -> Result<(), String> {
         let device_key = any_key_on_device.device_key();
 
-        let mut stream_keys: Vec<DataColumnId> = Vec::new();
+        let mut stream_keys: Vec<ColumnKey> = Vec::new();
 
         for handle in self.pipeline_threads.values() {
-            let mut maybe_sources: Vec<&DataColumnId> = Vec::new();
+            let mut maybe_sources: Vec<&ColumnKey> = Vec::new();
             match &handle.thread_type {
                 ThreadType::Root { source_key, .. }
                 | ThreadType::Statistics { source_key, .. }
@@ -829,7 +845,7 @@ impl ProcessingManager {
         Ok(())
     }
 
-    pub fn register_plot_channel(&mut self, plot_id: String, channel: Channel<PlotData>) {
+    pub fn register_plot_channel(&mut self, plot_id: PlotId, channel: Channel<PlotData>) {
         self.plot_channels.insert(plot_id, channel);
     }
 

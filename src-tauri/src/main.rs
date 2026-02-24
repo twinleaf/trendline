@@ -52,6 +52,8 @@ fn main() {
             commands::capture::pause_plot,
             commands::capture::unpause_plot,
             // --- Pipeline Commands ---
+            commands::pipeline::create_plot,
+            commands::pipeline::destroy_plot,
             commands::pipeline::update_plot_pipeline,
             commands::pipeline::destroy_plot_pipeline,
             commands::pipeline::create_statistics_provider,

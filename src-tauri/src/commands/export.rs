@@ -1,4 +1,4 @@
-use crate::shared::{DataColumnId, PlotData};
+use crate::shared::{ColumnKey, PlotData, PlotId};
 use crate::state::comm_manager::{CommManager, CommMsg};
 use crate::state::port_manager::PortMsg;
 use csv::WriterBuilder;
@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
 use twinleaf::data::{AlignedWindow, ColumnBatch};
-use twinleaf::tio::proto::identifiers::ColumnKey;
+use twinleaf::tio::proto::identifiers::ColumnKey as LibColumnKey;
 
 #[derive(Deserialize)]
 pub struct FrontendPlotData {
@@ -25,16 +25,16 @@ struct CsvExportPayload {
     path: Option<String>,
 }
 
-fn data_column_id_to_column_key(id: &DataColumnId) -> ColumnKey {
-    ColumnKey::new(id.device_route.clone(), id.stream_id, id.column_index)
+fn to_lib_key(k: &ColumnKey) -> LibColumnKey {
+    LibColumnKey::new(k.route.clone(), k.stream_id, k.column_id)
 }
 
-fn aligned_window_to_plot_data(window: &AlignedWindow, column_ids: &[DataColumnId]) -> PlotData {
+fn aligned_window_to_plot_data(window: &AlignedWindow, column_ids: &[ColumnKey]) -> PlotData {
     let timestamps = window.timestamps.clone();
     let series_data = column_ids
         .iter()
         .map(|id| {
-            let key = data_column_id_to_column_key(id);
+            let key = to_lib_key(id);
             match window.columns.get(&key) {
                 Some(ColumnBatch::F64(v)) => v.clone(),
                 Some(ColumnBatch::I64(v)) => v.iter().map(|&x| x as f64).collect(),
@@ -50,25 +50,17 @@ fn aligned_window_to_plot_data(window: &AlignedWindow, column_ids: &[DataColumnI
 }
 
 fn read_live_raw_plot_data(
-    data_column_ids: &[DataColumnId],
+    data_column_ids: &[ColumnKey],
     start_time: f64,
     end_time: f64,
     registry: &CommManager,
 ) -> Result<PlotData, String> {
-    let first = data_column_ids.first().ok_or("No data columns provided.")?;
-
     let port_manager = registry
-        .ask(|reply| CommMsg::GetPort {
-            port_url: first.port_url.clone(),
-            reply,
-        })
+        .ask(|reply| CommMsg::GetActivePort { reply })
         .map_err(|e| format!("Failed to query port manager: {}", e))?
-        .ok_or("Port not found")?;
+        .ok_or("No active port")?;
 
-    let columns: Vec<ColumnKey> = data_column_ids
-        .iter()
-        .map(data_column_id_to_column_key)
-        .collect();
+    let columns: Vec<LibColumnKey> = data_column_ids.iter().map(to_lib_key).collect();
 
     let window = port_manager
         .ask(|reply| PortMsg::ReadTimeRange {
@@ -85,18 +77,13 @@ fn read_live_raw_plot_data(
 
 fn read_snapshot_plot_data(
     plot_id: &str,
-    data_column_ids: &[DataColumnId],
+    data_column_ids: &[ColumnKey],
     registry: &CommManager,
 ) -> Result<PlotData, String> {
-    let first = data_column_ids.first().ok_or("No data columns provided.")?;
-
     let port_manager = registry
-        .ask(|reply| CommMsg::GetPort {
-            port_url: first.port_url.clone(),
-            reply,
-        })
+        .ask(|reply| CommMsg::GetActivePort { reply })
         .map_err(|e| format!("Failed to query port manager: {}", e))?
-        .ok_or("Port not found")?;
+        .ok_or("No active port")?;
 
     let window = port_manager
         .ask(|reply| PortMsg::GetSnapshot {
@@ -111,12 +98,17 @@ fn read_snapshot_plot_data(
 
 fn format_plot_data_to_csv_string(
     plot_data: &PlotData,
-    data_column_ids: &[DataColumnId],
+    data_column_ids: &[ColumnKey],
     registry: &CommManager,
 ) -> Result<String, String> {
     if data_column_ids.is_empty() {
         return Err("No data columns provided for formatting.".to_string());
     }
+
+    let port_manager = registry
+        .ask(|reply| CommMsg::GetActivePort { reply })
+        .map_err(|e| format!("Failed to query port manager: {}", e))?
+        .ok_or("No active port")?;
 
     let mut headers: Vec<String> = vec!["time".to_string()];
     let mut data_types: Vec<String> = Vec::new();
@@ -124,23 +116,15 @@ fn format_plot_data_to_csv_string(
     let is_single_device = {
         let mut unique_device_routes = HashSet::new();
         for id in data_column_ids {
-            unique_device_routes.insert(id.device_route.clone());
+            unique_device_routes.insert(id.route.clone());
         }
         unique_device_routes.len() <= 1
     };
 
     for data_col_id in data_column_ids {
-        let port_manager = registry
-            .ask(|reply| CommMsg::GetPort {
-                port_url: data_col_id.port_url.clone(),
-                reply,
-            })
-            .map_err(|e| format!("Failed to query port manager: {}", e))?
-            .ok_or("Port not found")?;
-
         let device = port_manager
             .ask(|reply| PortMsg::GetDevice {
-                route: data_col_id.device_route.clone(),
+                route: data_col_id.route.clone(),
                 reply,
             })
             .map_err(|e| format!("Failed to query device: {}", e))?
@@ -154,7 +138,7 @@ fn format_plot_data_to_csv_string(
         let column_meta = ui_stream
             .columns
             .iter()
-            .find(|c| c.index == data_col_id.column_index)
+            .find(|c| c.index == data_col_id.column_id)
             .ok_or("Column not found")?;
 
         data_types.push(column_meta.data_type.clone());
@@ -162,7 +146,7 @@ fn format_plot_data_to_csv_string(
         let header_name = if is_single_device {
             column_meta.name.clone()
         } else {
-            format!("{}.{}", data_col_id.device_route, column_meta.name)
+            format!("{}.{}", data_col_id.route, column_meta.name)
         };
         headers.push(header_name);
     }
@@ -203,7 +187,7 @@ fn format_plot_data_to_csv_string(
 pub async fn export_plot_data_to_clipboard(
     app_handle: AppHandle,
     plot_data: FrontendPlotData,
-    data_column_ids: Vec<DataColumnId>,
+    data_column_ids: Vec<ColumnKey>,
     registry: State<'_, Arc<CommManager>>,
 ) -> Result<(), String> {
     let internal_plot_data = PlotData {
@@ -243,7 +227,7 @@ pub async fn export_plot_data_to_clipboard(
 pub async fn save_plot_data_to_file(
     app_handle: AppHandle,
     plot_data: FrontendPlotData,
-    data_column_ids: Vec<DataColumnId>,
+    data_column_ids: Vec<ColumnKey>,
     file_name_suggestion: String,
     registry: State<'_, Arc<CommManager>>,
 ) -> Result<(), String> {
@@ -296,8 +280,8 @@ pub async fn save_plot_data_to_file(
 #[tauri::command]
 pub async fn save_raw_plot_data_to_file(
     app_handle: AppHandle,
-    plot_id: String,
-    data_column_ids: Vec<DataColumnId>,
+    plot_id: PlotId,
+    data_column_ids: Vec<ColumnKey>,
     start_time: f64,
     end_time: f64,
     is_paused: bool,
@@ -305,7 +289,7 @@ pub async fn save_raw_plot_data_to_file(
     registry: State<'_, Arc<CommManager>>,
 ) -> Result<(), String> {
     let raw_plot_data = if is_paused {
-        read_snapshot_plot_data(&plot_id, &data_column_ids, &registry)?
+        read_snapshot_plot_data(&plot_id.0.to_string(), &data_column_ids, &registry)?
     } else {
         read_live_raw_plot_data(&data_column_ids, start_time, end_time, &registry)?
     };

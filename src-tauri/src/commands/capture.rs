@@ -1,13 +1,14 @@
 use crate::pipeline::manager::ProcessingManager;
+use crate::shared::PlotId;
 use crate::state::comm_manager::{CommManager, CommMsg};
 use crate::state::port_manager::PortMsg;
 use std::sync::{Arc, Mutex};
 use tauri::State;
-use twinleaf::tio::proto::identifiers::ColumnKey;
+use twinleaf::tio::proto::identifiers::ColumnKey as LibColumnKey;
 
 #[tauri::command]
 pub fn pause_plot(
-    plot_id: String,
+    plot_id: PlotId,
     start_time: f64,
     end_time: f64,
     manager: State<Arc<Mutex<ProcessingManager>>>,
@@ -17,28 +18,22 @@ pub fn pause_plot(
     let plot_config = mg
         .managed_plots
         .get(&plot_id)
-        .ok_or_else(|| format!("Plot {} not found.", plot_id))?;
+        .ok_or_else(|| format!("Plot {:?} not found.", plot_id))?;
 
     let data_keys = &plot_config.config.data_keys;
-    let port_url = data_keys
-        .first()
-        .ok_or("Plot has no data columns.")?
-        .port_url
-        .clone();
-
-    let columns: Vec<ColumnKey> = data_keys
+    let columns: Vec<LibColumnKey> = data_keys
         .iter()
-        .map(|id| ColumnKey::new(id.device_route.clone(), id.stream_id, id.column_index))
+        .map(|k| LibColumnKey::new(k.route.clone(), k.stream_id, k.column_id))
         .collect();
 
     let port_manager = registry
-        .ask(|reply| CommMsg::GetPort { port_url, reply })
+        .ask(|reply| CommMsg::GetActivePort { reply })
         .map_err(|e| format!("Failed to query port manager: {}", e))?
-        .ok_or("Port not found")?;
+        .ok_or("No active port")?;
 
     port_manager
         .ask(|reply| PortMsg::CreateSnapshot {
-            id: plot_id,
+            id: plot_id.0.to_string(),
             columns,
             start_time,
             end_time,
@@ -50,25 +45,25 @@ pub fn pause_plot(
 
 #[tauri::command]
 pub fn unpause_plot(
-    plot_id: String,
+    plot_id: PlotId,
     manager: State<Arc<Mutex<ProcessingManager>>>,
     registry: State<Arc<CommManager>>,
 ) -> Result<(), String> {
     let mg = manager.lock().unwrap();
-    let port_url = mg
+    let _ = mg
         .managed_plots
         .get(&plot_id)
-        .and_then(|p| p.config.data_keys.first())
-        .map(|k| k.port_url.clone())
-        .ok_or_else(|| format!("Plot {} not found.", plot_id))?;
+        .ok_or_else(|| format!("Plot {:?} not found.", plot_id))?;
     drop(mg);
 
     let port_manager = registry
-        .ask(|reply| CommMsg::GetPort { port_url, reply })
+        .ask(|reply| CommMsg::GetActivePort { reply })
         .map_err(|e| format!("Failed to query port manager: {}", e))?
-        .ok_or("Port not found")?;
+        .ok_or("No active port")?;
 
     port_manager
-        .dispatch(PortMsg::ClearSnapshot { id: plot_id })
+        .dispatch(PortMsg::ClearSnapshot {
+            id: plot_id.0.to_string(),
+        })
         .map_err(|e| format!("Failed to clear snapshot: {}", e))
 }

@@ -23,7 +23,7 @@ use twinleaf::tio::proxy::{PortError, RpcError as LibProxyError};
 // FSM States -------------------------------------------------------------
 
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub enum PortState {
     Idle,
     Connecting,
@@ -36,7 +36,7 @@ pub enum PortState {
 
 // Device -----------------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq, Default)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct DeviceMeta {
     pub serial_number: String,
     pub firmware_hash: String,
@@ -59,7 +59,7 @@ impl From<LibDeviceMeta> for DeviceMeta {
 
 // Stream -----------------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct StreamMeta {
     pub stream_id: u8,
     pub name: String,
@@ -84,7 +84,7 @@ impl From<LibStreamMeta> for StreamMeta {
 
 // Column -----------------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct ColumnMeta {
     pub stream_id: u8,
     pub index: usize,
@@ -109,7 +109,7 @@ impl From<LibColumnMeta> for ColumnMeta {
 
 // Segment ----------------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct SegmentMeta {
     pub stream_id: u8,
     pub segment_id: u8,
@@ -145,7 +145,7 @@ impl From<LibSegmentMeta> for SegmentMeta {
 // RPC -----------------------------------------------------------------
 // TODO: ASK GB TO MOVE IT INTO TWINLEAF LIBRARY
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct RpcMeta {
     pub name: String,
     pub size: usize,
@@ -163,7 +163,7 @@ pub struct RpcMeta {
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[repr(u16)]
 #[derive(FromPrimitive, IntoPrimitive)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub enum RpcErrorCode {
     NoError = 0,
     Undefined = 1,
@@ -214,7 +214,7 @@ impl From<LibRpcErrorCode> for RpcErrorCode {
 }
 
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct RpcErrorPayload {
     pub id: u16,
     pub error: RpcErrorCode,
@@ -232,7 +232,7 @@ impl From<LibRpcErrorPayload> for RpcErrorPayload {
 }
 
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 #[serde(tag = "type", content = "payload")]
 pub enum RpcError {
     ExecError(RpcErrorPayload),
@@ -291,7 +291,7 @@ impl From<LibProxyError> for RpcError {
 
 // Misc. Metadata -------------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub enum MetadataEpoch {
     Invalid,
     Zero,
@@ -313,7 +313,7 @@ impl From<LibMetadataEpoch> for MetadataEpoch {
 }
 
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub enum MetadataFilter {
     Unfiltered,
     FirstOrderCascade1,
@@ -334,7 +334,7 @@ impl From<LibMetadataFilter> for MetadataFilter {
 
 // Frontend structs ----------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct UiStream {
     pub meta: StreamMeta,
     pub segment: Option<SegmentMeta>,
@@ -343,7 +343,7 @@ pub struct UiStream {
 }
 
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct UiDevice {
     pub url: String,
     pub route: String,
@@ -354,7 +354,7 @@ pub struct UiDevice {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub enum DecimationMethod {
     #[default]
     None,
@@ -362,7 +362,7 @@ pub enum DecimationMethod {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub enum DetrendMethod {
     #[default]
     None, // Only remove the mean (DC offset)
@@ -371,68 +371,87 @@ pub enum DetrendMethod {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub enum ViewConfig {
     Timeseries(TimeseriesConfig),
     Fft(FftConfig),
 }
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct TimeseriesConfig {
     pub decimation_method: DecimationMethod,
     pub window_seconds: f64,
     pub resolution_multiplier: u32,
 }
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct FftConfig {
     pub window_seconds: f64,
     pub detrend_method: DetrendMethod,
 }
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct SharedPlotConfig {
-    pub plot_id: String,
-    pub data_keys: Vec<DataColumnId>,
+    pub plot_id: PlotId,
+    pub data_keys: Vec<ColumnKey>,
     pub max_sampling_rate: f64,
     pub view_config: ViewConfig,
 }
 
 // Plot Structs -----------------------------------------------------------------
+
+pub static VIRTUAL_ROUTE: std::sync::LazyLock<twinleaf::tio::proto::DeviceRoute> =
+    std::sync::LazyLock::new(|| twinleaf::tio::proto::DeviceRoute::from_str("255").unwrap());
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
-pub struct DataColumnId {
-    pub port_url: String,
+#[ts(export)]
+pub struct ColumnKey {
     #[serde(with = "util")]
     #[ts(type = "string")]
-    pub device_route: twinleaf::tio::proto::DeviceRoute,
+    pub route: twinleaf::tio::proto::DeviceRoute,
     pub stream_id: u8,
-    pub column_index: usize,
+    pub column_id: usize,
 }
 
-impl DataColumnId {
+impl ColumnKey {
+    pub fn new(route: twinleaf::tio::proto::DeviceRoute, stream_id: u8, column_id: usize) -> Self {
+        Self {
+            route,
+            stream_id,
+            column_id,
+        }
+    }
+
     pub fn device_key(&self) -> Self {
         Self {
             stream_id: 0,
-            column_index: 0,
+            column_id: 0,
             ..self.clone()
         }
     }
 
     pub fn stream_key(&self) -> Self {
         Self {
-            column_index: 0,
+            column_id: 0,
             ..self.clone()
         }
+    }
+
+    pub fn is_virtual(&self) -> bool {
+        self.route == *VIRTUAL_ROUTE
     }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, TS, PartialEq, Eq, Hash)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
+pub struct PlotId(pub Uuid);
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, TS, PartialEq, Eq, Hash)]
+#[ts(export)]
 pub struct PipelineId(pub Uuid);
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct PlotData {
     pub timestamps: Vec<f64>,
     pub series_data: Vec<Vec<f64>>,
@@ -469,7 +488,7 @@ impl Point {
 }
 
 #[derive(Clone, Debug, Serialize, TS, Default, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct StatisticSet {
     pub count: u64,
     pub mean: f64,
@@ -480,7 +499,7 @@ pub struct StatisticSet {
 }
 
 #[derive(Clone, Debug, Serialize, TS, Default, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct HealthSet {
     pub gap_count: u64,
     pub nan_count: u64,
@@ -490,7 +509,7 @@ pub struct HealthSet {
 }
 
 #[derive(Clone, Debug, Serialize, TS, Default, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct ColumnStatistics {
     pub latest_value: f64,
     pub persistent: StatisticSet,
@@ -500,7 +519,7 @@ pub struct ColumnStatistics {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub enum MathOp {
     Add,
     Sub,
@@ -509,7 +528,7 @@ pub enum MathOp {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub enum BiquadKind {
     Lowpass,
     Highpass,
@@ -517,22 +536,22 @@ pub enum BiquadKind {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub struct BiquadParams {
     pub cutoff_hz: f64,
     pub q: f64, // for BPF: bandwidth via Q
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
-#[ts(export, export_to = "../../src/lib/bindings/")]
+#[ts(export)]
 pub enum MathChannelConfig {
     Arithmetic {
-        a: DataColumnId,
+        a: ColumnKey,
         op: MathOp,
-        b: DataColumnId,
+        b: ColumnKey,
     },
     Biquad {
-        src: DataColumnId,
+        src: ColumnKey,
         kind: BiquadKind,
         params: BiquadParams,
     },
