@@ -28,7 +28,8 @@
     // Svelte 5 state management
     let plots = $derived(chartState.plots);
     let layout = $derived(chartState.layout);
-    let targetedPlotId: string | null = $state(null);
+    import type { PlotId } from "$lib/bindings/PlotId";
+    let targetedPlotId: PlotId | null = $state(null);
     let isMenuOpen = $state(false);
     let chartAreaContainer: HTMLDivElement | null = $state(null);
     let paneGroupRef: { setLayout(layout: number[]): void } | undefined =
@@ -84,10 +85,9 @@
 
                 for (const column of sortedColumns) {
                     const dataKey = {
-                        port_url: device.url,
-                        device_route: device.route,
+                        route: device.route,
                         stream_id: stream.meta.stream_id,
-                        column_index: column.index,
+                        column_id: column.index,
                     };
                     columnNodes.push({
                         id: JSON.stringify(dataKey),

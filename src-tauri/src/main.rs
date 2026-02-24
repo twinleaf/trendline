@@ -55,7 +55,6 @@ fn main() {
             commands::pipeline::create_plot,
             commands::pipeline::destroy_plot,
             commands::pipeline::update_plot_pipeline,
-            commands::pipeline::destroy_plot_pipeline,
             commands::pipeline::create_statistics_provider,
             commands::pipeline::create_math_channel,
             commands::pipeline::destroy_processor,

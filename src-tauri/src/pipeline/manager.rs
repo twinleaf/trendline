@@ -462,11 +462,6 @@ impl ProcessingManager {
         self.plot_channels.remove(&plot_id);
     }
 
-    pub fn destroy_plot_pipelines(&mut self, plot_id: &PlotId) {
-        self._destroy_plot_components(plot_id);
-        self.plot_channels.remove(plot_id);
-    }
-
     fn _create_timeseries_for_plot(
         &mut self,
         key: &ColumnKey,

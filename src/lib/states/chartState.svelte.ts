@@ -1,8 +1,9 @@
 import { deviceState } from "$lib/states/deviceState.svelte";
 import { uiState } from "$lib/states/uiState.svelte";
-import type { DataColumnId } from "$lib/bindings/DataColumnId";
+import type { ColumnKey } from "$lib/bindings/ColumnKey";
 import type { DecimationMethod } from "$lib/bindings/DecimationMethod";
 import type { DetrendMethod } from "$lib/bindings/DetrendMethod";
+import type { PlotId } from "$lib/bindings/PlotId";
 import type { RowSelectionState } from "@tanstack/table-core";
 import type { ExpandedState } from "@tanstack/table-core";
 import { untrack } from "svelte";
@@ -16,7 +17,7 @@ export type StreamLayout = "grouped" | "vertical" | "horizontal";
 const TIMESERIES_RESOLUTION_BASELINE_MULTIPLIER = 4;
 
 export interface PlotSeries {
-  dataKey: DataColumnId;
+  dataKey: ColumnKey;
   uPlotSeries: uPlot.Series;
 }
 
@@ -54,7 +55,7 @@ class DataColumnStyler {
    * @param dataKey The unique identifier for the data column.
    * @returns An object containing style properties (e.g., `{ color: string }`).
    */
-  getStyle(dataKey: DataColumnId): { color: string } {
+  getStyle(dataKey: ColumnKey): { color: string } {
     const key = JSON.stringify(dataKey);
     if (!this.#styles.has(key)) {
       this.#styles.set(key, { color: this.#getNextColor() });
@@ -68,11 +69,11 @@ class DataColumnStyler {
  * This includes data selection, view settings, and derived uPlot options.
  */
 export class PlotConfig {
-  /** A unique identifier for this plot instance, generated on creation. */
-  id = crypto.randomUUID();
+  /** A unique identifier for this plot instance, assigned by the backend. */
+  id: PlotId;
   /** The user-editable title of the plot. */
   title = $state("New Plot");
-  /** State for selected rows (data columns) in the TanStack Table, keyed by a stringified `DataColumnId`. */
+  /** State for selected rows (data columns) in the TanStack Table, keyed by a stringified `ColumnKey`. */
   rowSelection = $state<RowSelectionState>({});
   /** State for expanded rows (devices/streams) in the TanStack Table. */
   expansion = $state<ExpandedState>({});
@@ -125,16 +126,13 @@ export class PlotConfig {
     for (const keyString of selectedKeys) {
       if (keyString.startsWith("{") && keyString.endsWith("}")) {
         try {
-          const dataKey: DataColumnId = JSON.parse(keyString);
-          const device = deviceState.getDevice(
-            dataKey.port_url,
-            dataKey.device_route,
-          );
+          const dataKey: ColumnKey = JSON.parse(keyString);
+          const device = deviceState.getDevice(dataKey.route);
           const stream = device?.streams.find(
             (s) => s.meta.stream_id === dataKey.stream_id,
           );
           const column = stream?.columns.find(
-            (c) => c.index === dataKey.column_index,
+            (c) => c.index === dataKey.column_id,
           );
 
           if (device && stream && column) {
@@ -167,10 +165,7 @@ export class PlotConfig {
   maxSamplingRate = $derived.by((): number => {
     if (this.series.length === 0) return 0;
     const rates = this.series.map((s) => {
-      const device = deviceState.getDevice(
-        s.dataKey.port_url,
-        s.dataKey.device_route,
-      );
+      const device = deviceState.getDevice(s.dataKey.route);
       const stream = device?.streams.find(
         (st) => st.meta.stream_id === s.dataKey.stream_id,
       );
@@ -337,17 +332,20 @@ export class PlotConfig {
 
   /**
    * Creates a new PlotConfig instance.
+   * @param id The backend-generated PlotId.
    * @param title The initial title for the plot.
    * @param sel The initial row selection state.
    * @param exp The initial row expansion state.
    * @param paused The initial pause state.
    */
   constructor(
+    id: PlotId,
     title: string,
     sel: RowSelectionState = {},
     exp: ExpandedState = {},
     paused = false,
   ) {
+    this.id = id;
     this.title = title;
     this.rowSelection = sel;
     this.expansion = exp;
@@ -363,7 +361,7 @@ class ChartState {
   /** An array of PlotConfig objects, representing all charts currently displayed. */
   plots = $state<PlotConfig[]>([]);
   /** A map from a plot's unique ID to its latest stream of PlotData. */
-  plotsData = new SvelteMap<string, PlotData>();
+  plotsData = new SvelteMap<PlotId, PlotData>();
   /** A global flag to pause or resume data updates for all plots. */
   isPaused = $state(false);
 
@@ -374,22 +372,22 @@ class ChartState {
   /** The height of the main chart area container in pixels, measured by a ResizeObserver. */
   containerHeight = $state(0);
   /** A record of plot IDs to their user-defined heights in pixels, used only in 'manual' mode. */
-  manualLayout = $state<Record<string, number>>({});
+  manualLayout = $state<Record<PlotId, number>>({});
   /** True when the user is actively dragging a resize handle between panes. */
   isDragResizing = $state(false);
 
   // --- Private State ---
 
   /** A set of plot IDs that have an active data listener on the backend. */
-  #listeningPlots = new Set<string>();
+  #listeningPlots = new Set<PlotId>();
   /** A flag used to lock actions and prevent rapid-fire calls from double-clicks. */
   #isActionLocked = false;
   /** The timeout ID for the action lock, used to release the lock after a cooldown. */
   #actionLockTimeout: number | undefined;
   /** A non-reactive cache to store the most recent data for each plot, avoiding immediate reactive triggers. */
-  #latestDataCache = new Map<string, PlotData>();
+  #latestDataCache = new Map<PlotId, PlotData>();
   /** A set of plot IDs that have received new data since the last render frame, marking them as "dirty". */
-  #dirtyPlots = new Set<string>();
+  #dirtyPlots = new Set<PlotId>();
   /** A flag to ensure the render loop is only started once. */
   #isUpdateLoopRunning = false;
 
@@ -397,17 +395,17 @@ class ChartState {
   /**
    * A helper to prevent rapid execution of state-mutating UI actions like adding or moving plots.
    * It executes the action immediately, then enforces a short cooldown to prevent double-clicks.
-   * @param actionFn The function to execute.
+   * @param actionFn The function to execute (sync or async).
    * @param cooldown The cooldown period in milliseconds.
    */
-  #withActionLock(actionFn: () => void, cooldown = 200) {
+  async #withActionLock(actionFn: () => Promise<void> | void, cooldown = 200) {
     if (this.#isActionLocked) {
       return;
     }
     this.#isActionLocked = true;
 
     try {
-      actionFn();
+      await actionFn();
     } finally {
       this.#actionLockTimeout = window.setTimeout(() => {
         this.#isActionLocked = false;
@@ -452,7 +450,7 @@ class ChartState {
 
     const plots = this.plots;
     const containerHeight = this.containerHeight;
-    const newLayout: Record<string, number> = {};
+    const newLayout: Record<PlotId, number> = {};
 
     if (plots.length === 0 || containerHeight === 0) {
       return {};
@@ -479,7 +477,7 @@ class ChartState {
    * @param plotId The ID of the plot to check.
    * @returns `true` if the plot has data, `false` otherwise.
    */
-  plotHasData(plotId: string): boolean {
+  plotHasData(plotId: PlotId): boolean {
     const data = this.plotsData.get(plotId);
     return data ? data.timestamps.length > 0 : false;
   }
@@ -487,8 +485,8 @@ class ChartState {
   /**
    * Cleans up all plots and backend resources. Should be called when the component is destroyed.
    */
-  destroy() {
-    this.deleteAllPlots();
+  async destroy() {
+    await this.deleteAllPlots();
   }
 
   /**
@@ -568,22 +566,17 @@ class ChartState {
   }
 
   /**
-   * Tears down the data pipeline for a specific plot on the backend.
+   * Tears down a plot on the backend (pipeline + channel + snapshot cleanup).
    * @param plotId The ID of the plot to destroy on the backend.
    */
-  async destroyPlotOnBackend(plotId: string) {
-    if (this.#listeningPlots.has(plotId)) {
-      this.#listeningPlots.delete(plotId);
-    }
+  async destroyPlotOnBackend(plotId: PlotId) {
+    this.#listeningPlots.delete(plotId);
     this.#latestDataCache.delete(plotId);
     this.#dirtyPlots.delete(plotId);
     try {
-      await invoke("destroy_plot_pipeline", { plotId });
+      await invoke("destroy_plot", { plotId });
     } catch (e) {
-      console.error(
-        `[Frontend] Failed to destroy backend pipeline for plot ${plotId}:`,
-        e,
-      );
+      console.error(`[Frontend] Failed to destroy backend plot ${plotId}:`, e);
     }
   }
 
@@ -594,21 +587,23 @@ class ChartState {
    * @param plotId The ID of the plot.
    * @returns The index of the plot, or -1 if not found.
    */
-  getPlotIndex(plotId: string): number {
+  getPlotIndex(plotId: PlotId): number {
     return this.plots.findIndex((p) => p.id === plotId);
   }
 
   /**
    * Adds a new, empty plot to the end of the chart list.
    */
-  addPlot() {
-    this.#withActionLock(() => {
+  async addPlot() {
+    await this.#withActionLock(async () => {
+      const plotId = await invoke<PlotId>("create_plot");
       const initialExpansion: ExpandedState = {};
       for (const portData of deviceState.devices) {
         for (const device of portData.devices)
           initialExpansion[`${device.url}:${device.route}`] = true;
       }
       const newPlot = new PlotConfig(
+        plotId,
         "New Plot",
         {},
         initialExpansion,
@@ -627,16 +622,18 @@ class ChartState {
    * Adds a new, empty plot immediately above a specified plot.
    * @param plotId The ID of the plot to add the new plot above.
    */
-  addPlotAbove(plotId: string) {
-    this.#withActionLock(() => {
+  async addPlotAbove(plotId: PlotId) {
+    await this.#withActionLock(async () => {
       const index = this.getPlotIndex(plotId);
       if (index === -1) return;
+      const newPlotId = await invoke<PlotId>("create_plot");
       const initialExpansion: ExpandedState = {};
       for (const portData of deviceState.devices) {
         for (const device of portData.devices)
           initialExpansion[`${device.url}:${device.route}`] = true;
       }
       const newPlot = new PlotConfig(
+        newPlotId,
         "New Plot",
         {},
         initialExpansion,
@@ -655,16 +652,18 @@ class ChartState {
    * Adds a new, empty plot immediately below a specified plot.
    * @param plotId The ID of the plot to add the new plot below.
    */
-  addPlotBelow(plotId: string) {
-    this.#withActionLock(() => {
+  async addPlotBelow(plotId: PlotId) {
+    await this.#withActionLock(async () => {
       const index = this.getPlotIndex(plotId);
       if (index === -1) return;
+      const newPlotId = await invoke<PlotId>("create_plot");
       const initialExpansion: ExpandedState = {};
       for (const portData of deviceState.devices) {
         for (const device of portData.devices)
           initialExpansion[`${device.url}:${device.route}`] = true;
       }
       const newPlot = new PlotConfig(
+        newPlotId,
         "New Plot",
         {},
         initialExpansion,
@@ -684,16 +683,19 @@ class ChartState {
    * @param dataKey The data column identifier to pre-select.
    * @param streamName The name of the stream for the plot title.
    */
-  addPlotFromStream(dataKey: DataColumnId, streamName: string) {
-    this.#withActionLock(() => {
+  async addPlotFromStream(dataKey: ColumnKey, streamName: string) {
+    await this.#withActionLock(async () => {
+      const plotId = await invoke<PlotId>("create_plot");
       const selectionKey = JSON.stringify(dataKey);
-      const deviceId = `${dataKey.port_url}:${dataKey.device_route}`;
+      const portUrl = deviceState.selection?.portUrl ?? "";
+      const deviceId = `${portUrl}:${dataKey.route}`;
       const streamId = `${deviceId}:${dataKey.stream_id}`;
       const initialExpansion: ExpandedState = {
         [deviceId]: true,
         [streamId]: true,
       };
       const newPlot = new PlotConfig(
+        plotId,
         `${streamName}`,
         { [selectionKey]: true },
         initialExpansion,
@@ -713,7 +715,7 @@ class ChartState {
    * @param plotId The ID of the plot to move.
    * @param direction The direction to move the plot, either 'up' or 'down'.
    */
-  movePlot(plotId: string, direction: "up" | "down") {
+  movePlot(plotId: PlotId, direction: "up" | "down") {
     this.#withActionLock(() => {
       const index = this.getPlotIndex(plotId);
       if (index === -1) return;
@@ -728,9 +730,9 @@ class ChartState {
 
   /**
    * Copies the decimated data currently visible in the plot to the clipboard.
-   * @param plotId The ID of the plot to move.
+   * @param plotId The ID of the plot.
    */
-  async copyPlotViewToClipboard(plotId: string) {
+  async copyPlotViewToClipboard(plotId: PlotId) {
     const plot = this.plots.find((p) => p.id === plotId);
     if (!plot) {
       uiState.showError("Plot not found.");
@@ -757,7 +759,7 @@ class ChartState {
    * Saves the decimated data currently visible in the plot to a CSV file.
    * @param plotId The ID of the plot whose data will be saved.
    */
-  async savePlotDataAsCsv(plotId: string) {
+  async savePlotDataAsCsv(plotId: PlotId) {
     const plot = this.plots.find((p) => p.id === plotId);
     if (!plot) {
       uiState.showError("Plot not found.");
@@ -785,9 +787,9 @@ class ChartState {
    * Saves the high-resolution raw data corresponding to the plot's current view.
    * It intelligently uses a pre-existing snapshot if the plot is paused,
    * or performs an instant "live snapshot" if the plot is running.
-   * @param plotId The ID of the plot to move.
+   * @param plotId The ID of the plot.
    */
-  async saveRawDataAsCsv(plotId: string) {
+  async saveRawDataAsCsv(plotId: PlotId) {
     const plot = this.plots.find((p) => p.id === plotId);
     if (!plot) {
       uiState.showError("Plot not found.");
@@ -820,21 +822,18 @@ class ChartState {
 
   /**
    * Removes a plot from the chart area and intelligently updates the layout.
-   * If in 'manual' mode, it rescales the remaining plots to fill the viewport.
+   * Awaits backend teardown before removing from local state.
    * @param plotId The ID of the plot to remove.
    */
-  removePlot(plotId: string) {
+  async removePlot(plotId: PlotId) {
     const plotIndex = this.plots.findIndex((p) => p.id === plotId);
     if (plotIndex === -1) return;
 
     const oldManualLayout = { ...this.manualLayout };
     const wasInManualMode = this.layoutMode === "manual";
 
-    invoke("unpause_plot", { plotId }).catch((e) =>
-      console.error(`Failed to clear snapshot for removed plot ${plotId}:`, e),
-    );
+    await this.destroyPlotOnBackend(plotId);
 
-    this.destroyPlotOnBackend(plotId);
     this.plots.splice(plotIndex, 1);
     this.plotsData.delete(plotId);
 
@@ -843,7 +842,7 @@ class ChartState {
         this.rebalancePlots();
         return;
       }
-      const newLayout: Record<string, number> = {};
+      const newLayout: Record<PlotId, number> = {};
       const remainingSum = this.plots.reduce(
         (sum, p) => sum + (oldManualLayout[p.id] || 0),
         0,
@@ -864,12 +863,10 @@ class ChartState {
   /**
    * Removes all plots from the chart area and resets the layout state.
    */
-  deleteAllPlots() {
-    untrack(() => {
-      for (const plot of this.plots) {
-        this.destroyPlotOnBackend(plot.id);
-      }
-    });
+  async deleteAllPlots() {
+    await Promise.allSettled(
+      untrack(() => this.plots.map((p) => this.destroyPlotOnBackend(p.id))),
+    );
     this.plots = [];
     this.manualLayout = {};
     this.plotsData.clear();
@@ -889,7 +886,7 @@ class ChartState {
    * @param plotId The ID of the plot to resize.
    * @param viewPercentage The desired height as a percentage of the viewport (e.g., 50).
    */
-  setPlotHeight(plotId: string, viewPercentage: number) {
+  setPlotHeight(plotId: PlotId, viewPercentage: number) {
     this.#withActionLock(() => {
       this.switchToManualMode();
       if (this.containerHeight <= 0) return;
@@ -913,7 +910,7 @@ class ChartState {
    * @param plotId The ID of the plot to check.
    * @returns A string key ('25', '33', '50', '100') or undefined if its height doesn't match a preset.
    */
-  getPlotHeightPercentageKey(plotId: string): string | undefined {
+  getPlotHeightPercentageKey(plotId: PlotId): string | undefined {
     const plotHeight = this.layout[plotId];
     if (!plotHeight || this.containerHeight <= 0) {
       return undefined;
@@ -931,7 +928,7 @@ class ChartState {
    * @param plotId The ID of the plot to check.
    * @returns A string key ('timeseries', 'fft') or undefined if the plot is not found.
    */
-  getPlotType(plotId: string): "timeseries" | "fft" | undefined {
+  getPlotType(plotId: PlotId): "timeseries" | "fft" | undefined {
     const plot = this.plots.find((p) => p.id === plotId);
     return plot?.viewType;
   }
@@ -962,7 +959,7 @@ class ChartState {
       0,
     );
     if (totalPixelHeight === 0) return;
-    const newLayout: Record<string, number> = {};
+    const newLayout: Record<PlotId, number> = {};
     currentPlots.forEach((plot, i) => {
       newLayout[plot.id] = (totalPixelHeight * percentages[i]) / 100;
     });
@@ -970,12 +967,15 @@ class ChartState {
   }
 
   /**
-   * A private helper to execute the backend pause/unpause logic.
-   * This is called by both local and global toggle handlers.
+   * Executes the backend pause/unpause logic and returns whether it succeeded.
    * @param plot The plot to update.
    * @param pause The desired new state (true for pause, false for unpause).
+   * @returns `true` if the backend call succeeded, `false` otherwise.
    */
-  private async _setPlotPauseOnBackend(plot: PlotConfig, pause: boolean) {
+  private async _setPlotPauseOnBackend(
+    plot: PlotConfig,
+    pause: boolean,
+  ): Promise<boolean> {
     try {
       if (pause) {
         const viewData = this.plotsData.get(plot.id);
@@ -983,8 +983,7 @@ class ChartState {
           uiState.showWarning(
             `Cannot pause "${plot.title}": plot has no data.`,
           );
-          plot.isPaused = false; // Revert optimistic UI update
-          return;
+          return false;
         }
         const startTime = Math.min(...viewData.timestamps);
         const endTime = Math.max(...viewData.timestamps);
@@ -992,45 +991,50 @@ class ChartState {
       } else {
         await invoke("unpause_plot", { plotId: plot.id });
       }
+      return true;
     } catch (e) {
       uiState.showError(e as string);
-      plot.isPaused = !pause; // Revert optimistic UI update on error
+      return false;
+    }
+  }
+
+  /**
+   * Sets the pause state for a SINGLE plot. Awaits backend before updating UI.
+   */
+  async setLocalPlotPause(plot: PlotConfig, paused: boolean) {
+    if (plot.isPaused === paused) return;
+    if (await this._setPlotPauseOnBackend(plot, paused)) {
+      plot.isPaused = paused;
     }
   }
 
   /**
    * Toggles the pause state for a SINGLE plot. This is called by the UI.
-   * Local control always takes precedence.
    */
-  setLocalPlotPause(plot: PlotConfig, paused: boolean) {
-    if (plot.isPaused === paused) return;
-    plot.isPaused = paused; // Optimistically update UI
-    this._setPlotPauseOnBackend(plot, paused);
-  }
-
-  /**
-   * Toggles the pause state for a SINGLE plot. This is called by the UI.
-   * Local control always takes precedence.
-   */
-  handleLocalPlotToggle(plot: PlotConfig) {
-    this.setLocalPlotPause(plot, !plot.isPaused);
+  async handleLocalPlotToggle(plot: PlotConfig) {
+    await this.setLocalPlotPause(plot, !plot.isPaused);
   }
 
   /**
    * Toggles the GLOBAL pause state, acting as a "Pause/Play All" button.
-   * This sets the state for all plots.
+   * Awaits all backend calls and only updates state for successful operations.
    */
-  toggleGlobalPause() {
-    const newGlobalPausedState = !this.isPaused;
-    this.isPaused = newGlobalPausedState;
-
-    // Fire-and-forget updates for all plots.
-    for (const plot of this.plots) {
-      if (plot.isPaused !== newGlobalPausedState) {
-        plot.isPaused = newGlobalPausedState;
-        this._setPlotPauseOnBackend(plot, newGlobalPausedState);
+  async toggleGlobalPause() {
+    const newState = !this.isPaused;
+    const toUpdate = this.plots.filter((p) => p.isPaused !== newState);
+    const results = await Promise.allSettled(
+      toUpdate.map((plot) => this._setPlotPauseOnBackend(plot, newState)),
+    );
+    let allOk = true;
+    for (let i = 0; i < toUpdate.length; i++) {
+      const r = results[i];
+      if (r.status === "fulfilled" && r.value) {
+        toUpdate[i].isPaused = newState;
+      } else {
+        allOk = false;
       }
     }
+    if (allOk) this.isPaused = newState;
   }
 }
 

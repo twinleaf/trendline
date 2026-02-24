@@ -41,15 +41,6 @@ pub fn update_plot_pipeline(
 }
 
 #[tauri::command]
-pub fn destroy_plot_pipeline(
-    plot_id: PlotId,
-    manager: State<Arc<Mutex<ProcessingManager>>>,
-) -> Result<(), String> {
-    manager.lock().unwrap().destroy_plot_pipelines(&plot_id);
-    Ok(())
-}
-
-#[tauri::command]
 pub fn create_statistics_provider(
     source_key: ColumnKey,
     window_seconds: f64,
