@@ -1,6 +1,6 @@
 import type { ColumnDef } from "@tanstack/table-core";
 import type { UiDevice } from '$lib/bindings/UiDevice';
-import type { RpcMeta } from '$lib/bindings/RpcMeta';
+import type { UiRpcMeta } from '$lib/bindings/UiRpcMeta';
 import { renderComponent } from "$lib/components/ui/data-table";
 import RpcActionCell from "./RpcActionCell.svelte";
 import DataTableSortHeader from "./DataTableSortHeader.svelte";
@@ -12,7 +12,7 @@ export type RpcTableMeta = {
     isSmall: boolean;
 }
 
-export const columns: ColumnDef<RpcMeta>[] = [
+export const columns: ColumnDef<UiRpcMeta>[] = [
   { 
     accessorKey: 'name',
     id: 'name',

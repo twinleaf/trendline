@@ -1,5 +1,6 @@
 <script lang="ts">
-    import type { PlotConfig } from "$lib/states/chartState.svelte";
+    import { chartState, type PlotConfig } from "$lib/states/chartState.svelte";
+    import type { RowSelectionState } from "@tanstack/table-core";
     import {
         columns,
         type TreeRow,
@@ -19,6 +20,24 @@
 
     let { plot = $bindable(), treeData }: Props = $props();
     let isPlotSettingsOpen = $state(false);
+    let draftRowSelection = $state<RowSelectionState>(plot.rowSelection);
+    let isCommitting = false;
+
+    $effect(() => {
+        const confirmed = plot.rowSelection;
+        if (!isCommitting) {
+            draftRowSelection = confirmed;
+        }
+    });
+
+    function handleRowSelectionCommit(rowSelection: RowSelectionState) {
+        draftRowSelection = rowSelection;
+        isCommitting = true;
+        chartState.setPlotSelection(plot, rowSelection).finally(() => {
+            isCommitting = false;
+            draftRowSelection = plot.rowSelection;
+        });
+    }
 </script>
 
 <Popover.Root bind:open={isPlotSettingsOpen}>
@@ -52,7 +71,8 @@
                             data={treeData}
                             getSubRows={(row: TreeRow) => row.subRows}
                             bind:expanded={plot.expansion}
-                            bind:rowSelection={plot.rowSelection}
+                            rowSelection={draftRowSelection}
+                            onRowSelectionCommit={handleRowSelectionCommit}
                         />
                     </ScrollArea>
                 </div>

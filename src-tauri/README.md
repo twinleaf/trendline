@@ -29,7 +29,7 @@ Single‑process backend (Tauri/Rust) that:
 * Spawns **root** pipelines (subscribe to raw batches) and **derived** ones (subscribe to other pipelines).
 * Emits merged `PlotData` to the UI roughly every **33 ms** (k‑way merge + linear interp; `NaN` for gaps).
 * Backpressure: root channels **128**; derived channels **1** (drop/overwrite vs. backlog).
-* Built‑ins: `Passthrough`, `FPCS` decimation, windowed `Detrend` (None/Linear/Quadratic), `FFT` (Welch→ASD), and streaming **Statistics** (window + persistent).
+* Built‑ins: `Passthrough`, `FPCS` decimation, windowed `Detrend` (None/Linear/Quadratic), `FFT` (Welch→ASD), and live **Statistics** (window + persistent).
 
 ### Data flow
 

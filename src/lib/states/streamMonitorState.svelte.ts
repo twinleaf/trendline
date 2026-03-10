@@ -2,9 +2,8 @@ import type { RowSelectionState, ExpandedState } from "@tanstack/table-core";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { PipelineId } from "$lib/bindings/PipelineId";
 import type { ColumnStatistics } from "$lib/bindings/ColumnStatistics";
-import type { DataColumnId } from "$lib/bindings/DataColumnId";
+import type { UiColumnKey } from "$lib/bindings/UiColumnKey";
 import { SvelteMap } from "svelte/reactivity";
-import { untrack } from "svelte";
 import { isVirtualKey } from "$lib/utils";
 
 class StreamMonitorState {
@@ -15,31 +14,26 @@ class StreamMonitorState {
 
   // --- Private State ---
   #pipelineIds = new SvelteMap<string, PipelineId>();
-  #listeningProviders = new Set<string>();
-  #isInitialized = false;
+  #syncQueue = Promise.resolve();
 
-  /**
-   * Initializes the state manager's reactive loop.
-   * This should be called once when the feature is mounted.
-   */
-  init() {
-    if (this.#isInitialized) return;
-    this.#isInitialized = true;
-
-    console.log("[StatsState] Initializing reactive effects.");
-
-    $effect(() => {
-      const currentSelection = this.rowSelection;
-      untrack(() => {
-        this.syncBackendPipelines(currentSelection);
-      });
-    });
+  setExpansion(nextExpansion: ExpandedState) {
+    this.expansion = nextExpansion;
   }
 
-  /**
-   * Private method to sync backend state based on the current selection.
-   * This is triggered automatically by the internal $effect.
-   */
+  async setRowSelection(nextSelection: RowSelectionState) {
+    this.rowSelection = nextSelection;
+
+    const syncPromise = this.#syncQueue.then(() =>
+      this.syncBackendPipelines(nextSelection),
+    );
+
+    this.#syncQueue = syncPromise.catch((error) => {
+      console.error("[StatsState] Failed to sync backend pipelines:", error);
+    });
+
+    return syncPromise;
+  }
+
   private async syncBackendPipelines(currentSelection: RowSelectionState) {
     const selectedKeys = new Set(
       Object.keys(currentSelection).filter((k) => k.startsWith("{")),
@@ -53,70 +47,72 @@ class StreamMonitorState {
       return;
     }
 
-    console.log(
-      `[StatsState] Syncing... Add: ${keysToAdd.length}, Remove: ${keysToRemove.length}`,
-    );
-
     for (const keyStr of keysToAdd) {
+      let pipelineId: PipelineId | null = null;
       try {
-        const dataKey: DataColumnId = JSON.parse(keyStr);
+        const dataKey: UiColumnKey = JSON.parse(keyStr);
         if (isVirtualKey(dataKey)) continue;
-        const pipelineId = await invoke<PipelineId>(
-          "create_statistics_provider",
-          { sourceKey: dataKey, windowSeconds: 1.0 },
-        );
+        pipelineId = await invoke<PipelineId>("create_statistics_provider", {
+          sourceKey: dataKey,
+          windowSeconds: 1.0,
+        });
 
-        this.#pipelineIds.set(keyStr, pipelineId);
         this.statisticsData.set(keyStr, null);
 
-        if (!this.#listeningProviders.has(keyStr)) {
-          const channel = new Channel<ColumnStatistics>();
-          channel.onmessage = (stats) => this.statisticsData.set(keyStr, stats);
-          await invoke("listen_to_statistics", {
-            id: pipelineId,
-            onEvent: channel,
-          });
-          this.#listeningProviders.add(keyStr);
-        }
+        const channel = new Channel<ColumnStatistics>();
+        channel.onmessage = (stats) => this.statisticsData.set(keyStr, stats);
+
+        await invoke("listen_to_statistics", {
+          id: pipelineId,
+          onEvent: channel,
+        });
+
+        this.#pipelineIds.set(keyStr, pipelineId);
       } catch (e) {
         console.error(`Failed to create provider for ${keyStr}:`, e);
+        this.statisticsData.delete(keyStr);
+        if (pipelineId) {
+          try {
+            await invoke("destroy_processor", { id: pipelineId });
+          } catch (destroyError) {
+            console.error(
+              `Failed to clean up provider for ${keyStr}:`,
+              destroyError,
+            );
+          }
+        }
       }
     }
 
     for (const keyStr of keysToRemove) {
       const pipelineId = this.#pipelineIds.get(keyStr);
       if (pipelineId) {
-        invoke("destroy_processor", { id: pipelineId });
+        try {
+          await invoke("destroy_processor", { id: pipelineId });
+        } catch (e) {
+          console.error(`Failed to destroy provider for ${keyStr}:`, e);
+        }
         this.#pipelineIds.delete(keyStr);
         this.statisticsData.delete(keyStr);
-        this.#listeningProviders.delete(keyStr);
       }
     }
   }
 
-  /**
-   * Cleans up everything. Called on component unmount.
-   */
-  destroy() {
-    if (!this.#isInitialized) return;
-    for (const pipelineId of this.#pipelineIds.values()) {
-      invoke("destroy_processor", { id: pipelineId });
-    }
-    this.#pipelineIds.clear();
+  async destroy() {
+    await this.setRowSelection({}).catch((error) => {
+      console.error("[StatsState] Failed to clear selection:", error);
+    });
+
     this.statisticsData.clear();
-    this.#listeningProviders.clear();
-    this.rowSelection = {}; // Reset for clean re-initialization
-    this.#isInitialized = false;
-    console.log("[StatsState] Destroyed.");
+    this.expansion = {};
   }
 
   /**
    * Resets the persistent statistics for a single pipeline
    */
-  async resetStatisticsPipeline(dataKey: DataColumnId) {
+  async resetStatisticsPipeline(dataKey: UiColumnKey) {
     const key = JSON.stringify(dataKey);
     const pipelineId = this.#pipelineIds.get(key);
-    console.log(`[StatsState] Clearing stats provider ${pipelineId}`);
     if (pipelineId) {
       await invoke("reset_by_pipeline_id", { id: pipelineId });
     }
@@ -127,22 +123,11 @@ class StreamMonitorState {
    * selected and active stream monitors.
    */
   async resetAllStatistics() {
-    console.log(
-      `[StatsState] Resetting all ${this.#pipelineIds.size} active providers.`,
-    );
-
-    // Get all the current pipeline IDs
     const allIds = Array.from(this.#pipelineIds.values());
-
-    // Create an array of invoke promises
     const resetPromises = allIds.map((pipelineId) =>
       invoke("reset_by_pipeline_id", { id: pipelineId }),
     );
-
-    // Run all reset commands in parallel and wait for them to complete
     await Promise.all(resetPromises);
-
-    console.log("[StatsState] All providers reset.");
   }
 }
 

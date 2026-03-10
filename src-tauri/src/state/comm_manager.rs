@@ -1,4 +1,9 @@
+use crate::pipeline::manager::PipelineMsg;
 use crate::shared::PortState;
+use crate::shared::UiColumnKey;
+use crate::shared::UiConfirmedSelection;
+use crate::shared::UiSelectionState;
+use crate::state::data_manager::DataMsg;
 use crate::state::port_manager::{PortManager, PortMsg};
 use crate::util::get_valid_twinleaf_serial_urls;
 use crossbeam::channel::{bounded, unbounded, Receiver, Sender};
@@ -8,7 +13,6 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
-use twinleaf::tio::proto::identifiers::ColumnKey;
 use twinleaf::tio::proto::DeviceRoute;
 
 const LOCAL_TCP_URL: &str = "tcp://localhost";
@@ -17,7 +21,7 @@ const DISCOVERY_POLL_INTERVAL: Duration = Duration::from_millis(500);
 #[derive(Default)]
 struct CommModel {
     ports: HashMap<String, Arc<PortManager>>,
-    confirmed_selections: HashMap<String, Vec<ColumnKey>>,
+    confirmed_selection: Option<UiConfirmedSelection>,
     ignored_serial_ports: HashSet<String>,
     selected_port: Option<String>,
     discovery_polling_enabled: bool,
@@ -51,6 +55,12 @@ pub enum CommMsg {
     ListPorts {
         reply: Sender<Vec<Arc<PortManager>>>,
     },
+    GetActivePort {
+        reply: Sender<Option<Arc<PortManager>>>,
+    },
+    GetSelectionState {
+        reply: Sender<UiSelectionState>,
+    },
 }
 
 pub struct CommManager {
@@ -58,39 +68,49 @@ pub struct CommManager {
 }
 
 impl CommManager {
-    pub fn new(app: AppHandle) -> Self {
+    pub fn new(app: AppHandle, data_tx: Sender<DataMsg>, pipeline_tx: Sender<PipelineMsg>) -> Self {
         let (tx, rx) = unbounded::<CommMsg>();
-        Self::spawn_actor(app, rx);
+        Self::spawn_actor(app, data_tx, pipeline_tx, rx);
         Self { tx }
     }
 
-    fn spawn_actor(app: AppHandle, rx: Receiver<CommMsg>) {
+    fn spawn_actor(
+        app: AppHandle,
+        data_tx: Sender<DataMsg>,
+        pipeline_tx: Sender<PipelineMsg>,
+        rx: Receiver<CommMsg>,
+    ) {
         thread::Builder::new()
             .name("comm-manager".into())
             .spawn(move || {
                 let mut model = CommModel::default();
-
                 loop {
                     match rx.recv_timeout(DISCOVERY_POLL_INTERVAL) {
-                        Ok(msg) => Self::update(msg, &mut model, &app),
+                        Ok(msg) => Self::update(msg, &mut model, &app, &data_tx, &pipeline_tx),
                         Err(crossbeam::channel::RecvTimeoutError::Timeout) => {}
                         Err(crossbeam::channel::RecvTimeoutError::Disconnected) => break,
                     }
 
                     if model.discovery_polling_enabled {
-                        Self::discovery_tick(&mut model, &app);
+                        Self::discovery_tick(&mut model, &app, &data_tx, &pipeline_tx);
                     } else {
-                        Self::idle_tick(&mut model, &app);
+                        Self::idle_tick(&mut model, &app, &data_tx, &pipeline_tx);
                     }
                 }
             })
             .expect("Failed to spawn comm-manager thread.");
     }
 
-    fn update(msg: CommMsg, model: &mut CommModel, app: &AppHandle) {
+    fn update(
+        msg: CommMsg,
+        model: &mut CommModel,
+        app: &AppHandle,
+        data_tx: &Sender<DataMsg>,
+        pipeline_tx: &Sender<PipelineMsg>,
+    ) {
         match msg {
             CommMsg::Connect { port_url, reply } => {
-                let _ = reply.send(Self::connect(model, app, port_url));
+                let _ = reply.send(Self::connect(model, app, data_tx, pipeline_tx, port_url));
             }
             CommMsg::Disconnect { port_url, reply } => {
                 let _ = reply.send(Self::disconnect(model, app, &port_url));
@@ -100,12 +120,17 @@ impl CommManager {
                 children_routes,
                 reply,
             } => {
-                let _ = reply.send(Self::confirm_selection(model, &port_url, children_routes));
+                let _ = reply.send(Self::confirm_selection(
+                    model,
+                    app,
+                    &port_url,
+                    children_routes,
+                ));
             }
             CommMsg::SetDiscoveryPolling { enabled } => {
                 model.discovery_polling_enabled = enabled;
                 if !enabled {
-                    Self::idle_tick(model, app);
+                    Self::idle_tick(model, app, data_tx, pipeline_tx);
                 }
             }
             CommMsg::RefreshPort { port_url, reply } => {
@@ -118,22 +143,42 @@ impl CommManager {
                 let ports = model.ports.values().cloned().collect();
                 let _ = reply.send(ports);
             }
+            CommMsg::GetActivePort { reply } => {
+                let pm = model
+                    .selected_port
+                    .as_ref()
+                    .and_then(|url| model.ports.get(url))
+                    .cloned();
+                let _ = reply.send(pm);
+            }
+            CommMsg::GetSelectionState { reply } => {
+                let _ = reply.send(Self::selection_state(model));
+            }
         }
     }
 
     fn connect(
         model: &mut CommModel,
         app: &AppHandle,
+        data_tx: &Sender<DataMsg>,
+        pipeline_tx: &Sender<PipelineMsg>,
         port_url: String,
     ) -> Result<Arc<PortManager>, String> {
         if port_url.starts_with("serial://") {
             model.ignored_serial_ports.remove(&port_url);
         }
 
+        let previous_selected = model.selected_port.clone();
         model.selected_port = Some(port_url.clone());
+        let result = Self::ensure_port(model, app, data_tx, pipeline_tx, port_url.clone())
+            .ok_or_else(|| format!("Port '{}' is not available.", port_url));
 
-        Self::ensure_port(model, app, port_url.clone())
-            .ok_or_else(|| format!("Port '{}' is not available.", port_url))
+        if result.is_err() {
+            model.selected_port = previous_selected;
+        }
+
+        Self::emit_selection_state_changed(app, model);
+        result
     }
 
     fn disconnect(model: &mut CommModel, app: &AppHandle, port_url: &str) -> Result<(), String> {
@@ -145,11 +190,18 @@ impl CommManager {
             port.shutdown();
         }
 
-        model.confirmed_selections.remove(port_url);
+        if model
+            .confirmed_selection
+            .as_ref()
+            .is_some_and(|selection| selection.port_url == port_url)
+        {
+            model.confirmed_selection = None;
+        }
         if model.selected_port.as_deref() == Some(port_url) {
             model.selected_port = None;
         }
 
+        Self::emit_selection_state_changed(app, model);
         app.emit("device-removed", port_url.to_string())
             .map_err(|e| format!("Failed to emit device-removed for '{}': {}", port_url, e))?;
 
@@ -158,6 +210,7 @@ impl CommManager {
 
     fn confirm_selection(
         model: &mut CommModel,
+        app: &AppHandle,
         port_url: &str,
         children_routes: Vec<DeviceRoute>,
     ) -> Result<(), String> {
@@ -169,24 +222,34 @@ impl CommManager {
 
         let state = Self::port_state(&port_manager)
             .ok_or_else(|| format!("Port '{}' state is unavailable.", port_url))?;
-        if !matches!(state, PortState::Streaming) {
+        if !matches!(state, PortState::Online) {
             return Err(format!(
-                "Cannot confirm selection for '{}': expected Streaming, got {:?}.",
+                "Cannot confirm selection for '{}': expected Online, got {:?}.",
                 port_url, state
             ));
         }
 
         let keys = Self::selection_keys_for_routes(&port_manager, port_url, children_routes)?;
 
-        model
-            .confirmed_selections
-            .insert(port_url.to_string(), keys.clone());
+        let mut confirmed_children_routes: Vec<String> = keys
+            .iter()
+            .map(|key| key.route.to_string())
+            .filter(|route| !route.is_empty() && route != "/")
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        confirmed_children_routes.sort();
+        model.confirmed_selection = Some(UiConfirmedSelection {
+            port_url: port_url.to_string(),
+            children_routes: confirmed_children_routes,
+        });
         model.selected_port = Some(port_url.to_string());
         Self::shutdown_serial_except(model, port_url);
+        Self::emit_selection_state_changed(app, model);
 
         let mut selected_routes: Vec<DeviceRoute> = keys
             .into_iter()
-            .map(|key| key.device_route())
+            .map(|key| key.route.clone())
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
@@ -210,7 +273,7 @@ impl CommManager {
         port_manager: &Arc<PortManager>,
         port_url: &str,
         children_routes: Vec<DeviceRoute>,
-    ) -> Result<Vec<ColumnKey>, String> {
+    ) -> Result<Vec<UiColumnKey>, String> {
         let mut keys = HashSet::new();
         let mut all_selected_routes = children_routes;
         all_selected_routes.push(DeviceRoute::root());
@@ -234,7 +297,7 @@ impl CommManager {
 
             for stream in &device.streams {
                 for column in &stream.columns {
-                    keys.insert(ColumnKey::new(
+                    keys.insert(UiColumnKey::new(
                         route.clone(),
                         stream.meta.stream_id,
                         column.index,
@@ -243,7 +306,7 @@ impl CommManager {
             }
         }
 
-        let mut keys: Vec<ColumnKey> = keys.into_iter().collect();
+        let mut keys: Vec<UiColumnKey> = keys.into_iter().collect();
         keys.sort_by(|left, right| {
             left.route
                 .cmp(&right.route)
@@ -281,9 +344,24 @@ impl CommManager {
         pm.ask(|reply| PortMsg::GetState { reply }).ok()
     }
 
+    fn selection_state(model: &CommModel) -> UiSelectionState {
+        UiSelectionState {
+            active_port_url: model.selected_port.clone(),
+            confirmed: model.confirmed_selection.clone(),
+        }
+    }
+
+    fn emit_selection_state_changed(app: &AppHandle, model: &CommModel) {
+        if let Err(err) = app.emit("selection-state-changed", Self::selection_state(model)) {
+            eprintln!("[comm] Failed to emit selection-state-changed: {}", err);
+        }
+    }
+
     fn ensure_port(
         model: &mut CommModel,
         app: &AppHandle,
+        data_tx: &Sender<DataMsg>,
+        pipeline_tx: &Sender<PipelineMsg>,
         port_url: String,
     ) -> Option<Arc<PortManager>> {
         if port_url.starts_with("serial://") {
@@ -296,26 +374,20 @@ impl CommManager {
         }
 
         match model.ports.entry(port_url.clone()) {
-            Entry::Occupied(mut occupied) => {
+            Entry::Occupied(occupied) => {
                 let pm = occupied.get().clone();
                 let state = Self::port_state(&pm);
 
-                if matches!(state, Some(PortState::Disconnected | PortState::Error(_))) {
-                    if port_url.starts_with("serial://") {
-                        pm.shutdown();
-                        let replacement = PortManager::new(port_url.clone(), app.clone());
-                        occupied.insert(replacement.clone());
-                        Some(replacement)
-                    } else {
-                        pm.connect();
-                        Some(pm)
-                    }
+                if matches!(state, Some(PortState::Error(_))) {
+                    pm.connect();
+                    Some(pm)
                 } else {
                     Some(pm)
                 }
             }
             Entry::Vacant(vacant) => {
-                let pm = PortManager::new(port_url, app.clone());
+                let pm =
+                    PortManager::new(port_url, app.clone(), data_tx.clone(), pipeline_tx.clone());
                 vacant.insert(pm.clone());
                 Some(pm)
             }
@@ -340,6 +412,7 @@ impl CommManager {
             .filter(|port_url| port_url.starts_with("serial://") && !keep(port_url))
             .cloned()
             .collect();
+        let mut selection_changed = false;
 
         for port_url in to_remove {
             if let Some(manager) = model.ports.remove(&port_url) {
@@ -347,53 +420,63 @@ impl CommManager {
                 manager.shutdown();
             }
 
-            model.confirmed_selections.remove(&port_url);
+            if model
+                .confirmed_selection
+                .as_ref()
+                .is_some_and(|selection| selection.port_url == port_url)
+            {
+                model.confirmed_selection = None;
+                selection_changed = true;
+            }
             if model.selected_port.as_deref() == Some(port_url.as_str()) {
                 model.selected_port = None;
+                selection_changed = true;
             }
+        }
+
+        if selection_changed {
+            Self::emit_selection_state_changed(app, model);
         }
     }
 
-    fn idle_tick(model: &mut CommModel, app: &AppHandle) {
+    fn idle_tick(
+        model: &mut CommModel,
+        app: &AppHandle,
+        data_tx: &Sender<DataMsg>,
+        pipeline_tx: &Sender<PipelineMsg>,
+    ) {
         if let Some(selected_serial) = model
             .selected_port
             .clone()
             .filter(|port_url| port_url.starts_with("serial://"))
         {
-            let _ = Self::ensure_port(model, app, selected_serial.clone());
+            let selected_is_available = get_valid_twinleaf_serial_urls()
+                .into_iter()
+                .any(|port_url| port_url == selected_serial);
+            if selected_is_available {
+                let _ =
+                    Self::ensure_port(model, app, data_tx, pipeline_tx, selected_serial.clone());
+            }
             Self::prune_serial_ports(model, app, |port_url| port_url == selected_serial);
         } else {
             Self::prune_serial_ports(model, app, |_| false);
         }
     }
 
-    fn discovery_tick(model: &mut CommModel, app: &AppHandle) {
+    fn discovery_tick(
+        model: &mut CommModel,
+        app: &AppHandle,
+        data_tx: &Sender<DataMsg>,
+        pipeline_tx: &Sender<PipelineMsg>,
+    ) {
         let tcp_url = LOCAL_TCP_URL.to_string();
-        let _ = Self::ensure_port(model, app, tcp_url.clone());
+        let _ = Self::ensure_port(model, app, data_tx, pipeline_tx, tcp_url.clone());
 
         if let Some(tcp_port) = model.ports.get(&tcp_url) {
             let state = Self::port_state(tcp_port);
-            if matches!(state, Some(PortState::Error(_) | PortState::Disconnected)) {
+            if matches!(state, Some(PortState::Error(_))) {
                 tcp_port.connect();
             }
-        }
-
-        let tcp_online = model
-            .ports
-            .get(&tcp_url)
-            .and_then(Self::port_state)
-            .as_ref()
-            .is_some_and(|state| {
-                matches!(
-                    state,
-                    PortState::Discovery | PortState::Streaming | PortState::Reconnecting
-                )
-            });
-
-        if tcp_online {
-            Self::shutdown_serial_except(model, LOCAL_TCP_URL);
-            Self::prune_serial_ports(model, app, |_| false);
-            return;
         }
 
         if model
@@ -410,7 +493,13 @@ impl CommManager {
             .clone()
             .filter(|port_url| port_url.starts_with("serial://"))
         {
-            let _ = Self::ensure_port(model, app, selected_serial.clone());
+            let selected_is_available = get_valid_twinleaf_serial_urls()
+                .into_iter()
+                .any(|port_url| port_url == selected_serial);
+            if selected_is_available {
+                let _ =
+                    Self::ensure_port(model, app, data_tx, pipeline_tx, selected_serial.clone());
+            }
             Self::prune_serial_ports(model, app, |port_url| port_url == selected_serial);
             return;
         }
@@ -421,7 +510,7 @@ impl CommManager {
             .collect();
 
         for port_url in &visible_serials {
-            let _ = Self::ensure_port(model, app, port_url.clone());
+            let _ = Self::ensure_port(model, app, data_tx, pipeline_tx, port_url.clone());
         }
 
         Self::prune_serial_ports(model, app, |port_url| visible_serials.contains(port_url));

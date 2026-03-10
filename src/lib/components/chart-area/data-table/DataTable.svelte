@@ -26,6 +26,7 @@
         getSubRows?: (originalRow: TData) => TData[] | undefined;
         expanded?: ExpandedState;
         rowSelection?: RowSelectionState;
+        onRowSelectionCommit?: (selection: RowSelectionState) => void;
     };
 
     let {
@@ -34,6 +35,7 @@
         getSubRows,
         expanded = $bindable(),
         rowSelection = $bindable(),
+        onRowSelectionCommit,
     }: DataTableProps<TData, TValue> = $props();
 
     let sorting = $state<SortingState>([]);
@@ -179,6 +181,22 @@
                     : updater;
             const rowsById = table.getCoreRowModel().rowsById;
 
+            // When a parent row is deselected, TanStack only removes
+            // the parent key. Manually propagate to all descendants.
+            const oldKeys = Object.keys(rowSelection ?? {});
+            for (const id of oldKeys) {
+                if (newSelection[id]) continue;
+                const row = rowsById[id];
+                if (!row?.getCanExpand()) continue;
+                const removeDescendants = (r: typeof row) => {
+                    for (const sub of r.subRows ?? []) {
+                        delete newSelection[sub.id];
+                        removeDescendants(sub);
+                    }
+                };
+                removeDescendants(row);
+            }
+
             const selectedLeafNodes = Object.keys(newSelection)
                 .map((id) => rowsById[id])
                 .filter((row) => row && !row.getCanExpand())
@@ -186,6 +204,7 @@
 
             if (selectedLeafNodes.length === 0) {
                 rowSelection = {};
+                onRowSelectionCommit?.({});
                 return;
             }
 
@@ -196,6 +215,7 @@
 
             if (constrainingRate === null) {
                 rowSelection = {};
+                onRowSelectionCommit?.({});
                 return;
             }
 
@@ -227,6 +247,7 @@
             });
 
             rowSelection = consistentSelection;
+            onRowSelectionCommit?.(consistentSelection);
         },
         onSortingChange: (updater) => {
             sorting =

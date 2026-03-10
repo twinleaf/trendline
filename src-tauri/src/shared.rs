@@ -8,17 +8,18 @@ use serde_json::Value;
 use ts_rs::TS;
 use uuid::Uuid;
 
+use twinleaf::tio::proto::identifiers::ColumnKey as TwinleafColumnKey;
 use twinleaf::tio::proto::meta::{
-    ColumnMetadata as LibColumnMeta, DeviceMetadata as LibDeviceMeta,
-    MetadataEpoch as LibMetadataEpoch, MetadataFilter as LibMetadataFilter,
-    SegmentMetadata as LibSegmentMeta, StreamMetadata as LibStreamMeta,
+    ColumnMetadata as TwinleafColumnMetadata, DeviceMetadata as TwinleafDeviceMetadata,
+    MetadataEpoch as TwinleafMetadataEpoch, MetadataFilter as TwinleafMetadataFilter,
+    SegmentMetadata as TwinleafSegmentMetadata, StreamMetadata as TwinleafStreamMetadata,
 };
 
 use twinleaf::tio::proto::rpc::{
-    RpcErrorCode as LibRpcErrorCode, RpcErrorPayload as LibRpcErrorPayload,
+    RpcErrorCode as TwinleafRpcErrorCode, RpcErrorPayload as TwinleafRpcErrorPayload,
 };
 
-use twinleaf::tio::proxy::{PortError, RpcError as LibProxyError};
+use twinleaf::tio::proxy::{PortError, RpcError as ProxyRpcError};
 
 // FSM States -------------------------------------------------------------
 
@@ -28,16 +29,30 @@ pub enum PortState {
     Idle,
     Connecting,
     Discovery,
-    Streaming,
+    Online,
     Reconnecting,
     Disconnected,
     Error(String),
 }
 
+#[derive(Serialize, Clone, Debug, TS, PartialEq)]
+#[ts(export)]
+pub struct UiConfirmedSelection {
+    pub port_url: String,
+    pub children_routes: Vec<String>,
+}
+
+#[derive(Serialize, Clone, Debug, TS, PartialEq)]
+#[ts(export)]
+pub struct UiSelectionState {
+    pub active_port_url: Option<String>,
+    pub confirmed: Option<UiConfirmedSelection>,
+}
+
 // Device -----------------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq, Default)]
 #[ts(export)]
-pub struct DeviceMeta {
+pub struct UiDeviceMeta {
     pub serial_number: String,
     pub firmware_hash: String,
     pub n_streams: usize,
@@ -45,8 +60,8 @@ pub struct DeviceMeta {
     pub name: String,
 }
 
-impl From<LibDeviceMeta> for DeviceMeta {
-    fn from(d: LibDeviceMeta) -> Self {
+impl From<TwinleafDeviceMetadata> for UiDeviceMeta {
+    fn from(d: TwinleafDeviceMetadata) -> Self {
         Self {
             serial_number: d.serial_number,
             firmware_hash: d.firmware_hash,
@@ -60,7 +75,7 @@ impl From<LibDeviceMeta> for DeviceMeta {
 // Stream -----------------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export)]
-pub struct StreamMeta {
+pub struct UiStreamMeta {
     pub stream_id: u8,
     pub name: String,
     pub n_columns: usize,
@@ -69,8 +84,8 @@ pub struct StreamMeta {
     pub buf_samples: usize,
 }
 
-impl From<LibStreamMeta> for StreamMeta {
-    fn from(s: LibStreamMeta) -> Self {
+impl From<TwinleafStreamMetadata> for UiStreamMeta {
+    fn from(s: TwinleafStreamMetadata) -> Self {
         Self {
             stream_id: s.stream_id,
             name: s.name,
@@ -85,7 +100,7 @@ impl From<LibStreamMeta> for StreamMeta {
 // Column -----------------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export)]
-pub struct ColumnMeta {
+pub struct UiColumnMeta {
     pub stream_id: u8,
     pub index: usize,
     pub data_type: String,
@@ -94,8 +109,8 @@ pub struct ColumnMeta {
     pub description: String,
 }
 
-impl From<LibColumnMeta> for ColumnMeta {
-    fn from(c: LibColumnMeta) -> Self {
+impl From<TwinleafColumnMetadata> for UiColumnMeta {
+    fn from(c: TwinleafColumnMetadata) -> Self {
         Self {
             stream_id: c.stream_id,
             index: c.index,
@@ -110,22 +125,22 @@ impl From<LibColumnMeta> for ColumnMeta {
 // Segment ----------------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export)]
-pub struct SegmentMeta {
+pub struct UiSegmentMeta {
     pub stream_id: u8,
     pub segment_id: u8,
     pub flags: u8,
-    pub time_ref_epoch: MetadataEpoch,
+    pub time_ref_epoch: UiMetadataEpoch,
     pub time_ref_serial: String,
     pub time_ref_session_id: u32,
     pub start_time: u32,
     pub sampling_rate: u32,
     pub decimation: u32,
     pub filter_cutoff: f32,
-    pub filter_type: MetadataFilter,
+    pub filter_type: UiMetadataFilter,
 }
 
-impl From<LibSegmentMeta> for SegmentMeta {
-    fn from(s: LibSegmentMeta) -> Self {
+impl From<TwinleafSegmentMetadata> for UiSegmentMeta {
+    fn from(s: TwinleafSegmentMetadata) -> Self {
         Self {
             stream_id: s.stream_id,
             segment_id: s.segment_id,
@@ -146,7 +161,7 @@ impl From<LibSegmentMeta> for SegmentMeta {
 // TODO: ASK GB TO MOVE IT INTO TWINLEAF LIBRARY
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export)]
-pub struct RpcMeta {
+pub struct UiRpcMeta {
     pub name: String,
     pub size: usize,
     pub permissions: String, // e.g., "RW-", "R-P"
@@ -164,7 +179,7 @@ pub struct RpcMeta {
 #[repr(u16)]
 #[derive(FromPrimitive, IntoPrimitive)]
 #[ts(export)]
-pub enum RpcErrorCode {
+pub enum UiRpcErrorCode {
     NoError = 0,
     Undefined = 1,
     NotFound = 2,
@@ -187,42 +202,42 @@ pub enum RpcErrorCode {
     Unknown(u16),
 }
 
-impl From<LibRpcErrorCode> for RpcErrorCode {
-    fn from(lib_error: LibRpcErrorCode) -> Self {
+impl From<TwinleafRpcErrorCode> for UiRpcErrorCode {
+    fn from(lib_error: TwinleafRpcErrorCode) -> Self {
         match lib_error {
-            LibRpcErrorCode::NoError => RpcErrorCode::NoError,
-            LibRpcErrorCode::Undefined => RpcErrorCode::Undefined,
-            LibRpcErrorCode::NotFound => RpcErrorCode::NotFound,
-            LibRpcErrorCode::MalformedRequest => RpcErrorCode::MalformedRequest,
-            LibRpcErrorCode::WrongSizeArgs => RpcErrorCode::WrongSizeArgs,
-            LibRpcErrorCode::InvalidArgs => RpcErrorCode::InvalidArgs,
-            LibRpcErrorCode::ReadOnly => RpcErrorCode::ReadOnly,
-            LibRpcErrorCode::WriteOnly => RpcErrorCode::WriteOnly,
-            LibRpcErrorCode::Timeout => RpcErrorCode::Timeout,
-            LibRpcErrorCode::Busy => RpcErrorCode::Busy,
-            LibRpcErrorCode::WrongDeviceState => RpcErrorCode::WrongDeviceState,
-            LibRpcErrorCode::LoadFailed => RpcErrorCode::LoadFailed,
-            LibRpcErrorCode::LoadRpcFailed => RpcErrorCode::LoadRpcFailed,
-            LibRpcErrorCode::SaveFailed => RpcErrorCode::SaveFailed,
-            LibRpcErrorCode::SaveWriteFailed => RpcErrorCode::SaveWriteFailed,
-            LibRpcErrorCode::Internal => RpcErrorCode::Internal,
-            LibRpcErrorCode::OutOfMemory => RpcErrorCode::OutOfMemory,
-            LibRpcErrorCode::OutOfRange => RpcErrorCode::OutOfRange,
-            LibRpcErrorCode::Unknown(v) => RpcErrorCode::Unknown(v),
+            TwinleafRpcErrorCode::NoError => UiRpcErrorCode::NoError,
+            TwinleafRpcErrorCode::Undefined => UiRpcErrorCode::Undefined,
+            TwinleafRpcErrorCode::NotFound => UiRpcErrorCode::NotFound,
+            TwinleafRpcErrorCode::MalformedRequest => UiRpcErrorCode::MalformedRequest,
+            TwinleafRpcErrorCode::WrongSizeArgs => UiRpcErrorCode::WrongSizeArgs,
+            TwinleafRpcErrorCode::InvalidArgs => UiRpcErrorCode::InvalidArgs,
+            TwinleafRpcErrorCode::ReadOnly => UiRpcErrorCode::ReadOnly,
+            TwinleafRpcErrorCode::WriteOnly => UiRpcErrorCode::WriteOnly,
+            TwinleafRpcErrorCode::Timeout => UiRpcErrorCode::Timeout,
+            TwinleafRpcErrorCode::Busy => UiRpcErrorCode::Busy,
+            TwinleafRpcErrorCode::WrongDeviceState => UiRpcErrorCode::WrongDeviceState,
+            TwinleafRpcErrorCode::LoadFailed => UiRpcErrorCode::LoadFailed,
+            TwinleafRpcErrorCode::LoadRpcFailed => UiRpcErrorCode::LoadRpcFailed,
+            TwinleafRpcErrorCode::SaveFailed => UiRpcErrorCode::SaveFailed,
+            TwinleafRpcErrorCode::SaveWriteFailed => UiRpcErrorCode::SaveWriteFailed,
+            TwinleafRpcErrorCode::Internal => UiRpcErrorCode::Internal,
+            TwinleafRpcErrorCode::OutOfMemory => UiRpcErrorCode::OutOfMemory,
+            TwinleafRpcErrorCode::OutOfRange => UiRpcErrorCode::OutOfRange,
+            TwinleafRpcErrorCode::Unknown(v) => UiRpcErrorCode::Unknown(v),
         }
     }
 }
 
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export)]
-pub struct RpcErrorPayload {
+pub struct UiRpcErrorPayload {
     pub id: u16,
-    pub error: RpcErrorCode,
+    pub error: UiRpcErrorCode,
     pub extra: Vec<u8>,
 }
 
-impl From<LibRpcErrorPayload> for RpcErrorPayload {
-    fn from(s: LibRpcErrorPayload) -> Self {
+impl From<TwinleafRpcErrorPayload> for UiRpcErrorPayload {
+    fn from(s: TwinleafRpcErrorPayload) -> Self {
         Self {
             id: s.id,
             error: s.error.into(),
@@ -234,31 +249,31 @@ impl From<LibRpcErrorPayload> for RpcErrorPayload {
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export)]
 #[serde(tag = "type", content = "payload")]
-pub enum RpcError {
-    ExecError(RpcErrorPayload),
+pub enum UiRpcError {
+    ExecError(UiRpcErrorPayload),
     SendFailed(String),
     RecvFailed(String),
     TypeError,
     AppLogic(String),
 }
-impl From<String> for RpcError {
+impl From<String> for UiRpcError {
     fn from(err: String) -> Self {
-        RpcError::AppLogic(err)
+        UiRpcError::AppLogic(err)
     }
 }
 
-impl From<PortError> for RpcError {
+impl From<PortError> for UiRpcError {
     fn from(err: PortError) -> Self {
-        RpcError::AppLogic(format!("Port Error: {:?}", err))
+        UiRpcError::AppLogic(format!("Port Error: {:?}", err))
     }
 }
 
-impl From<LibProxyError> for RpcError {
-    fn from(lib_err: LibProxyError) -> Self {
+impl From<ProxyRpcError> for UiRpcError {
+    fn from(lib_err: ProxyRpcError) -> Self {
         match lib_err {
-            LibProxyError::ExecError(payload) => RpcError::ExecError(payload.into()),
+            ProxyRpcError::ExecError(payload) => UiRpcError::ExecError(payload.into()),
 
-            LibProxyError::SendFailed(send_error) => {
+            ProxyRpcError::SendFailed(send_error) => {
                 let msg = match send_error {
                     twinleaf::tio::proxy::SendError::WouldBlock(_) => {
                         "Send would block.".to_string()
@@ -270,10 +285,10 @@ impl From<LibProxyError> for RpcError {
                         "Invalid device route for send.".to_string()
                     }
                 };
-                RpcError::SendFailed(msg)
+                UiRpcError::SendFailed(msg)
             }
 
-            LibProxyError::RecvFailed(recv_error) => {
+            ProxyRpcError::RecvFailed(recv_error) => {
                 let msg = match recv_error {
                     twinleaf::tio::proxy::RecvError::WouldBlock => {
                         "Receive would block.".to_string()
@@ -282,9 +297,9 @@ impl From<LibProxyError> for RpcError {
                         "Proxy disconnected during receive.".to_string()
                     }
                 };
-                RpcError::RecvFailed(msg)
+                UiRpcError::RecvFailed(msg)
             }
-            LibProxyError::TypeError => RpcError::TypeError,
+            ProxyRpcError::TypeError => UiRpcError::TypeError,
         }
     }
 }
@@ -292,7 +307,7 @@ impl From<LibProxyError> for RpcError {
 // Misc. Metadata -------------------------------------------------------------
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export)]
-pub enum MetadataEpoch {
+pub enum UiMetadataEpoch {
     Invalid,
     Zero,
     Systime,
@@ -300,34 +315,34 @@ pub enum MetadataEpoch {
     Unknown(u8),
 }
 
-impl From<LibMetadataEpoch> for MetadataEpoch {
-    fn from(e: LibMetadataEpoch) -> Self {
+impl From<TwinleafMetadataEpoch> for UiMetadataEpoch {
+    fn from(e: TwinleafMetadataEpoch) -> Self {
         match e {
-            LibMetadataEpoch::Invalid => Self::Invalid,
-            LibMetadataEpoch::Zero => Self::Zero,
-            LibMetadataEpoch::Systime => Self::Systime,
-            LibMetadataEpoch::Unix => Self::Unix,
-            LibMetadataEpoch::Unknown(v) => Self::Unknown(v),
+            TwinleafMetadataEpoch::Invalid => Self::Invalid,
+            TwinleafMetadataEpoch::Zero => Self::Zero,
+            TwinleafMetadataEpoch::Systime => Self::Systime,
+            TwinleafMetadataEpoch::Unix => Self::Unix,
+            TwinleafMetadataEpoch::Unknown(v) => Self::Unknown(v),
         }
     }
 }
 
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export)]
-pub enum MetadataFilter {
+pub enum UiMetadataFilter {
     Unfiltered,
     FirstOrderCascade1,
     FirstOrderCascade2,
     Unknown(u8),
 }
 
-impl From<LibMetadataFilter> for MetadataFilter {
-    fn from(f: LibMetadataFilter) -> Self {
+impl From<TwinleafMetadataFilter> for UiMetadataFilter {
+    fn from(f: TwinleafMetadataFilter) -> Self {
         match f {
-            LibMetadataFilter::Unfiltered => Self::Unfiltered,
-            LibMetadataFilter::FirstOrderCascade1 => Self::FirstOrderCascade1,
-            LibMetadataFilter::FirstOrderCascade2 => Self::FirstOrderCascade2,
-            LibMetadataFilter::Unknown(v) => Self::Unknown(v),
+            TwinleafMetadataFilter::Unfiltered => Self::Unfiltered,
+            TwinleafMetadataFilter::FirstOrderCascade1 => Self::FirstOrderCascade1,
+            TwinleafMetadataFilter::FirstOrderCascade2 => Self::FirstOrderCascade2,
+            TwinleafMetadataFilter::Unknown(v) => Self::Unknown(v),
         }
     }
 }
@@ -336,9 +351,9 @@ impl From<LibMetadataFilter> for MetadataFilter {
 #[derive(Serialize, Clone, Debug, TS, PartialEq)]
 #[ts(export)]
 pub struct UiStream {
-    pub meta: StreamMeta,
-    pub segment: Option<SegmentMeta>,
-    pub columns: Vec<ColumnMeta>,
+    pub meta: UiStreamMeta,
+    pub segment: Option<UiSegmentMeta>,
+    pub columns: Vec<UiColumnMeta>,
     pub effective_sampling_rate: f64,
 }
 
@@ -348,9 +363,9 @@ pub struct UiDevice {
     pub url: String,
     pub route: String,
     pub state: PortState,
-    pub meta: DeviceMeta,
+    pub meta: UiDeviceMeta,
     pub streams: Vec<UiStream>,
-    pub rpcs: Vec<RpcMeta>,
+    pub rpcs: Vec<UiRpcMeta>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
@@ -376,26 +391,64 @@ pub enum ViewConfig {
     Timeseries(TimeseriesConfig),
     Fft(FftConfig),
 }
+
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
+#[ts(export)]
+pub enum PlotViewType {
+    #[default]
+    Timeseries,
+    Fft,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
 #[ts(export)]
 pub struct TimeseriesConfig {
     pub decimation_method: DecimationMethod,
     pub window_seconds: f64,
     pub resolution_multiplier: u32,
 }
-#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq, Default)]
+impl Default for TimeseriesConfig {
+    fn default() -> Self {
+        Self {
+            decimation_method: DecimationMethod::Fpcs,
+            window_seconds: 30.0,
+            resolution_multiplier: 400,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
 #[ts(export)]
 pub struct FftConfig {
     pub window_seconds: f64,
     pub detrend_method: DetrendMethod,
 }
+impl Default for FftConfig {
+    fn default() -> Self {
+        Self {
+            window_seconds: 10.0,
+            detrend_method: DetrendMethod::None,
+        }
+    }
+}
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
 #[ts(export)]
-pub struct SharedPlotConfig {
+pub struct UiPlotState {
     pub plot_id: PlotId,
-    pub data_keys: Vec<ColumnKey>,
+    pub data_keys: Vec<UiColumnKey>,
     pub max_sampling_rate: f64,
-    pub view_config: ViewConfig,
+    pub active_view: PlotViewType,
+    pub timeseries_config: TimeseriesConfig,
+    pub fft_config: FftConfig,
+}
+
+impl UiPlotState {
+    pub fn active_view_config(&self) -> ViewConfig {
+        match self.active_view {
+            PlotViewType::Timeseries => ViewConfig::Timeseries(self.timeseries_config.clone()),
+            PlotViewType::Fft => ViewConfig::Fft(self.fft_config.clone()),
+        }
+    }
 }
 
 // Plot Structs -----------------------------------------------------------------
@@ -405,7 +458,7 @@ pub static VIRTUAL_ROUTE: std::sync::LazyLock<twinleaf::tio::proto::DeviceRoute>
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
-pub struct ColumnKey {
+pub struct UiColumnKey {
     #[serde(with = "util")]
     #[ts(type = "string")]
     pub route: twinleaf::tio::proto::DeviceRoute,
@@ -413,7 +466,7 @@ pub struct ColumnKey {
     pub column_id: usize,
 }
 
-impl ColumnKey {
+impl UiColumnKey {
     pub fn new(route: twinleaf::tio::proto::DeviceRoute, stream_id: u8, column_id: usize) -> Self {
         Self {
             route,
@@ -442,6 +495,30 @@ impl ColumnKey {
     }
 }
 
+impl From<&UiColumnKey> for TwinleafColumnKey {
+    fn from(value: &UiColumnKey) -> Self {
+        Self::new(value.route.clone(), value.stream_id, value.column_id)
+    }
+}
+
+impl From<UiColumnKey> for TwinleafColumnKey {
+    fn from(value: UiColumnKey) -> Self {
+        Self::from(&value)
+    }
+}
+
+impl From<&TwinleafColumnKey> for UiColumnKey {
+    fn from(value: &TwinleafColumnKey) -> Self {
+        Self::new(value.route.clone(), value.stream_id, value.column_id)
+    }
+}
+
+impl From<TwinleafColumnKey> for UiColumnKey {
+    fn from(value: TwinleafColumnKey) -> Self {
+        Self::from(&value)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, TS, PartialEq, Eq, Hash)]
 #[ts(export)]
 pub struct PlotId(pub Uuid);
@@ -454,7 +531,7 @@ pub struct PipelineId(pub Uuid);
 #[ts(export)]
 pub struct PlotData {
     pub timestamps: Vec<f64>,
-    pub series_data: Vec<Vec<f64>>,
+    pub series_data: Vec<Vec<Option<f64>>>,
 }
 
 impl PlotData {
@@ -546,12 +623,12 @@ pub struct BiquadParams {
 #[ts(export)]
 pub enum MathChannelConfig {
     Arithmetic {
-        a: ColumnKey,
+        a: UiColumnKey,
         op: MathOp,
-        b: ColumnKey,
+        b: UiColumnKey,
     },
     Biquad {
-        src: ColumnKey,
+        src: UiColumnKey,
         kind: BiquadKind,
         params: BiquadParams,
     },

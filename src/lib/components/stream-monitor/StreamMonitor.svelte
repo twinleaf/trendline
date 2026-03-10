@@ -1,12 +1,16 @@
 <script lang="ts">
     import { deviceState } from "$lib/states/deviceState.svelte";
     import { streamMonitorState } from "$lib/states/streamMonitorState.svelte";
-    import { isVirtualUrl, sortUiDevicesByRoute } from "$lib/utils";
+    import {
+        isVirtualUrl,
+        isVirtualKey,
+        sortUiDevicesByRoute,
+    } from "$lib/utils";
     import type { UiStream } from "$lib/bindings/UiStream";
-    import type { ColumnMeta } from "$lib/bindings/ColumnMeta";
+    import type { UiColumnMeta } from "$lib/bindings/UiColumnMeta";
     import type { TreeRow } from "$lib/components/chart-area/data-table/column";
-    import type { DataColumnId } from "$lib/bindings/DataColumnId";
-    import { onMount } from "svelte";
+    import type { UiColumnKey } from "$lib/bindings/UiColumnKey";
+    import { onDestroy } from "svelte";
 
     import { columns } from "$lib/components/stream-monitor/data-table/column";
     import DataTable from "$lib/components/stream-monitor/data-table/DataTable.svelte";
@@ -30,11 +34,8 @@
     let showDesc = $state(true);
     let includeVirtual = $state(false);
 
-    onMount(() => {
-        streamMonitorState.init();
-        return () => {
-            streamMonitorState.destroy();
-        };
+    onDestroy(() => {
+        void streamMonitorState.destroy();
     });
 
     // --- Derived Data ---
@@ -43,7 +44,7 @@
         name: string;
         depth: number;
         units?: string;
-        dataKey: DataColumnId;
+        dataKey: UiColumnKey;
     }
 
     interface GroupedMonitorItems {
@@ -88,17 +89,16 @@
 
             for (const stream of sortedStreams) {
                 const sortedColumns = [...stream.columns].sort(
-                    (a: ColumnMeta, b: ColumnMeta) =>
+                    (a: UiColumnMeta, b: UiColumnMeta) =>
                         a.name.localeCompare(b.name),
                 );
 
                 const columnNodes: TreeRow[] = [];
                 for (const column of sortedColumns) {
                     const dataKey = {
-                        port_url: device.url,
-                        device_route: device.route,
+                        route: device.route,
                         stream_id: stream.meta.stream_id,
-                        column_index: column.index,
+                        column_id: column.index,
                     };
                     columnNodes.push({
                         id: JSON.stringify(dataKey),
@@ -137,11 +137,8 @@
         const selectedDevicesMap = new Map<string, UiDevice>();
         for (const key of leafNodeKeys) {
             try {
-                const dataKey = JSON.parse(key) as DataColumnId;
-                const device = deviceState.getDevice(
-                    dataKey.port_url,
-                    dataKey.device_route,
-                );
+                const dataKey = JSON.parse(key) as UiColumnKey;
+                const device = deviceState.getDevice(dataKey.route);
                 if (device) {
                     selectedDevicesMap.set(device.url + device.route, device);
                 }
@@ -161,16 +158,13 @@
         for (const key of leafNodeKeys) {
             try {
                 const dataKey = JSON.parse(key);
-                if (!includeVirtual && isVirtualUrl(dataKey.port_url)) continue;
-                const device = deviceState.getDevice(
-                    dataKey.port_url,
-                    dataKey.device_route,
-                );
+                if (!includeVirtual && isVirtualKey(dataKey)) continue;
+                const device = deviceState.getDevice(dataKey.route);
                 const stream = device?.streams.find(
                     (s) => s.meta.stream_id === dataKey.stream_id,
                 );
                 const column = stream?.columns.find(
-                    (c) => c.index === dataKey.column_index,
+                    (c) => c.index === dataKey.column_id,
                 );
 
                 if (device && stream && column) {
@@ -245,11 +239,11 @@
 
         const initialSelection: RowSelectionState = {};
         for (const id of selection) initialSelection[id] = true;
-        streamMonitorState.rowSelection = initialSelection;
+        void streamMonitorState.setRowSelection(initialSelection);
 
         const initialExpansion: ExpandedState = {};
         for (const id of expansion) initialExpansion[id] = true;
-        streamMonitorState.expansion = initialExpansion;
+        streamMonitorState.setExpansion(initialExpansion);
 
         isInitialSelectionDone = true;
     });
@@ -337,10 +331,14 @@
                                 {columns}
                                 data={treeData}
                                 getSubRows={(row) => row.subRows}
-                                bind:expanded={streamMonitorState.expansion}
-                                bind:rowSelection={
-                                    streamMonitorState.rowSelection
-                                }
+                                expanded={streamMonitorState.expansion}
+                                rowSelection={streamMonitorState.rowSelection}
+                                onExpandedCommit={(expanded) =>
+                                    streamMonitorState.setExpansion(expanded)}
+                                onRowSelectionCommit={(selection) =>
+                                    void streamMonitorState.setRowSelection(
+                                        selection,
+                                    )}
                             />
                         </div>
                     </ScrollArea>

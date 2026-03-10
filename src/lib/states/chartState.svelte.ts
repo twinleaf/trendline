@@ -1,24 +1,33 @@
 import { deviceState } from "$lib/states/deviceState.svelte";
 import { uiState } from "$lib/states/uiState.svelte";
-import type { ColumnKey } from "$lib/bindings/ColumnKey";
+import { listen } from "@tauri-apps/api/event";
+import type { UiColumnKey } from "$lib/bindings/UiColumnKey";
 import type { DecimationMethod } from "$lib/bindings/DecimationMethod";
 import type { DetrendMethod } from "$lib/bindings/DetrendMethod";
 import type { PlotId } from "$lib/bindings/PlotId";
+import type { PortState } from "$lib/bindings/PortState";
 import type { RowSelectionState } from "@tanstack/table-core";
 import type { ExpandedState } from "@tanstack/table-core";
 import { untrack } from "svelte";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { PlotData } from "$lib/bindings/PlotData";
 import { SvelteMap } from "svelte/reactivity";
-import type { SharedPlotConfig } from "$lib/bindings/SharedPlotConfig";
+import type { UiPlotState } from "$lib/bindings/UiPlotState";
+import type { ViewConfig } from "$lib/bindings/ViewConfig";
 
 export type ChartLayout = "carousel" | "vertical" | "horizontal";
 export type StreamLayout = "grouped" | "vertical" | "horizontal";
 const TIMESERIES_RESOLUTION_BASELINE_MULTIPLIER = 4;
 
 export interface PlotSeries {
-  dataKey: ColumnKey;
+  dataKey: UiColumnKey;
   uPlotSeries: uPlot.Series;
+}
+
+function buildRowSelection(dataKeys: UiColumnKey[]): RowSelectionState {
+  return Object.fromEntries(
+    dataKeys.map((dataKey) => [JSON.stringify(dataKey), true]),
+  );
 }
 
 /**
@@ -55,7 +64,7 @@ class DataColumnStyler {
    * @param dataKey The unique identifier for the data column.
    * @returns An object containing style properties (e.g., `{ color: string }`).
    */
-  getStyle(dataKey: ColumnKey): { color: string } {
+  getStyle(dataKey: UiColumnKey): { color: string } {
     const key = JSON.stringify(dataKey);
     if (!this.#styles.has(key)) {
       this.#styles.set(key, { color: this.#getNextColor() });
@@ -69,52 +78,54 @@ class DataColumnStyler {
  * This includes data selection, view settings, and derived uPlot options.
  */
 export class PlotConfig {
-  /** A unique identifier for this plot instance, assigned by the backend. */
-  id: PlotId;
+  #confirmedState = $state<UiPlotState | null>(null);
   /** The user-editable title of the plot. */
   title = $state("New Plot");
-  /** State for selected rows (data columns) in the TanStack Table, keyed by a stringified `ColumnKey`. */
-  rowSelection = $state<RowSelectionState>({});
   /** State for expanded rows (devices/streams) in the TanStack Table. */
   expansion = $state<ExpandedState>({});
   /** The currently active tab in the plot's settings header ('selection' or 'settings'). */
   activeTab = $state<"selection" | "settings">("selection");
-
-  // --- Private state for view settings ---
-  #manualDecimationMethod = $state<DecimationMethod>("Fpcs");
-  #isDecimationManual = $state(false);
-
-  /** The time window of data to display for timeseries view, in seconds. */
-  windowSeconds = $state<number>(30.0);
-  /** A user-facing multiplier affecting the data resolution for the timeseries view. */
-  resolutionMultiplier = $state<number>(100);
-  /** The time window of data to use for FFT calculation, in seconds. */
-  fftSeconds = $state<number>(10.0);
-  /** The detrending method to apply before performing an FFT. */
-  fftDetrendMethod = $state<DetrendMethod>("None");
   /** A flag indicating if the plot has received any data from the backend. */
   hasData = $state(false);
   /** The most recent timestamp of data received by the plot, used for tracking data flow. */
   latestTimestamp = $state(0);
   /** A local pause state for this specific plot, which can override the global pause state. */
   isPaused = $state(false);
-  /** The type of visualization to display ('timeseries' or 'fft'). */
-  viewType = $state<"timeseries" | "fft">("timeseries");
 
-  /**
-   * The data decimation method for the timeseries view.
-   * Defaults to 'Fpcs' unless a manual method is set by the user.
-   */
-  get decimationMethod(): DecimationMethod {
-    if (this.#isDecimationManual) {
-      return this.#manualDecimationMethod;
-    }
-    return "Fpcs";
-  }
-  set decimationMethod(value: DecimationMethod) {
-    this.#isDecimationManual = true;
-    this.#manualDecimationMethod = value;
-  }
+  id = $derived.by(() => this.#confirmedState!.plot_id);
+
+  rowSelection = $derived.by(() =>
+    buildRowSelection(this.#confirmedState!.data_keys),
+  );
+
+  dataKeys = $derived.by(() => this.#confirmedState!.data_keys);
+
+  viewType = $derived.by((): "timeseries" | "fft" =>
+    this.#confirmedState!.active_view === "Fft" ? "fft" : "timeseries",
+  );
+
+  decimationMethod = $derived.by(
+    (): DecimationMethod =>
+      this.#confirmedState!.timeseries_config.decimation_method,
+  );
+
+  windowSeconds = $derived.by(
+    (): number => this.#confirmedState!.timeseries_config.window_seconds,
+  );
+
+  resolutionMultiplier = $derived.by(
+    (): number =>
+      this.#confirmedState!.timeseries_config.resolution_multiplier /
+      TIMESERIES_RESOLUTION_BASELINE_MULTIPLIER,
+  );
+
+  fftSeconds = $derived.by(
+    (): number => this.#confirmedState!.fft_config.window_seconds,
+  );
+
+  fftDetrendMethod = $derived.by(
+    (): DetrendMethod => this.#confirmedState!.fft_config.detrend_method,
+  );
 
   /**
    * A derived array of `PlotSeries` objects, generated from the `rowSelection` state.
@@ -122,232 +133,78 @@ export class PlotConfig {
    */
   series = $derived.by((): PlotSeries[] => {
     const newSeries: PlotSeries[] = [];
-    const selectedKeys = Object.keys(this.rowSelection);
-    for (const keyString of selectedKeys) {
-      if (keyString.startsWith("{") && keyString.endsWith("}")) {
-        try {
-          const dataKey: ColumnKey = JSON.parse(keyString);
-          const device = deviceState.getDevice(dataKey.route);
-          const stream = device?.streams.find(
-            (s) => s.meta.stream_id === dataKey.stream_id,
-          );
-          const column = stream?.columns.find(
-            (c) => c.index === dataKey.column_id,
-          );
+    for (const dataKey of this.dataKeys) {
+      const device = deviceState.getDevice(dataKey.route);
+      const stream = device?.streams.find(
+        (s) => s.meta.stream_id === dataKey.stream_id,
+      );
+      const column = stream?.columns.find((c) => c.index === dataKey.column_id);
 
-          if (device && stream && column) {
-            const style = dataColumnStyler.getStyle(dataKey);
-            newSeries.push({
-              dataKey: dataKey,
-              uPlotSeries: {
-                label: column.name,
-                stroke: style.color,
-                scale: column.units,
-              },
-            });
-          }
-        } catch (e) {
-          console.error(
-            "Failed to parse a key that looked like JSON:",
-            keyString,
-            e,
-          );
-        }
+      if (device && stream && column) {
+        const style = dataColumnStyler.getStyle(dataKey);
+        newSeries.push({
+          dataKey,
+          uPlotSeries: {
+            label: column.name,
+            stroke: style.color,
+            scale: column.units,
+          },
+        });
       }
     }
     return newSeries;
   });
 
-  /**
-   * A derived value calculating the maximum effective sampling rate among all selected series in the plot.
-   * This is sent to the backend to configure the data processing pipeline correctly.
-   */
-  maxSamplingRate = $derived.by((): number => {
-    if (this.series.length === 0) return 0;
-    const rates = this.series.map((s) => {
-      const device = deviceState.getDevice(s.dataKey.route);
-      const stream = device?.streams.find(
-        (st) => st.meta.stream_id === s.dataKey.stream_id,
-      );
-      return stream?.effective_sampling_rate ?? 0;
-    });
-    return Math.max(...rates);
-  });
-
-  /**
-   * A large derived object that generates the complete configuration for the `uPlot`
-   * charting library based on the current plot state (series, viewType, axes, etc.).
-   */
-  uPlotOptions = $derived.by((): uPlot.Options => {
-    if (this.series.length === 0) {
+  buildViewConfig(
+    overrides: Partial<{
+      viewType: "timeseries" | "fft";
+      decimationMethod: DecimationMethod;
+      windowSeconds: number;
+      resolutionMultiplier: number;
+      fftSeconds: number;
+      fftDetrendMethod: DetrendMethod;
+    }> = {},
+  ): ViewConfig {
+    const viewType = overrides.viewType ?? this.viewType;
+    if (viewType === "timeseries") {
       return {
-        width: 800,
-        height: 400,
-        legend: { show: false },
-        series: [{}],
-        axes: [{}, { show: false }],
+        Timeseries: {
+          decimation_method:
+            overrides.decimationMethod ?? this.decimationMethod,
+          window_seconds: overrides.windowSeconds ?? this.windowSeconds,
+          resolution_multiplier:
+            (overrides.resolutionMultiplier ?? this.resolutionMultiplier) *
+            TIMESERIES_RESOLUTION_BASELINE_MULTIPLIER,
+        },
       };
     }
-    const uniqueUnits = new Set(this.series.map((s) => s.uPlotSeries.scale));
-    const scalesConfig: Record<string, uPlot.Scale> = {};
-    for (const unit of uniqueUnits) {
-      if (unit) {
-        if (this.viewType === "fft") {
-          scalesConfig[unit] = {
-            auto: true,
-            range: (u, dataMin, dataMax): [number | null, number | null] => {
-              if (dataMin <= 0 || !isFinite(dataMin)) return [1e-4, 1];
-              const currentViewMin = u.scales[unit]?.min ?? null;
-              const currentViewMax = u.scales[unit]?.max ?? null;
-              let shouldResize = false;
-              if (currentViewMin === null || currentViewMax === null) {
-                shouldResize = true;
-              } else {
-                if (dataMin < currentViewMin || dataMax > currentViewMax)
-                  shouldResize = true;
-                else {
-                  const viewDecades =
-                    Math.log10(currentViewMax) - Math.log10(currentViewMin);
-                  const dataDecades = Math.log10(dataMax) - Math.log10(dataMin);
-                  if (viewDecades > dataDecades + 2.0) shouldResize = true;
-                }
-              }
-              if (!shouldResize) return [currentViewMin, currentViewMax];
-              if (dataMin === dataMax) {
-                const logVal = Math.log10(dataMin);
-                return [10 ** (logVal - 1), 10 ** (logVal + 1)];
-              }
-              const logMin = Math.log10(dataMin);
-              const logMax = Math.log10(dataMax);
-              const logCenter = (logMin + logMax) / 2;
-              const logHalfSpan = (logMax - logMin) / 2;
-              const paddedHalfSpan = logHalfSpan + 0.5;
-              return [
-                10 ** Math.floor(logCenter - paddedHalfSpan),
-                10 ** Math.ceil(logCenter + paddedHalfSpan),
-              ];
-            },
-          };
-        } else scalesConfig[unit] = { auto: true };
-      }
-    }
-    const axesConfig: uPlot.Axis[] = [{}];
-    if (this.viewType === "fft") {
-      scalesConfig["x"] = { time: false, distr: 3, log: 10 };
-      const formatHz = (v: number) => {
-        if (v == null || !isFinite(v)) return "";
-        if (v < 1e3) {
-          const dp = v < 10 ? 2 : v < 100 ? 1 : 0;
-          return `${v.toFixed(dp)} Hz`;
-        }
-        if (v < 1e6) {
-          const n = v / 1e3;
-          const dp = n < 10 ? 2 : n < 100 ? 1 : 0;
-          return `${n.toFixed(dp)} kHz`;
-        }
-        const n = v / 1e6;
-        const dp = n < 10 ? 2 : n < 100 ? 1 : 0;
-        return `${n.toFixed(dp)} MHz`;
-      };
-      axesConfig[0] = {
-        scale: "x",
-        values: (_u, ticks) => ticks.map(formatHz),
-      };
-      for (const unit of uniqueUnits)
-        if (unit && scalesConfig[unit]) {
-          scalesConfig[unit].distr = 3;
-          scalesConfig[unit].log = 10;
-        }
-    } else {
-      scalesConfig["x"] = { time: false };
-      axesConfig[0] = {
-        scale: "x",
-        space: 100,
-        values: (_, ticks) =>
-          ticks.map((raw) =>
-            Math.abs(raw) < 1e-9 ? "Now" : `-${Math.abs(raw).toFixed(1)}s`,
-          ),
-      };
-    }
-    let yAxisCount = 0;
-    for (const unit of uniqueUnits) {
-      if (!unit) continue;
-      const yAxisLabel = this.viewType === "fft" ? `${unit}/√Hz` : unit;
-      const axisOptions: uPlot.Axis = {
-        scale: unit,
-        label: yAxisLabel,
-        labelGap: 5,
-        stroke: this.series.find((s) => s.uPlotSeries.scale === unit)
-          ?.uPlotSeries.stroke,
-        values: (_, vals) =>
-          vals.map((v) => {
-            if (v == null) return "";
-            if (v === 0) return "0 ";
-            const absV = Math.abs(v);
-            if (absV > 0 && absV < 0.01) return v.toExponential(1) + " ";
-            if (absV < 10) return v.toFixed(2) + " ";
-            if (absV < 100) return v.toFixed(1) + " ";
-            return v.toFixed(0) + " ";
-          }),
-      };
-      if (yAxisCount > 0) {
-        axisOptions.side = 1;
-        axisOptions.grid = { show: false };
-      }
-      axesConfig.push(axisOptions);
-      yAxisCount++;
-    }
-    const uplotSeriesConfig: uPlot.Series[] = [
-      {},
-      ...this.series.map((s) => s.uPlotSeries),
-    ];
     return {
-      width: 800,
-      height: 400,
-      series: uplotSeriesConfig,
-      scales: scalesConfig,
-      axes: axesConfig,
-      pxAlign: 0,
-      legend: { show: false },
-      cursor: {
-        drag: {
-          x: false,
-          y: false,
-          setScale: false,
-        },
-        show: true,
-        points: { show: false },
-        move: (_, t, l) => [t, l],
-        bind: {
-          click: () => {
-            return null;
-          },
-          dblclick: (u) => {
-            return null;
-          },
-        },
+      Fft: {
+        window_seconds: overrides.fftSeconds ?? this.fftSeconds,
+        detrend_method: overrides.fftDetrendMethod ?? this.fftDetrendMethod,
       },
     };
-  });
+  }
+
+  applyConfirmedState(nextState: UiPlotState) {
+    this.#confirmedState = nextState;
+  }
 
   /**
    * Creates a new PlotConfig instance.
-   * @param id The backend-generated PlotId.
+   * @param initialState The backend-confirmed plot state.
    * @param title The initial title for the plot.
-   * @param sel The initial row selection state.
    * @param exp The initial row expansion state.
    * @param paused The initial pause state.
    */
   constructor(
-    id: PlotId,
+    initialState: UiPlotState,
     title: string,
-    sel: RowSelectionState = {},
     exp: ExpandedState = {},
     paused = false,
   ) {
-    this.id = id;
+    this.#confirmedState = initialState;
     this.title = title;
-    this.rowSelection = sel;
     this.expansion = exp;
     this.isPaused = paused;
   }
@@ -356,6 +213,18 @@ export class PlotConfig {
 const DEFAULT_PLOT_HEIGHT = 400;
 
 class ChartState {
+  constructor() {
+    void listen<[string, PortState]>(
+      "port-state-changed",
+      ({ payload: [portUrl, newState] }) => {
+        if (deviceState.selection?.portUrl !== portUrl) return;
+        if (newState === "Disconnected" || newState === "Reconnecting") {
+          this.#clearAllPlotData();
+        }
+      },
+    );
+  }
+
   // --- Public State ---
 
   /** An array of PlotConfig objects, representing all charts currently displayed. */
@@ -390,6 +259,8 @@ class ChartState {
   #dirtyPlots = new Set<PlotId>();
   /** A flag to ensure the render loop is only started once. */
   #isUpdateLoopRunning = false;
+  /** A per-plot counter used to ignore stale async config responses. */
+  #plotConfigRequestVersion = new Map<PlotId, number>();
 
   // --- Private Helper for Rate Limiting ---
   /**
@@ -436,6 +307,88 @@ class ChartState {
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
+  }
+
+  // --- Private helpers for action methods ---
+
+  #clearPlotData(plot: PlotConfig) {
+    this.plotsData.delete(plot.id);
+    this.#latestDataCache.delete(plot.id);
+    this.#dirtyPlots.delete(plot.id);
+    plot.hasData = false;
+    plot.latestTimestamp = 0;
+  }
+
+  #clearAllPlotData() {
+    for (const plot of this.plots) {
+      this.#clearPlotData(plot);
+    }
+  }
+
+  #applyConfirmedPlotState(plot: PlotConfig, state: UiPlotState) {
+    plot.applyConfirmedState(state);
+  }
+
+  #createPlotFromConfig(
+    config: UiPlotState,
+    title: string,
+    expansion: ExpandedState = {},
+    paused = false,
+  ): PlotConfig {
+    return new PlotConfig(config, title, expansion, paused);
+  }
+
+  #beginPlotConfigRequest(plotId: PlotId): number {
+    const next = (this.#plotConfigRequestVersion.get(plotId) ?? 0) + 1;
+    this.#plotConfigRequestVersion.set(plotId, next);
+    return next;
+  }
+
+  async #requestPlotConfig(
+    plot: PlotConfig,
+    command: string,
+    args: Record<string, unknown>,
+  ): Promise<UiPlotState | null> {
+    const requestVersion = this.#beginPlotConfigRequest(plot.id);
+    try {
+      const config = await invoke<UiPlotState>(command, args);
+      if (this.#plotConfigRequestVersion.get(plot.id) !== requestVersion) {
+        return null;
+      }
+      return config;
+    } catch (e) {
+      if (this.#plotConfigRequestVersion.get(plot.id) !== requestVersion) {
+        return null;
+      }
+      const message =
+        typeof e === "string" ? e : `Failed to update "${plot.title}".`;
+      uiState.showError(message);
+      return null;
+    }
+  }
+
+  async ensurePlotChannel(plot: PlotConfig) {
+    this.#startUpdateLoop();
+    if (this.#listeningPlots.has(plot.id)) return;
+    this.#listeningPlots.add(plot.id);
+
+    const plotChannel = new Channel<PlotData>();
+    plotChannel.onmessage = (data) => {
+      if (!plot.isPaused) {
+        this.#latestDataCache.set(plot.id, data);
+        this.#dirtyPlots.add(plot.id);
+      }
+    };
+
+    try {
+      await invoke("listen_to_plot_data", {
+        plotId: plot.id,
+        onEvent: plotChannel,
+      });
+    } catch (e) {
+      this.#listeningPlots.delete(plot.id);
+      console.error(`[IPC] Failed to register channel for plot ${plot.id}`, e);
+    }
   }
 
   /**
@@ -489,80 +442,136 @@ class ChartState {
     await this.deleteAllPlots();
   }
 
-  /**
-   * Synchronizes the state of a single plot with the backend, creating or updating its data processing pipeline.
-   * This is a declarative "upsert" operation.
-   * @param plot The PlotConfig object to sync.
-   */
-  async syncPlotWithBackend(plot: PlotConfig) {
-    this.#startUpdateLoop();
+  // --- Action methods: explicit intents that update the backend then local state ---
 
-    untrack(async () => {
-      if (plot.series.length === 0) {
-        if (this.#listeningPlots.has(plot.id)) {
-          await this.destroyPlotOnBackend(plot.id);
-        }
-        return;
-      }
-
-      if (!this.#listeningPlots.has(plot.id)) {
-        const plotChannel = new Channel<PlotData>();
-
-        plotChannel.onmessage = (data) => {
-          if (!plot.isPaused) {
-            this.#latestDataCache.set(plot.id, data);
-            this.#dirtyPlots.add(plot.id);
-          }
-        };
-
-        try {
-          await invoke("listen_to_plot_data", {
-            plotId: plot.id,
-            onEvent: plotChannel,
-          });
-          this.#listeningPlots.add(plot.id);
-        } catch (e) {
-          console.error(
-            `[IPC] Failed to invoke listener for plot ${plot.id}`,
-            e,
-          );
-        }
-      }
-
-      const viewConfig =
-        plot.viewType === "timeseries"
-          ? {
-              Timeseries: {
-                decimation_method: plot.decimationMethod,
-                window_seconds: plot.windowSeconds,
-                resolution_multiplier:
-                  plot.resolutionMultiplier *
-                  TIMESERIES_RESOLUTION_BASELINE_MULTIPLIER,
-              },
-            }
-          : {
-              Fft: {
-                window_seconds: plot.fftSeconds,
-                detrend_method: plot.fftDetrendMethod,
-              },
-            };
-
-      const configForBackend: SharedPlotConfig = {
-        plot_id: plot.id,
-        data_keys: plot.series.map((s) => s.dataKey),
-        max_sampling_rate: plot.maxSamplingRate,
-        view_config: viewConfig,
-      };
-
-      try {
-        await invoke("update_plot_pipeline", { config: configForBackend });
-      } catch (e) {
-        console.error(
-          `[Frontend] Failed to sync pipeline for plot ${plot.id}:`,
-          e,
-        );
-      }
+  async setPlotColumns(plot: PlotConfig, dataKeys: UiColumnKey[]) {
+    await this.ensurePlotChannel(plot);
+    const config = await this.#requestPlotConfig(plot, "update_plot_columns", {
+      plotId: plot.id,
+      dataKeys,
+      viewConfig: plot.buildViewConfig(),
     });
+    if (config) {
+      this.#clearPlotData(plot);
+      this.#applyConfirmedPlotState(plot, config);
+    }
+  }
+
+  async setPlotSelection(plot: PlotConfig, rowSelection: RowSelectionState) {
+    const dataKeys = Object.keys(rowSelection)
+      .filter((key) => key.startsWith("{") && key.endsWith("}"))
+      .map((key) => JSON.parse(key) as UiColumnKey);
+    await this.setPlotColumns(plot, dataKeys);
+  }
+
+  async setPlotViewType(plot: PlotConfig, viewType: "timeseries" | "fft") {
+    if (plot.viewType === viewType) return;
+    const viewConfig = plot.buildViewConfig({ viewType });
+    const config = await this.#requestPlotConfig(
+      plot,
+      "update_plot_view_config",
+      {
+        plotId: plot.id,
+        viewConfig,
+      },
+    );
+    if (config) {
+      this.#clearPlotData(plot);
+      this.#applyConfirmedPlotState(plot, config);
+    }
+  }
+
+  async setPlotDecimation(plot: PlotConfig, method: DecimationMethod) {
+    if (plot.decimationMethod === method) return;
+    const viewConfig = plot.buildViewConfig({
+      decimationMethod: method,
+    });
+    const config = await this.#requestPlotConfig(
+      plot,
+      "update_plot_view_config",
+      {
+        plotId: plot.id,
+        viewConfig,
+      },
+    );
+    if (config) {
+      this.#clearPlotData(plot);
+      this.#applyConfirmedPlotState(plot, config);
+    }
+  }
+
+  async setPlotWindow(plot: PlotConfig, seconds: number) {
+    if (plot.windowSeconds === seconds) return;
+    const viewConfig = plot.buildViewConfig({
+      windowSeconds: seconds,
+    });
+    const config = await this.#requestPlotConfig(
+      plot,
+      "update_plot_view_config",
+      {
+        plotId: plot.id,
+        viewConfig,
+      },
+    );
+    if (config) {
+      this.#clearPlotData(plot);
+      this.#applyConfirmedPlotState(plot, config);
+    }
+  }
+
+  async setPlotResolution(plot: PlotConfig, multiplier: number) {
+    if (plot.resolutionMultiplier === multiplier) return;
+    const viewConfig = plot.buildViewConfig({
+      resolutionMultiplier: multiplier,
+    });
+    const config = await this.#requestPlotConfig(
+      plot,
+      "update_plot_view_config",
+      {
+        plotId: plot.id,
+        viewConfig,
+      },
+    );
+    if (config) {
+      this.#clearPlotData(plot);
+      this.#applyConfirmedPlotState(plot, config);
+    }
+  }
+
+  async setPlotFftWindow(plot: PlotConfig, seconds: number) {
+    if (plot.fftSeconds === seconds) return;
+    const viewConfig = plot.buildViewConfig({ fftSeconds: seconds });
+    const config = await this.#requestPlotConfig(
+      plot,
+      "update_plot_view_config",
+      {
+        plotId: plot.id,
+        viewConfig,
+      },
+    );
+    if (config) {
+      this.#clearPlotData(plot);
+      this.#applyConfirmedPlotState(plot, config);
+    }
+  }
+
+  async setPlotDetrend(plot: PlotConfig, method: DetrendMethod) {
+    if (plot.fftDetrendMethod === method) return;
+    const viewConfig = plot.buildViewConfig({
+      fftDetrendMethod: method,
+    });
+    const config = await this.#requestPlotConfig(
+      plot,
+      "update_plot_view_config",
+      {
+        plotId: plot.id,
+        viewConfig,
+      },
+    );
+    if (config) {
+      this.#clearPlotData(plot);
+      this.#applyConfirmedPlotState(plot, config);
+    }
   }
 
   /**
@@ -573,6 +582,7 @@ class ChartState {
     this.#listeningPlots.delete(plotId);
     this.#latestDataCache.delete(plotId);
     this.#dirtyPlots.delete(plotId);
+    this.#plotConfigRequestVersion.delete(plotId);
     try {
       await invoke("destroy_plot", { plotId });
     } catch (e) {
@@ -596,16 +606,15 @@ class ChartState {
    */
   async addPlot() {
     await this.#withActionLock(async () => {
-      const plotId = await invoke<PlotId>("create_plot");
+      const config = await invoke<UiPlotState>("create_plot");
       const initialExpansion: ExpandedState = {};
       for (const portData of deviceState.devices) {
         for (const device of portData.devices)
           initialExpansion[`${device.url}:${device.route}`] = true;
       }
-      const newPlot = new PlotConfig(
-        plotId,
+      const newPlot = this.#createPlotFromConfig(
+        config,
         "New Plot",
-        {},
         initialExpansion,
         this.isPaused,
       );
@@ -626,16 +635,15 @@ class ChartState {
     await this.#withActionLock(async () => {
       const index = this.getPlotIndex(plotId);
       if (index === -1) return;
-      const newPlotId = await invoke<PlotId>("create_plot");
+      const config = await invoke<UiPlotState>("create_plot");
       const initialExpansion: ExpandedState = {};
       for (const portData of deviceState.devices) {
         for (const device of portData.devices)
           initialExpansion[`${device.url}:${device.route}`] = true;
       }
-      const newPlot = new PlotConfig(
-        newPlotId,
+      const newPlot = this.#createPlotFromConfig(
+        config,
         "New Plot",
-        {},
         initialExpansion,
         this.isPaused,
       );
@@ -656,16 +664,15 @@ class ChartState {
     await this.#withActionLock(async () => {
       const index = this.getPlotIndex(plotId);
       if (index === -1) return;
-      const newPlotId = await invoke<PlotId>("create_plot");
+      const config = await invoke<UiPlotState>("create_plot");
       const initialExpansion: ExpandedState = {};
       for (const portData of deviceState.devices) {
         for (const device of portData.devices)
           initialExpansion[`${device.url}:${device.route}`] = true;
       }
-      const newPlot = new PlotConfig(
-        newPlotId,
+      const newPlot = this.#createPlotFromConfig(
+        config,
         "New Plot",
-        {},
         initialExpansion,
         this.isPaused,
       );
@@ -683,9 +690,9 @@ class ChartState {
    * @param dataKey The data column identifier to pre-select.
    * @param streamName The name of the stream for the plot title.
    */
-  async addPlotFromStream(dataKey: ColumnKey, streamName: string) {
+  async addPlotFromStream(dataKey: UiColumnKey, streamName: string) {
     await this.#withActionLock(async () => {
-      const plotId = await invoke<PlotId>("create_plot");
+      const config = await invoke<UiPlotState>("create_plot");
       const selectionKey = JSON.stringify(dataKey);
       const portUrl = deviceState.selection?.portUrl ?? "";
       const deviceId = `${portUrl}:${dataKey.route}`;
@@ -694,14 +701,14 @@ class ChartState {
         [deviceId]: true,
         [streamId]: true,
       };
-      const newPlot = new PlotConfig(
-        plotId,
+      const newPlot = this.#createPlotFromConfig(
+        config,
         `${streamName}`,
-        { [selectionKey]: true },
         initialExpansion,
         this.isPaused,
       );
       this.plots.push(newPlot);
+      await this.setPlotSelection(newPlot, { [selectionKey]: true });
       if (this.layoutMode === "manual") {
         const newLayout = { ...this.manualLayout };
         newLayout[newPlot.id] = DEFAULT_PLOT_HEIGHT;
@@ -815,6 +822,21 @@ class ChartState {
         isPaused: plot.isPaused,
         fileNameSuggestion: `${plot.title.replace(/\s+/g, "_")}_raw.csv`,
       });
+    } catch (e) {
+      uiState.showError(e as string);
+    }
+  }
+
+  /**
+   * Resets a plot: clears all pipeline state and plot data, keeping columns selected.
+   * Data refills live from the current moment.
+   */
+  async resetPlot(plotId: PlotId) {
+    const plot = this.plots.find((p) => p.id === plotId);
+    if (!plot) return;
+    try {
+      await invoke("reset_plot", { plotId });
+      this.#clearPlotData(plot);
     } catch (e) {
       uiState.showError(e as string);
     }

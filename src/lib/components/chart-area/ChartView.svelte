@@ -9,7 +9,7 @@
     import SplitButton from "$lib/components/chart-area/SplitButton.svelte";
     import type { UiStream } from "$lib/bindings/UiStream";
     import type { UiDevice } from "$lib/bindings/UiDevice";
-    import type { ColumnMeta } from "$lib/bindings/ColumnMeta";
+    import type { UiColumnMeta } from "$lib/bindings/UiColumnMeta";
     import { sortUiDevicesByRoute, isVirtualUrl } from "$lib/utils";
     import { onDestroy } from "svelte";
     import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -24,6 +24,7 @@
         Database,
         ChartLine,
         ChartColumn,
+        RotateCcw,
     } from "@lucide/svelte";
     // Svelte 5 state management
     let plots = $derived(chartState.plots);
@@ -76,7 +77,7 @@
             const streamNodes: TreeRow[] = [];
             for (const stream of sortedStreams) {
                 const sortedColumns = [...stream.columns].sort(
-                    (a: ColumnMeta, b: ColumnMeta) =>
+                    (a: UiColumnMeta, b: UiColumnMeta) =>
                         a.name.localeCompare(b.name),
                 );
 
@@ -358,6 +359,18 @@
                             </ContextMenu.RadioGroup>
                         </ContextMenu.SubContent>
                     </ContextMenu.Sub>
+                    <ContextMenu.Separator />
+
+                    <ContextMenu.Item
+                        disabled={!hasData}
+                        onclick={() => {
+                            isMenuOpen = false;
+                            chartState.resetPlot(plotId);
+                        }}
+                    >
+                        <RotateCcw class="mr-2 h-4 w-4" />
+                        Reset Plot
+                    </ContextMenu.Item>
                     <ContextMenu.Separator />
 
                     <ContextMenu.Item

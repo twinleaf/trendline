@@ -385,7 +385,8 @@ pub fn k_way_merge_plot_data(all_series_data: Vec<PlotData>) -> PlotData {
         return PlotData::empty();
     }
 
-    let continuous_series: Vec<Vec<Point>> = all_series_data
+    // Each input PlotData has exactly 1 series. Pair timestamps with nullable values.
+    let continuous_series: Vec<Vec<(f64, Option<f64>)>> = all_series_data
         .iter()
         .filter_map(|plot_data| {
             if !plot_data.timestamps.is_empty() && plot_data.series_data.len() == 1 {
@@ -394,7 +395,7 @@ pub fn k_way_merge_plot_data(all_series_data: Vec<PlotData>) -> PlotData {
                         .timestamps
                         .iter()
                         .zip(plot_data.series_data[0].iter())
-                        .map(|(&x, &y)| Point { x, y })
+                        .map(|(&x, &y)| (x, y))
                         .collect(),
                 )
             } else {
@@ -412,30 +413,53 @@ pub fn k_way_merge_plot_data(all_series_data: Vec<PlotData>) -> PlotData {
     }
     let num_series = series_iters.len();
     let mut merged_plot_data = PlotData::with_series_capacity(num_series);
+    // Track last non-None point per series for interpolation
     let mut last_points: Vec<Option<Point>> = vec![None; num_series];
 
     loop {
         let next_ts = series_iters
             .iter_mut()
-            .filter_map(|it| it.peek().map(|p| p.x))
+            .filter_map(|it| it.peek().map(|(x, _)| *x))
             .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-        if let Some(ts) = next_ts {
-            merged_plot_data.timestamps.push(ts);
-            for i in 0..num_series {
-                let iter = &mut series_iters[i];
-                let mut y_val = f64::NAN; // Use NaN for gaps
-                if iter.peek().map_or(false, |p| (p.x - ts).abs() < 1e-9) {
-                    let p_next = iter.next().unwrap();
-                    last_points[i] = Some(*p_next);
-                    y_val = p_next.y;
-                } else if let (Some(p_next_real), Some(p_last)) = (iter.peek(), last_points[i]) {
-                    y_val = lerp(&p_last, p_next_real, ts);
+        let Some(ts) = next_ts else { break };
+        merged_plot_data.timestamps.push(ts);
+
+        for i in 0..num_series {
+            let iter = &mut series_iters[i];
+            let y_val: Option<f64>;
+
+            if iter.peek().map_or(false, |(x, _)| (*x - ts).abs() < 1e-9) {
+                let &(_, opt_y) = iter.next().unwrap();
+                match opt_y {
+                    Some(y) => {
+                        last_points[i] = Some(Point::new(ts, y));
+                        y_val = Some(y);
+                    }
+                    None => {
+                        // Explicit gap — clear interpolation anchor
+                        last_points[i] = None;
+                        y_val = None;
+                    }
                 }
-                merged_plot_data.series_data[i].push(y_val);
+            } else if let (Some(&(next_x, next_opt_y)), Some(p_last)) =
+                (iter.peek(), last_points[i])
+            {
+                // Interpolate only if both neighbours are non-None
+                match next_opt_y {
+                    Some(next_y) => {
+                        let p_next = Point::new(*next_x, *next_y);
+                        y_val = Some(lerp(&p_last, &p_next, ts));
+                    }
+                    None => {
+                        y_val = None;
+                    }
+                }
+            } else {
+                y_val = None;
             }
-        } else {
-            break; // No more points in any iterator
+
+            merged_plot_data.series_data[i].push(y_val);
         }
     }
     merged_plot_data

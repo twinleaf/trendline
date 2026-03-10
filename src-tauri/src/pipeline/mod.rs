@@ -1,11 +1,14 @@
-use crate::shared::{ColumnStatistics, PipelineId, PlotData};
-use crate::state::capture::{BatchedData, CaptureState};
+use crate::shared::{ColumnStatistics, PipelineId, PlotData, Point};
+use crate::state::data_manager::BatchedData;
 use crossbeam::channel::Sender;
 use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum PipelineCommand {
-    Hydrate,
+    Hydrate {
+        sampling_rate: Option<f64>,
+        backfill: Vec<Point>,
+    },
     AddSubscriber(Sender<(PlotData, f64)>),
     Shutdown,
     ResetSelf,
@@ -17,12 +20,12 @@ pub trait Pipeline: Send + Sync {
     fn get_output(&self) -> PlotData;
     fn process_batch(&mut self, _batch: Arc<BatchedData>) {}
     fn process_derived_batch(&mut self, _batch: (PlotData, f64)) {}
-    fn process_command(&mut self, cmd: PipelineCommand, capture: &CaptureState);
+    fn process_command(&mut self, cmd: PipelineCommand);
 }
 
 pub trait StatisticsProvider: Send + Sync {
     fn id(&self) -> PipelineId;
-    fn get_output(&mut self, capture_state: &CaptureState) -> ColumnStatistics;
+    fn get_output(&mut self) -> ColumnStatistics;
     fn process_batch(&mut self, batch: Arc<BatchedData>);
     fn reset(&mut self);
 }

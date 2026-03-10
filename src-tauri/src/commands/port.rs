@@ -1,3 +1,4 @@
+use crate::shared::UiSelectionState;
 use crate::state::comm_manager::{CommManager, CommMsg};
 use std::sync::Arc;
 use tauri::State;
@@ -53,4 +54,11 @@ pub fn confirm_selection(
         children_routes: parsed_routes,
         reply,
     })?
+}
+
+#[tauri::command]
+pub fn get_selection_state(registry: State<Arc<CommManager>>) -> Result<UiSelectionState, String> {
+    registry
+        .ask(|reply| CommMsg::GetSelectionState { reply })
+        .map_err(|e| format!("Failed to query selection state: {}", e))
 }

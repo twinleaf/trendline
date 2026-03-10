@@ -1,9 +1,8 @@
 use super::{Pipeline, PipelineCommand};
-use crate::shared::{BiquadKind, BiquadParams, DataColumnId, PipelineId, PlotData, Point};
-use crate::state::capture::{BatchedData, CaptureCommand, CaptureState};
+use crate::shared::{BiquadKind, BiquadParams, PipelineId, PlotData, Point, UiColumnKey};
+use crate::state::data_manager::BatchedData;
 use crossbeam::channel::Sender;
 use std::sync::Arc;
-use std::time::Instant;
 use uuid::Uuid;
 
 #[derive(Clone, Copy)]
@@ -88,23 +87,23 @@ impl Biquad {
 
 pub struct BiquadProducer {
     id: PipelineId,
-    src: DataColumnId,
-    out_key: DataColumnId,
+    src: UiColumnKey,
+    out_key: UiColumnKey,
     kind: BiquadKind,
     params: BiquadParams,
     biquad: Option<Biquad>,
     fs: Option<f64>,
     last_session: Option<u32>,
-    capture_tx: Sender<CaptureCommand>,
+    virtual_tx: Sender<Arc<BatchedData>>,
 }
 
 impl BiquadProducer {
     pub fn new(
-        src: DataColumnId,
+        src: UiColumnKey,
         kind: BiquadKind,
         params: BiquadParams,
-        out_key: DataColumnId,
-        capture_tx: Sender<CaptureCommand>,
+        out_key: UiColumnKey,
+        virtual_tx: Sender<Arc<BatchedData>>,
     ) -> Self {
         Self {
             id: PipelineId(Uuid::new_v4()),
@@ -115,7 +114,7 @@ impl BiquadProducer {
             biquad: None,
             fs: None,
             last_session: None,
-            capture_tx,
+            virtual_tx,
         }
     }
 
@@ -127,6 +126,23 @@ impl BiquadProducer {
                 self.biquad = Some(Biquad::new(kind, &params, fs));
             }
         }
+    }
+
+    fn emit_batch(&self, points: Vec<Point>, sample_numbers: Vec<u32>, session_id: u32) {
+        if points.is_empty() {
+            return;
+        }
+        let t_min = points.first().map(|p| p.x).unwrap_or(0.0);
+        let t_max = points.last().map(|p| p.x).unwrap_or(0.0);
+        let batch = Arc::new(BatchedData {
+            key: self.out_key.clone(),
+            session_id,
+            points: Arc::new(points),
+            sample_numbers: Arc::new(sample_numbers),
+            t_min,
+            t_max,
+        });
+        let _ = self.virtual_tx.try_send(batch);
     }
 }
 
@@ -163,29 +179,20 @@ impl Pipeline for BiquadProducer {
             out_pts.push(Point { x: p.x, y });
         }
 
-        if !out_pts.is_empty() {
-            let _ = self.capture_tx.send(CaptureCommand::InsertBatch {
-                key: self.out_key.clone(),
-                points: out_pts,
-                sample_numbers: sns.to_vec(),
-                session_id: batch.session_id,
-                instant: Instant::now(),
-            });
-        }
+        self.emit_batch(out_pts, sns.to_vec(), batch.session_id);
     }
 
-    fn process_command(&mut self, cmd: PipelineCommand, capture: &CaptureState) {
+    fn process_command(&mut self, cmd: PipelineCommand) {
         match cmd {
-            PipelineCommand::Hydrate => {
-                self.fs = capture.get_effective_sampling_rate(&self.src);
-                if let Some(fs) = self.fs {
+            PipelineCommand::Hydrate {
+                sampling_rate,
+                backfill: _,
+            } => {
+                if let Some(fs) = sampling_rate {
+                    self.fs = Some(fs);
                     let kind = self.kind.clone();
                     let params = self.params.clone();
                     self.biquad = Some(Biquad::new(kind, &params, fs));
-                    let _ = self.capture_tx.send(CaptureCommand::UpdateSampleRate {
-                        key: self.out_key.clone(),
-                        rate: fs,
-                    });
                 }
             }
             PipelineCommand::ResetSelf => {

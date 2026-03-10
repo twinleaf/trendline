@@ -7,7 +7,6 @@
     import { uiState } from "$lib/states/uiState.svelte";
     import { LoaderCircleIcon, PlusIcon } from "@lucide/svelte/icons";
     import DeviceList from "$lib/components/device-select/DeviceList.svelte";
-    import { invoke } from "@tauri-apps/api/core";
     import { X } from "@lucide/svelte/icons";
     import { mode } from "mode-watcher";
 
@@ -33,7 +32,7 @@
         if (!portInfo) {
             return true;
         }
-        if (portInfo.state == "Streaming") {
+        if (portInfo.state == "Online") {
             confirmButton?.focus();
             return false;
         }
@@ -47,18 +46,25 @@
         }
 
         if (!selectedParent || !devices.some((d) => d.url === selectedParent)) {
-            selectedParent = devices[0].url;
+            const confirmedPortUrl = deviceState.selection?.portUrl;
+            selectedParent =
+                confirmedPortUrl &&
+                devices.some((d) => d.url === confirmedPortUrl)
+                    ? confirmedPortUrl
+                    : devices[0].url;
         }
     });
 
     // Simplified function: fire-and-forget without toast notifications.
-    function handleManualConnect() {
+    async function handleManualConnect(event: SubmitEvent) {
+        event.preventDefault();
         if (!manualUrl) return;
-        invoke("connect_to_port", { portUrl: manualUrl });
+        const connected = await deviceState.connectToPort(manualUrl);
+        if (!connected) return;
         manualConnectDialogOpen = false;
     }
 
-    function confirm(event: SubmitEvent) {
+    async function confirm(event: SubmitEvent) {
         event.preventDefault();
         if (!selectedParent) {
             console.warn("No parent device selected.");
@@ -73,28 +79,22 @@
             childrenRoutes: Array.from(selectedChildren),
         };
 
-        deviceState.selection = payload;
-        console.log(
-            `[DeviceSelectorDialog] Made selection for ${selectedParent} with length ${Array.from(selectedChildren).length}`,
+        const confirmed = await deviceState.confirmSelection(
+            payload.portUrl,
+            payload.childrenRoutes,
         );
-        invoke("confirm_selection", payload);
+        if (!confirmed) return;
         uiState.close();
         manualConnectDialogOpen = false;
     }
 
     $effect(() => {
         const discoveryOpen = uiState.is("discovery");
-        invoke("set_discovery_polling", { enabled: discoveryOpen }).catch(
-            (e) => {
-                console.error("set_discovery_polling failed", e);
-            },
-        );
+        void deviceState.setDiscoveryPolling(discoveryOpen);
 
         return () => {
             if (!discoveryOpen) return;
-            invoke("set_discovery_polling", { enabled: false }).catch((e) => {
-                console.error("set_discovery_polling cleanup failed", e);
-            });
+            void deviceState.setDiscoveryPolling(false);
         };
     });
 </script>

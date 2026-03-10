@@ -1,6 +1,6 @@
 use super::{Pipeline, PipelineCommand};
-use crate::shared::{DataColumnId, PipelineId, PlotData, Point};
-use crate::state::capture::{CaptureState, SessionId};
+use crate::shared::{PipelineId, PlotData, Point, UiColumnKey};
+use crate::state::data_manager::{BatchedData, SessionId};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -14,7 +14,7 @@ enum FpcsLastRetained {
 
 pub struct StreamingFpcsPipeline {
     id: PipelineId,
-    source_key: DataColumnId,
+    source_key: UiColumnKey,
     last_processed_time: f64,
     ratio: usize,
     window_seconds: f64,
@@ -32,7 +32,7 @@ pub struct StreamingFpcsPipeline {
 }
 
 impl StreamingFpcsPipeline {
-    pub fn new(source_key: DataColumnId, ratio: usize, window_seconds: f64) -> Self {
+    pub fn new(source_key: UiColumnKey, ratio: usize, window_seconds: f64) -> Self {
         Self {
             id: PipelineId(Uuid::new_v4()),
             source_key,
@@ -54,6 +54,11 @@ impl StreamingFpcsPipeline {
     #[inline]
     fn reset_internal(&mut self) {
         self.output.lock().unwrap().clear();
+        self.reset_algorithm_state();
+    }
+
+    #[inline]
+    fn reset_algorithm_state(&mut self) {
         self.counter = 0;
         self.potential_point = None;
         self.last_retained_flag = FpcsLastRetained::None;
@@ -141,7 +146,11 @@ impl Pipeline for StreamingFpcsPipeline {
 
         for point in output.iter() {
             timestamps.push(point.x);
-            series_data.push(point.y);
+            series_data.push(if point.y.is_nan() {
+                None
+            } else {
+                Some(point.y)
+            });
         }
 
         PlotData {
@@ -150,7 +159,7 @@ impl Pipeline for StreamingFpcsPipeline {
         }
     }
 
-    fn process_batch(&mut self, batch: Arc<crate::state::capture::BatchedData>) {
+    fn process_batch(&mut self, batch: Arc<BatchedData>) {
         // Reset if the session changed.
         let mut need_reset = self
             .last_session_id
@@ -174,7 +183,12 @@ impl Pipeline for StreamingFpcsPipeline {
         }
 
         if need_reset {
-            self.reset_internal();
+            // Preserve output buffer (old data stays visible), reset algorithm only
+            self.reset_algorithm_state();
+            // Insert gap marker so the chart shows a break
+            if let Some(first_point) = batch.points.first() {
+                self.retain_point(Point::new(first_point.x, f64::NAN));
+            }
         }
 
         for point in batch.points.iter() {
@@ -186,56 +200,33 @@ impl Pipeline for StreamingFpcsPipeline {
         self.last_sample_number = batch.sample_numbers.last().copied();
     }
 
-    fn process_command(&mut self, cmd: PipelineCommand, capture_state: &CaptureState) {
+    fn process_command(&mut self, cmd: PipelineCommand) {
         match cmd {
             PipelineCommand::ResetSelf => self.reset_internal(),
-            PipelineCommand::Hydrate => {
-                println!("[FPCS Pipeline {:?}] Received Hydrate command.", self.id);
+            PipelineCommand::Hydrate {
+                sampling_rate,
+                backfill,
+            } => {
                 if self.capacity == 0 && self.window_seconds > 0.0 {
-                    if let Some(sampling_rate) =
-                        capture_state.get_effective_sampling_rate(&self.source_key)
-                    {
-                        if sampling_rate > 0.0 {
-                            let output_rate_approx = (2.0 * sampling_rate) / self.ratio as f64;
+                    if let Some(rate) = sampling_rate {
+                        if rate > 0.0 {
+                            let output_rate_approx = (2.0 * rate) / self.ratio as f64;
                             let new_capacity =
                                 (output_rate_approx * self.window_seconds).ceil() as usize;
                             self.capacity = new_capacity.max(2);
-                            println!(
-                                "[FPCS Pipeline {:?}] Hydrated with capacity {}",
-                                self.id, self.capacity
-                            );
                         }
                     }
                 }
 
-                let Some(latest_time) =
-                    capture_state.get_latest_unified_timestamp(&[self.source_key.clone()])
-                else {
+                if backfill.is_empty() {
                     return;
-                };
+                }
 
-                let start_time = latest_time - self.window_seconds;
-                let raw_data_vecs = capture_state.get_data_across_sessions_for_keys(
-                    &[self.source_key.clone()],
-                    start_time,
-                    latest_time,
-                );
-
-                if let Some(points) = raw_data_vecs.get(0) {
-                    if points.is_empty() {
-                        return;
-                    }
-                    println!(
-                        "[FPCS Pipeline {:?}] Backfilling with {} points.",
-                        self.id,
-                        points.len()
-                    );
-                    for point in points {
-                        self.process_point(*point);
-                    }
-                    if let Some(last) = points.last() {
-                        self.last_processed_time = last.x;
-                    }
+                for point in &backfill {
+                    self.process_point(*point);
+                }
+                if let Some(last) = backfill.last() {
+                    self.last_processed_time = last.x;
                 }
             }
             _ => {}

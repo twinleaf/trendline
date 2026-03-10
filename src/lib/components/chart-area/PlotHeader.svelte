@@ -53,7 +53,11 @@
             class="text-muted-foreground hover:text-foreground data-[state=on]:text-primary"
             bind:pressed={
                 () => plot.viewType === "fft",
-                (isFft) => (plot.viewType = isFft ? "fft" : "timeseries")
+                (isFft) =>
+                    chartState.setPlotViewType(
+                        plot,
+                        isFft ? "fft" : "timeseries",
+                    )
             }
             onclick={(e) => e.stopPropagation()}
         >

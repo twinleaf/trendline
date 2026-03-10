@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { DataColumnId } from "$lib/bindings/DataColumnId";
+    import type { UiColumnKey } from "$lib/bindings/UiColumnKey";
     import { chartState } from "$lib/states/chartState.svelte";
     import { streamMonitorState } from "$lib/states/streamMonitorState.svelte";
     import type { ColumnStatistics } from "$lib/bindings/ColumnStatistics";
@@ -9,7 +9,7 @@
     import { Button } from "$lib/components/ui/button";
 
     type Props = {
-        dataKey: DataColumnId;
+        dataKey: UiColumnKey;
         name: string;
         units?: string;
         depth?: number;

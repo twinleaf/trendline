@@ -1,6 +1,6 @@
 use super::{Pipeline, PipelineCommand};
-use crate::shared::{DataColumnId, DetrendMethod, PipelineId, PlotData, Point};
-use crate::state::capture::{BatchedData, CaptureState};
+use crate::shared::{DetrendMethod, PipelineId, PlotData, Point, UiColumnKey};
+use crate::state::data_manager::{BatchedData, SessionId};
 use crossbeam::channel::Sender;
 use nalgebra::{DMatrix, DVector};
 use std::collections::VecDeque;
@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 pub struct DetrendPipeline {
     id: PipelineId,
-    source_key: DataColumnId,
+    source_key: UiColumnKey,
     window_seconds: f64,
     method: DetrendMethod,
     output: Arc<Mutex<PlotData>>,
@@ -19,11 +19,12 @@ pub struct DetrendPipeline {
     hop_size_samples: usize,
     since_last_emit: usize,
     sample_rate: Option<f64>,
+    last_session_id: Option<SessionId>,
 }
 const HOP_TIME_SECONDS: f64 = 0.066;
 
 impl DetrendPipeline {
-    pub fn new(source_key: DataColumnId, window_seconds: f64, method: DetrendMethod) -> Self {
+    pub fn new(source_key: UiColumnKey, window_seconds: f64, method: DetrendMethod) -> Self {
         Self {
             id: PipelineId(Uuid::new_v4()),
             source_key,
@@ -36,6 +37,7 @@ impl DetrendPipeline {
             hop_size_samples: 0,
             since_last_emit: 0,
             sample_rate: None,
+            last_session_id: None,
         }
     }
 
@@ -54,7 +56,7 @@ impl DetrendPipeline {
 
         let result_plot_data = PlotData {
             timestamps: block.iter().map(|p| p.x).collect(),
-            series_data: vec![detrended_y],
+            series_data: vec![detrended_y.into_iter().map(Some).collect()],
         };
 
         *self.output.lock().unwrap() = result_plot_data.clone();
@@ -80,6 +82,16 @@ impl Pipeline for DetrendPipeline {
         if batch.key != self.source_key || batch.points.is_empty() {
             return;
         }
+
+        // Session boundary: clear working buffer so FFT gets only post-boundary data
+        if let Some(last_sid) = self.last_session_id {
+            if last_sid != batch.session_id {
+                self.buffer.clear();
+                self.since_last_emit = 0;
+                *self.output.lock().unwrap() = PlotData::empty();
+            }
+        }
+        self.last_session_id = Some(batch.session_id);
 
         self.buffer.extend(batch.points.iter());
 
@@ -138,50 +150,38 @@ impl Pipeline for DetrendPipeline {
         self.since_last_emit %= self.hop_size_samples;
     }
 
-    fn process_command(&mut self, cmd: PipelineCommand, capture_state: &CaptureState) {
+    fn process_command(&mut self, cmd: PipelineCommand) {
         match cmd {
             PipelineCommand::AddSubscriber(tx) => {
                 self.subscribers.push(tx);
             }
             PipelineCommand::ResetSelf => {
-                println!("[Detrend {:?}] Received ResetSelf command", self.id);
                 self.buffer.clear();
                 self.since_last_emit = 0;
+                self.last_session_id = None;
                 *self.output.lock().unwrap() = PlotData::empty();
             }
-            PipelineCommand::Hydrate => {
-                if let Some(sr) = capture_state.get_effective_sampling_rate(&self.source_key) {
+            PipelineCommand::Hydrate {
+                sampling_rate,
+                backfill,
+            } => {
+                if let Some(sr) = sampling_rate {
                     self.sample_rate = Some(sr);
                     self.window_size_samples = (sr * self.window_seconds).ceil() as usize;
                     self.hop_size_samples = ((sr * HOP_TIME_SECONDS).ceil() as usize).max(1);
-
-                    println!(
-                        "[Detrend {:?}] Hydrated. Window: {} samples, Hop: {} samples.",
-                        self.id, self.window_size_samples, self.hop_size_samples
-                    );
                 }
 
-                let Some(latest_time) =
-                    capture_state.get_latest_unified_timestamp(&[self.source_key.clone()])
-                else {
+                if backfill.is_empty() {
                     return;
-                };
-
-                let start_time = latest_time - self.window_seconds;
-                let raw_data_vecs = capture_state.get_data_across_sessions_for_keys(
-                    &[self.source_key.clone()],
-                    start_time,
-                    latest_time,
-                );
-
-                if let Some(mut points) = raw_data_vecs.into_iter().next() {
-                    if self.window_size_samples > 0 && points.len() > self.window_size_samples {
-                        points.drain(..points.len() - self.window_size_samples);
-                    }
-                    self.calculate_and_distribute(&points);
-                    self.buffer.extend(points);
-                    self.since_last_emit = 0;
                 }
+
+                let mut points = backfill;
+                if self.window_size_samples > 0 && points.len() > self.window_size_samples {
+                    points.drain(..points.len() - self.window_size_samples);
+                }
+                self.calculate_and_distribute(&points);
+                self.buffer.extend(points);
+                self.since_last_emit = 0;
             }
             _ => {}
         }

@@ -1,11 +1,11 @@
 <script lang="ts">
 	import type { Column } from '@tanstack/table-core';
-	import type { RpcMeta } from '$lib/bindings/RpcMeta';
+	import type { UiRpcMeta } from '$lib/bindings/UiRpcMeta';
 	import { Button } from '$lib/components/ui/button';
 	import { ChevronsUpDown, ArrowUp, ArrowDown } from '@lucide/svelte';
 	import { cn } from '$lib/utils';
 
-	let { column, title, class: className }: { column: Column<RpcMeta>; title: string; class?: string; } =
+	let { column, title, class: className }: { column: Column<UiRpcMeta>; title: string; class?: string; } =
 			$props();
 	const sorted = $derived(column.getIsSorted());
 </script>

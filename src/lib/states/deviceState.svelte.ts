@@ -1,12 +1,46 @@
 import { listen } from "@tauri-apps/api/event";
 import type { PortState } from "$lib/bindings/PortState";
 import type { UiDevice } from "$lib/bindings/UiDevice";
-import { SvelteMap } from "svelte/reactivity";
+import type { UiRpcError } from "$lib/bindings/UiRpcError";
+import type { UiRpcMeta } from "$lib/bindings/UiRpcMeta";
+import type { UiSelectionState } from "$lib/bindings/UiSelectionState";
+import { uiState } from "$lib/states/uiState.svelte";
+import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { invoke } from "@tauri-apps/api/core";
 import { sortUiDevicesByRoute, isRootRoute } from "$lib/utils";
 
 type DeviceTreeItem = UiDevice & { children: UiDevice[] };
 const LOCAL_TCP_URL_PREFIX = "tcp://localhost";
+
+const isLocalTcpUrl = (url: string) => url.startsWith(LOCAL_TCP_URL_PREFIX);
+const isSerialUrl = (url: string) => url.startsWith("serial://");
+const deviceIdentityKey = (device: UiDevice) => {
+  const serialNumber = device.meta.serial_number.trim();
+  return serialNumber.length > 0 && serialNumber !== "N/A"
+    ? `serial:${serialNumber}`
+    : `url:${device.url}`;
+};
+
+function shouldPreferDevice(
+  candidate: DeviceTreeItem,
+  current: DeviceTreeItem,
+  preferredUrl: string | null,
+) {
+  if (candidate.url === preferredUrl && current.url !== preferredUrl)
+    return true;
+  if (current.url === preferredUrl && candidate.url !== preferredUrl)
+    return false;
+
+  const candidateIsLocalTcp = isLocalTcpUrl(candidate.url);
+  const currentIsLocalTcp = isLocalTcpUrl(current.url);
+  if (candidateIsLocalTcp !== currentIsLocalTcp) return candidateIsLocalTcp;
+
+  const candidateIsSerial = isSerialUrl(candidate.url);
+  const currentIsSerial = isSerialUrl(current.url);
+  if (candidateIsSerial !== currentIsSerial) return !candidateIsSerial;
+
+  return candidate.url.localeCompare(current.url) < 0;
+}
 
 export interface Selection {
   portUrl: string;
@@ -18,6 +52,8 @@ class DeviceState {
     string,
     { state: PortState; devices: UiDevice[] }
   >();
+  #pendingConnectUrls = new SvelteSet<string>();
+  activePortUrl = $state<string | null>(null);
   selection = $state<Selection | null>(null);
   // Map<portUrl, Set<route>>
   childrenSelections = new SvelteMap<string, Set<string>>();
@@ -28,13 +64,7 @@ class DeviceState {
     listen<[string, PortState]>(
       "port-state-changed",
       ({ payload: [url, newState] }) => {
-        console.log(
-          `[DeviceState] Received state of ${newState} devices for port ${url} with selection ${this.selection?.portUrl}`,
-        );
         this.#setPortState(url, newState);
-        console.log(
-          `[DeviceState] Set state of ${newState} devices for port ${url} with selection ${this.selection?.portUrl}`,
-        );
       },
     );
 
@@ -56,28 +86,26 @@ class DeviceState {
         new_devices.sort(sortUiDevicesByRoute);
 
         this.#devicesMap.set(url, { ...entry, devices: new_devices });
+        if (new_devices.some((device) => isRootRoute(device.route))) {
+          this.#pendingConnectUrls.delete(url);
+        }
         this.#reconcileChildrenSelection(url);
       },
     );
 
     listen<string>("device-removed", ({ payload: url }) => {
+      this.#pendingConnectUrls.delete(url);
       this.#removePort(url);
+    });
+
+    listen<UiSelectionState>("selection-state-changed", ({ payload }) => {
+      this.#applySelectionState(payload);
     });
 
     listen<{ portUrl: string; childrenRoutes: string[] }>(
       "device-reconnected",
-      ({ payload: { portUrl, childrenRoutes } }) => {
-        const set = new Set(childrenRoutes);
-        deviceState.childrenSelections.set(portUrl, set);
-
-        if (
-          !deviceState.selection ||
-          deviceState.selection.portUrl === portUrl
-        ) {
-          deviceState.selection = { portUrl, childrenRoutes: Array.from(set) };
-        }
-
-        this.#reconcileChildrenSelection?.(portUrl);
+      ({ payload: { portUrl } }) => {
+        this.#reconcileChildrenSelection(portUrl);
       },
     );
 
@@ -97,6 +125,9 @@ class DeviceState {
         if (deviceIndex > -1) {
           portEntry.devices[deviceIndex] = updatedDevice;
           this.#devicesMap.set(portUrl, { ...portEntry });
+          if (isRootRoute(updatedDevice.route)) {
+            this.#pendingConnectUrls.delete(portUrl);
+          }
         }
       },
     );
@@ -105,13 +136,20 @@ class DeviceState {
   #removePort(url: string) {
     this.#devicesMap.delete(url);
     this.childrenSelections.delete(url);
+    if (this.activePortUrl === url) this.activePortUrl = null;
     if (this.selection?.portUrl === url) this.selection = null;
   }
 
   async #initializeState() {
     try {
-      const allCurrentDevices = await invoke<UiDevice[]>("get_all_devices");
-      if (allCurrentDevices.length === 0) return;
+      const [allCurrentDevices, selectionState] = await Promise.all([
+        invoke<UiDevice[]>("get_all_devices"),
+        invoke<UiSelectionState>("get_selection_state"),
+      ]);
+      if (allCurrentDevices.length === 0) {
+        this.#applySelectionState(selectionState);
+        return;
+      }
 
       const groupedByPort = new Map<string, UiDevice[]>();
       for (const device of allCurrentDevices) {
@@ -131,8 +169,7 @@ class DeviceState {
             devices: devicesForPort,
           });
 
-          if (currentState === "Streaming")
-            this.#setDefaultChildrenForPort(url);
+          if (currentState === "Online") this.#setDefaultChildrenForPort(url);
         } catch {
           const fallbackState = devicesForPort[0]?.state ?? "Disconnected";
           devicesForPort.sort(sortUiDevicesByRoute);
@@ -142,17 +179,46 @@ class DeviceState {
           });
         }
       }
+
+      this.#applySelectionState(selectionState);
     } catch (e) {
       console.error("Failed to get initial device list from backend:", e);
     }
   }
 
+  #applySelectionState(selectionState: UiSelectionState) {
+    this.activePortUrl = selectionState.active_port_url ?? null;
+
+    if (!selectionState.confirmed) {
+      this.selection = null;
+      return;
+    }
+
+    const nextSelection = {
+      portUrl: selectionState.confirmed.port_url,
+      childrenRoutes: selectionState.confirmed.children_routes,
+    };
+    this.selection = nextSelection;
+    this.childrenSelections.set(
+      nextSelection.portUrl,
+      new Set(nextSelection.childrenRoutes),
+    );
+  }
+
   #setPortState(url: string, state: PortState) {
     const entry = this.#devicesMap.get(url) ?? { state, devices: [] };
-    const prev = entry.state;
+    const hasRootDevice = entry.devices.some((device) =>
+      isRootRoute(device.route),
+    );
     this.#devicesMap.set(url, { ...entry, state });
 
-    if (state === "Streaming") this.#setDefaultChildrenForPort(url);
+    const isErrorState =
+      typeof state === "object" && state !== null && "Error" in state;
+    if (!hasRootDevice && (state === "Disconnected" || isErrorState)) {
+      this.#pendingConnectUrls.delete(url);
+    }
+
+    if (state === "Online") this.#setDefaultChildrenForPort(url);
   }
 
   #setDefaultChildrenForPort(url: string) {
@@ -174,16 +240,6 @@ class DeviceState {
     );
     this.childrenSelections.set(url, allChildrenRoutes);
     this.#reconcileChildrenSelection(url);
-
-    if (!this.selection) {
-      this.selection = {
-        portUrl: url,
-        childrenRoutes: Array.from(allChildrenRoutes),
-      };
-      console.log(
-        `[DeviceState] Set ${this.selection?.portUrl} inside setDefaultChildrenForPort`,
-      );
-    }
   }
 
   #reconcileChildrenSelection(url: string) {
@@ -212,16 +268,6 @@ class DeviceState {
         `[DeviceState] Set childrenSelections of ${this.selection?.portUrl} inside reconcileChildrenSelection`,
       );
     }
-
-    if (this.selection?.portUrl === url) {
-      const cur = new Set(this.selection.childrenRoutes);
-      for (const r of Array.from(cur)) if (!set!.has(r)) cur.delete(r);
-      for (const r of set!) if (!cur.has(r)) cur.add(r);
-      this.selection = { portUrl: url, childrenRoutes: Array.from(cur) };
-      console.log(
-        `[DeviceState] Set ${this.selection?.portUrl} inside reconcileChildrenSelection`,
-      );
-    }
   }
 
   toggleChildSelection(
@@ -238,25 +284,84 @@ class DeviceState {
     this.childrenSelections.set(portUrl, selections);
   }
 
+  async connectToPort(portUrl: string) {
+    this.#pendingConnectUrls.add(portUrl);
+    try {
+      await invoke("connect_to_port", { portUrl });
+      return true;
+    } catch (e) {
+      this.#pendingConnectUrls.delete(portUrl);
+      uiState.showError(e as string);
+      return false;
+    }
+  }
+
+  async refreshPort(portUrl: string) {
+    try {
+      await invoke("refresh_port", { portUrl });
+    } catch (e) {
+      uiState.showError(e as string);
+    }
+  }
+
+  async disconnectPort(portUrl: string) {
+    try {
+      await invoke("disconnect_port", { portUrl });
+    } catch (e) {
+      uiState.showError(e as string);
+    }
+  }
+
+  async confirmSelection(portUrl: string, childrenRoutes: string[]) {
+    try {
+      await invoke("confirm_selection", { portUrl, childrenRoutes });
+      return true;
+    } catch (e) {
+      uiState.showError(e as string);
+      return false;
+    }
+  }
+
+  async setDiscoveryPolling(enabled: boolean) {
+    try {
+      await invoke("set_discovery_polling", { enabled });
+    } catch (e) {
+      console.error("set_discovery_polling failed", e);
+    }
+  }
+
+  async executeRpc(
+    device: UiDevice,
+    rpc: UiRpcMeta,
+    args: unknown,
+  ): Promise<UiRpcError | null> {
+    try {
+      await invoke("execute_rpc", {
+        portUrl: device.url,
+        deviceRoute: device.route,
+        name: rpc.name,
+        args,
+      });
+      uiState.showSuccess(
+        rpc.writable ? `Updated ${rpc.name}` : `Executed ${rpc.name}`,
+      );
+      return null;
+    } catch (e) {
+      return e as UiRpcError;
+    }
+  }
+
   devices = $derived.by(() => Array.from(this.#devicesMap.values()));
 
   deviceTree = $derived.by(() => {
-    const out: DeviceTreeItem[] = [];
+    const placeholders: DeviceTreeItem[] = [];
+    const visibleRootsByIdentity = new Map<string, DeviceTreeItem>();
+    const preferredUrl = this.activePortUrl ?? this.selection?.portUrl ?? null;
 
     for (const [url, { state, devices }] of this.#devicesMap.entries()) {
       const parent = devices.find((d) => isRootRoute(d.route));
-      const isErrorState =
-        typeof state === "object" && state !== null && "Error" in state;
-      const isLocalTcpUrl = url.startsWith(LOCAL_TCP_URL_PREFIX);
-      const isTransitionState =
-        state === "Connecting" ||
-        state === "Discovery" ||
-        state === "Reconnecting" ||
-        state === "Disconnected" ||
-        isErrorState;
-      const isMissingRootWhileActive = !parent && state !== "Idle";
       const shouldRenderPlaceholder =
-        !isLocalTcpUrl && (isTransitionState || isMissingRootWhileActive);
+        !parent && this.#pendingConnectUrls.has(url);
 
       if (shouldRenderPlaceholder) {
         const placeholderDevice: DeviceTreeItem = {
@@ -274,20 +379,34 @@ class DeviceState {
           rpcs: [],
           children: [],
         };
-        out.push(placeholderDevice);
+        placeholders.push(placeholderDevice);
       } else if (parent) {
         const children = devices.filter((d) => !isRootRoute(d.route));
-        out.push({ ...parent, state, children });
+        const rootDevice = { ...parent, state, children };
+        const identityKey = deviceIdentityKey(rootDevice);
+        const existing = visibleRootsByIdentity.get(identityKey);
+
+        if (
+          !existing ||
+          shouldPreferDevice(rootDevice, existing, preferredUrl)
+        ) {
+          visibleRootsByIdentity.set(identityKey, rootDevice);
+        }
       }
     }
-    return out.sort((a, b) => a.url.localeCompare(b.url));
+
+    return [...placeholders, ...visibleRootsByIdentity.values()].sort((a, b) =>
+      a.url.localeCompare(b.url),
+    );
   });
 
   getPort(url: string) {
     return this.#devicesMap.get(url);
   }
 
-  getDevice(portUrl: string, route: string): UiDevice | undefined {
+  getDevice(route: string): UiDevice | undefined {
+    const portUrl = this.selection?.portUrl;
+    if (!portUrl) return undefined;
     const portData = this.#devicesMap.get(portUrl);
     if (!portData) return undefined;
     return portData.devices.find((d) => d.route === route);

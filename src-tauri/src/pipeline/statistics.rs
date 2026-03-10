@@ -1,6 +1,6 @@
 use crate::pipeline::StatisticsProvider;
-use crate::shared::{ColumnStatistics, DataColumnId, HealthSet, PipelineId, Point, StatisticSet};
-use crate::state::capture::{BatchedData, CaptureState, SessionId};
+use crate::shared::{ColumnStatistics, HealthSet, PipelineId, Point, StatisticSet, UiColumnKey};
+use crate::state::data_manager::{BatchedData, SessionId};
 use crate::util::{calculate_health_stats, calculate_value_stats};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -130,7 +130,7 @@ impl HealthAccumulator {
 
 pub struct StreamingStatisticsProvider {
     id: PipelineId,
-    source_key: DataColumnId,
+    source_key: UiColumnKey,
     window_seconds: f64,
 
     buf_points: VecDeque<Point>,
@@ -148,7 +148,7 @@ pub struct StreamingStatisticsProvider {
 }
 
 impl StreamingStatisticsProvider {
-    pub fn new(source_key: DataColumnId, window_seconds: f64) -> Self {
+    pub fn new(source_key: UiColumnKey, window_seconds: f64) -> Self {
         Self {
             id: PipelineId(Uuid::new_v4()),
             source_key,
@@ -199,7 +199,7 @@ impl StatisticsProvider for StreamingStatisticsProvider {
         self.id
     }
 
-    fn get_output(&mut self, _capture_state: &CaptureState) -> ColumnStatistics {
+    fn get_output(&mut self) -> ColumnStatistics {
         self.output.lock().unwrap().clone()
     }
 

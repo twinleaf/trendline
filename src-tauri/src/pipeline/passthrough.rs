@@ -1,28 +1,28 @@
 use super::{Pipeline, PipelineCommand};
-use crate::shared::{DataColumnId, PipelineId, PlotData, Point};
-use crate::state::capture::{BatchedData, CaptureState};
+use crate::shared::{PipelineId, PlotData, Point, UiColumnKey};
+use crate::state::data_manager::{BatchedData, SessionId};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 pub struct PassthroughPipeline {
     id: PipelineId,
-    source_key: DataColumnId,
+    source_key: UiColumnKey,
     window_seconds: f64,
     buffer: Arc<Mutex<VecDeque<Point>>>,
     capacity: usize,
-    sample_rate: Option<f64>,
+    last_session_id: Option<SessionId>,
 }
 
 impl PassthroughPipeline {
-    pub fn new(source_key: DataColumnId, window_seconds: f64) -> Self {
+    pub fn new(source_key: UiColumnKey, window_seconds: f64) -> Self {
         Self {
             id: PipelineId(Uuid::new_v4()),
             source_key,
             window_seconds,
             buffer: Arc::new(Mutex::new(VecDeque::new())),
             capacity: 0,
-            sample_rate: None,
+            last_session_id: None,
         }
     }
 }
@@ -41,7 +41,7 @@ impl Pipeline for PassthroughPipeline {
         let mut ys = Vec::with_capacity(buffer.len());
         for p in buffer.iter() {
             ts.push(p.x);
-            ys.push(p.y);
+            ys.push(if p.y.is_nan() { None } else { Some(p.y) });
         }
         PlotData {
             timestamps: ts,
@@ -53,7 +53,22 @@ impl Pipeline for PassthroughPipeline {
         if batch.key != self.source_key {
             return;
         }
+
         let mut buffer = self.buffer.lock().unwrap();
+
+        // Session boundary: insert gap marker, keep old data
+        if let Some(last_sid) = self.last_session_id {
+            if last_sid != batch.session_id {
+                if let Some(first_point) = batch.points.first() {
+                    if self.capacity > 0 && buffer.len() >= self.capacity {
+                        buffer.pop_front();
+                    }
+                    buffer.push_back(Point::new(first_point.x, f64::NAN));
+                }
+            }
+        }
+        self.last_session_id = Some(batch.session_id);
+
         for p in batch.points.iter() {
             if self.capacity > 0 && buffer.len() >= self.capacity {
                 buffer.pop_front();
@@ -62,40 +77,24 @@ impl Pipeline for PassthroughPipeline {
         }
     }
 
-    fn process_command(&mut self, cmd: PipelineCommand, capture_state: &CaptureState) {
+    fn process_command(&mut self, cmd: PipelineCommand) {
         match cmd {
             PipelineCommand::ResetSelf => {
-                println!(
-                    "[Passthrough Pipeline {:?}] Received ResetSelf command",
-                    self.id
-                );
                 self.buffer.lock().unwrap().clear();
+                self.last_session_id = None;
             }
-            PipelineCommand::Hydrate => {
-                println!(
-                    "[Passthrough Pipeline {:?}] Received Hydrate command.",
-                    self.id
-                );
-                if let Some(sr) = capture_state.get_effective_sampling_rate(&self.source_key) {
-                    self.sample_rate = Some(sr);
+            PipelineCommand::Hydrate {
+                sampling_rate,
+                backfill,
+            } => {
+                if let Some(sr) = sampling_rate {
                     self.capacity = ((sr * self.window_seconds).ceil() as usize).max(2);
                     self.buffer.lock().unwrap().reserve(self.capacity);
                 }
-                let Some(latest_time) =
-                    capture_state.get_latest_unified_timestamp(&[self.source_key.clone()])
-                else {
-                    return;
-                };
-                let start_time = latest_time - self.window_seconds;
-                let raw_data_vecs = capture_state.get_data_across_sessions_for_keys(
-                    &[self.source_key.clone()],
-                    start_time,
-                    latest_time,
-                );
-                if let Some(points) = raw_data_vecs.get(0) {
+                if !backfill.is_empty() {
                     let mut buffer = self.buffer.lock().unwrap();
                     buffer.clear();
-                    buffer.extend(points);
+                    buffer.extend(backfill);
                 }
             }
             _ => {}

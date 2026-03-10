@@ -1,6 +1,5 @@
 use super::{Pipeline, PipelineCommand};
 use crate::shared::{PipelineId, PlotData};
-use crate::state::capture::CaptureState;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use welch_sde::{Build, SpectralDensity};
@@ -31,21 +30,24 @@ impl Pipeline for FftPipeline {
     fn process_derived_batch(&mut self, batch: (PlotData, f64)) {
         let (plot_data, sample_rate) = batch;
 
-        let y_values = if let Some(data) = plot_data.series_data.get(0) {
+        let raw_series = if let Some(data) = plot_data.series_data.get(0) {
             data
         } else {
             return;
         };
+
+        // Filter out None values (gaps) — FFT needs a continuous block
+        let y_values: Vec<f64> = raw_series.iter().filter_map(|&v| v).collect();
 
         if y_values.len() < 16 || sample_rate <= 0.0 {
             *self.output.lock().unwrap() = PlotData::empty();
             return;
         }
 
-        let welch: SpectralDensity<f64> = SpectralDensity::builder(y_values, sample_rate).build();
+        let welch: SpectralDensity<f64> = SpectralDensity::builder(&y_values, sample_rate).build();
         let psd = welch.periodogram();
 
-        let asd: Vec<f64> = psd.to_vec().iter().map(|&p| p.sqrt()).collect();
+        let asd: Vec<Option<f64>> = psd.to_vec().iter().map(|&p| Some(p.sqrt())).collect();
         let frequencies = psd.frequency().to_vec();
 
         let result = PlotData {
@@ -56,9 +58,8 @@ impl Pipeline for FftPipeline {
         *self.output.lock().unwrap() = result;
     }
 
-    fn process_command(&mut self, cmd: PipelineCommand, _capture: &CaptureState) {
+    fn process_command(&mut self, cmd: PipelineCommand) {
         if let PipelineCommand::ResetSelf = cmd {
-            println!("[Detrend {:?}] Received ResetSelf command", self.id);
             *self.output.lock().unwrap() = PlotData::empty();
         }
     }

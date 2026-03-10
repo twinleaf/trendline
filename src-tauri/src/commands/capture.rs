@@ -1,30 +1,21 @@
-use crate::pipeline::manager::ProcessingManager;
+use crate::pipeline::manager::{PipelineManager, PipelineMsg};
 use crate::shared::PlotId;
 use crate::state::comm_manager::{CommManager, CommMsg};
 use crate::state::port_manager::PortMsg;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tauri::State;
-use twinleaf::tio::proto::identifiers::ColumnKey as LibColumnKey;
 
 #[tauri::command]
 pub fn pause_plot(
     plot_id: PlotId,
     start_time: f64,
     end_time: f64,
-    manager: State<Arc<Mutex<ProcessingManager>>>,
+    manager: State<Arc<PipelineManager>>,
     registry: State<Arc<CommManager>>,
 ) -> Result<(), String> {
-    let mg = manager.lock().unwrap();
-    let plot_config = mg
-        .managed_plots
-        .get(&plot_id)
+    let data_keys = manager
+        .ask(|reply| PipelineMsg::GetPlotDataKeys { plot_id, reply })?
         .ok_or_else(|| format!("Plot {:?} not found.", plot_id))?;
-
-    let data_keys = &plot_config.config.data_keys;
-    let columns: Vec<LibColumnKey> = data_keys
-        .iter()
-        .map(|k| LibColumnKey::new(k.route.clone(), k.stream_id, k.column_id))
-        .collect();
 
     let port_manager = registry
         .ask(|reply| CommMsg::GetActivePort { reply })
@@ -34,7 +25,7 @@ pub fn pause_plot(
     port_manager
         .ask(|reply| PortMsg::CreateSnapshot {
             id: plot_id.0.to_string(),
-            columns,
+            columns: data_keys,
             start_time,
             end_time,
             reply,
@@ -46,15 +37,13 @@ pub fn pause_plot(
 #[tauri::command]
 pub fn unpause_plot(
     plot_id: PlotId,
-    manager: State<Arc<Mutex<ProcessingManager>>>,
+    manager: State<Arc<PipelineManager>>,
     registry: State<Arc<CommManager>>,
 ) -> Result<(), String> {
-    let mg = manager.lock().unwrap();
-    let _ = mg
-        .managed_plots
-        .get(&plot_id)
+    // Verify plot exists
+    manager
+        .ask(|reply| PipelineMsg::GetPlotDataKeys { plot_id, reply })?
         .ok_or_else(|| format!("Plot {:?} not found.", plot_id))?;
-    drop(mg);
 
     let port_manager = registry
         .ask(|reply| CommMsg::GetActivePort { reply })

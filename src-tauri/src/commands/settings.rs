@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tauri::State;
 use twinleaf::tio::proto::DeviceRoute;
 
-use crate::shared::RpcError;
+use crate::shared::UiRpcError;
 use crate::shared::{PortState, UiDevice};
 use crate::state::comm_manager::{CommManager, CommMsg};
 use crate::state::port_manager::PortMsg;
@@ -63,17 +63,17 @@ pub async fn execute_rpc(
     name: String,
     args: Option<Value>,
     registry: State<'_, Arc<CommManager>>,
-) -> Result<Value, RpcError> {
+) -> Result<Value, UiRpcError> {
     let route = DeviceRoute::from_str(&device_route)
-        .map_err(|_| RpcError::AppLogic(format!("Invalid device route '{}'.", device_route)))?;
+        .map_err(|_| UiRpcError::AppLogic(format!("Invalid device route '{}'.", device_route)))?;
 
     let port_manager = registry
         .ask(|reply| CommMsg::GetPort {
             port_url: port_url.clone(),
             reply,
         })
-        .map_err(RpcError::AppLogic)?
-        .ok_or_else(|| RpcError::AppLogic(format!("Port '{}' not found.", port_url)))?;
+        .map_err(UiRpcError::AppLogic)?
+        .ok_or_else(|| UiRpcError::AppLogic(format!("Port '{}' not found.", port_url)))?;
 
     port_manager
         .ask(|reply| PortMsg::ExecuteRpc {
@@ -82,5 +82,5 @@ pub async fn execute_rpc(
             args: args.unwrap_or(Value::Null),
             reply,
         })
-        .map_err(RpcError::AppLogic)?
+        .map_err(UiRpcError::AppLogic)?
 }

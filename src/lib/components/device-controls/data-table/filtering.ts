@@ -1,11 +1,11 @@
 import type { FilterFn } from '@tanstack/table-core';
-import type { RpcMeta } from '$lib/bindings/RpcMeta';
+import type { UiRpcMeta } from '$lib/bindings/UiRpcMeta';
 import { rankItem, rankings } from '@tanstack/match-sorter-utils';
 import '@tanstack/table-core';
 
 type ItemRank = ReturnType<typeof rankItem>;
 
-export const fuzzyFilter: FilterFn<RpcMeta> = (row, columnId, value, addMeta) => {
+export const fuzzyFilter: FilterFn<UiRpcMeta> = (row, columnId, value, addMeta) => {
 	if (!value) {
 		addMeta({ itemRank: null });
 		return true;
@@ -25,7 +25,7 @@ export const fuzzyFilter: FilterFn<RpcMeta> = (row, columnId, value, addMeta) =>
 
 const prefixSetCache = new Map<string, Set<string>>();
 
-export const prefixFilter: FilterFn<RpcMeta> = (row, columnId, value: string[]) => {
+export const prefixFilter: FilterFn<UiRpcMeta> = (row, columnId, value: string[]) => {
   if (!value || value.length === 0) return true;
 
   const key = value.join('|');

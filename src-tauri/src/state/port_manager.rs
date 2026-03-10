@@ -1,5 +1,6 @@
-use crate::shared::{PortState, RpcError, RpcMeta as UiRpcMeta, UiDevice, UiStream};
-use crate::state::data_manager::{DataManager, DataMsg};
+use crate::pipeline::manager::PipelineMsg;
+use crate::shared::{PortState, UiColumnKey, UiDevice, UiRpcError, UiRpcMeta, UiStream};
+use crate::state::data_manager::DataMsg;
 use crate::state::rpc_manager::{RpcManager, RpcMsg};
 use crossbeam::channel::{bounded, unbounded, Receiver, Sender};
 use serde::Serialize;
@@ -10,12 +11,11 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use twinleaf::data::{AlignedWindow, DeviceFullMetadata, ReadError};
-use twinleaf::device::{DeviceEvent, DeviceTree, RpcMeta as TwinleafRpcMeta, TreeEvent, TreeItem};
-use twinleaf::tio::proto::identifiers::ColumnKey;
+use twinleaf::device::{DeviceEvent, DeviceTree, RpcMeta, TreeEvent, TreeItem};
 use twinleaf::tio::proto::{DeviceRoute, ProxyStatus, RpcMethod};
 use twinleaf::tio::proxy;
 
-const DATA_BUFFER_CAPACITY: usize = 500_000;
+pub const DATA_BUFFER_CAPACITY: usize = 500_000;
 const PROXY_RECONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub enum PortMsg {
@@ -29,7 +29,7 @@ pub enum PortMsg {
         route: DeviceRoute,
         name: String,
         args: Value,
-        reply: Sender<Result<Value, RpcError>>,
+        reply: Sender<Result<Value, UiRpcError>>,
     },
     GetDevices {
         reply: Sender<Vec<UiDevice>>,
@@ -39,23 +39,23 @@ pub enum PortMsg {
         reply: Sender<Option<UiDevice>>,
     },
     ReadWindow {
-        columns: Vec<ColumnKey>,
+        columns: Vec<UiColumnKey>,
         n: usize,
         reply: Sender<Result<AlignedWindow, ReadError>>,
     },
     ReadTimeRange {
-        columns: Vec<ColumnKey>,
+        columns: Vec<UiColumnKey>,
         start_time: f64,
         end_time: f64,
         reply: Sender<Result<AlignedWindow, ReadError>>,
     },
     RefreshRpcCacheForRoutes {
         routes: Vec<DeviceRoute>,
-        reply: Sender<Result<(), RpcError>>,
+        reply: Sender<Result<(), UiRpcError>>,
     },
     CreateSnapshot {
         id: String,
-        columns: Vec<ColumnKey>,
+        columns: Vec<UiColumnKey>,
         start_time: f64,
         end_time: f64,
         reply: Sender<Result<(), ReadError>>,
@@ -120,6 +120,7 @@ struct PortRuntime {
 struct PortModel {
     state: PortState,
     discovery_tracker: DiscoveryTracker,
+    prune_to_discovered_on_ready: bool,
     runtime: Option<PortRuntime>,
     next_runtime_id: u64,
     url: String,
@@ -131,6 +132,7 @@ impl PortModel {
         Self {
             state: PortState::Idle,
             discovery_tracker: DiscoveryTracker::default(),
+            prune_to_discovered_on_ready: false,
             runtime: None,
             next_runtime_id: 0,
             url,
@@ -150,8 +152,8 @@ impl PortModel {
 struct ActorDeps {
     app: AppHandle,
     event_tx: Sender<PumpEvent>,
-    data_manager: DataManager,
     data_tx: Sender<DataMsg>,
+    pipeline_tx: Sender<PipelineMsg>,
     rpc_manager: RpcManager,
     state_view: Arc<Mutex<PortState>>,
     devices_view: Arc<RwLock<HashMap<DeviceRoute, Arc<Mutex<UiDevice>>>>>,
@@ -172,12 +174,15 @@ pub struct PortManager {
 }
 
 impl PortManager {
-    pub fn new(url: String, app: AppHandle) -> Arc<Self> {
+    pub fn new(
+        url: String,
+        app: AppHandle,
+        data_tx: Sender<DataMsg>,
+        pipeline_tx: Sender<PipelineMsg>,
+    ) -> Arc<Self> {
         let (command_tx, command_rx) = unbounded::<PortMsg>();
         let (event_tx, event_rx) = unbounded::<PumpEvent>();
 
-        let data_manager = DataManager::new(DATA_BUFFER_CAPACITY);
-        let data_tx = data_manager.sender();
         let rpc_manager = RpcManager::new();
 
         let state = Arc::new(Mutex::new(PortState::Idle));
@@ -197,8 +202,8 @@ impl PortManager {
             ActorDeps {
                 app,
                 event_tx,
-                data_manager,
                 data_tx,
+                pipeline_tx,
                 rpc_manager,
                 state_view: state,
                 devices_view: devices,
@@ -244,7 +249,6 @@ impl PortManager {
                 }
 
                 Self::stop_runtime(&mut model);
-                let _ = deps.data_manager.dispatch(DataMsg::Shutdown);
                 let _ = deps.rpc_manager.dispatch(RpcMsg::Shutdown);
             })
             .expect("Failed to spawn port-manager thread.");
@@ -257,8 +261,8 @@ impl PortManager {
             }
             PortMsg::Shutdown => {
                 Self::stop_runtime(model);
+                Self::clear_runtime_data(model, deps);
                 Self::set_state(model, PortState::Disconnected, deps);
-                let _ = deps.data_manager.dispatch(DataMsg::Shutdown);
                 let _ = deps.rpc_manager.dispatch(RpcMsg::Shutdown);
                 return false;
             }
@@ -281,16 +285,22 @@ impl PortManager {
                 let _ = reply.send(result);
             }
             PortMsg::ReadWindow { columns, n, reply } => {
-                let result = match deps.data_manager.ask(|window_reply| DataMsg::ReadWindow {
-                    columns,
-                    n,
-                    reply: window_reply,
-                }) {
-                    Ok(inner) => inner,
-                    Err(err) => {
-                        eprintln!("[{}] ReadWindow failed: {}", model.url, err);
-                        Err(ReadError::NoColumnsRequested)
-                    }
+                let (data_reply_tx, data_reply_rx) = bounded(1);
+                let result = if deps
+                    .data_tx
+                    .send(DataMsg::ReadWindow {
+                        columns,
+                        n,
+                        reply: data_reply_tx,
+                    })
+                    .is_ok()
+                {
+                    data_reply_rx
+                        .recv()
+                        .unwrap_or(Err(ReadError::NoColumnsRequested))
+                } else {
+                    eprintln!("[{}] ReadWindow failed: data channel closed", model.url);
+                    Err(ReadError::NoColumnsRequested)
                 };
                 let _ = reply.send(result);
             }
@@ -300,19 +310,23 @@ impl PortManager {
                 end_time,
                 reply,
             } => {
-                let result = match deps
-                    .data_manager
-                    .ask(|window_reply| DataMsg::ReadTimeRange {
+                let (data_reply_tx, data_reply_rx) = bounded(1);
+                let result = if deps
+                    .data_tx
+                    .send(DataMsg::ReadTimeRange {
                         columns,
                         start_time,
                         end_time,
-                        reply: window_reply,
-                    }) {
-                    Ok(inner) => inner,
-                    Err(err) => {
-                        eprintln!("[{}] ReadTimeRange failed: {}", model.url, err);
-                        Err(ReadError::NoColumnsRequested)
-                    }
+                        reply: data_reply_tx,
+                    })
+                    .is_ok()
+                {
+                    data_reply_rx
+                        .recv()
+                        .unwrap_or(Err(ReadError::NoColumnsRequested))
+                } else {
+                    eprintln!("[{}] ReadTimeRange failed: data channel closed", model.url);
+                    Err(ReadError::NoColumnsRequested)
                 };
                 let _ = reply.send(result);
             }
@@ -333,34 +347,45 @@ impl PortManager {
                 end_time,
                 reply,
             } => {
-                let result = match deps.data_manager.ask(|snap_reply| DataMsg::CreateSnapshot {
-                    id,
-                    columns,
-                    start_time,
-                    end_time,
-                    reply: snap_reply,
-                }) {
-                    Ok(inner) => inner,
-                    Err(err) => {
-                        eprintln!("[{}] CreateSnapshot failed: {}", model.url, err);
-                        Err(ReadError::NoColumnsRequested)
-                    }
+                let (data_reply_tx, data_reply_rx) = bounded(1);
+                let result = if deps
+                    .data_tx
+                    .send(DataMsg::CreateSnapshot {
+                        id,
+                        columns,
+                        start_time,
+                        end_time,
+                        reply: data_reply_tx,
+                    })
+                    .is_ok()
+                {
+                    data_reply_rx
+                        .recv()
+                        .unwrap_or(Err(ReadError::NoColumnsRequested))
+                } else {
+                    eprintln!("[{}] CreateSnapshot failed: data channel closed", model.url);
+                    Err(ReadError::NoColumnsRequested)
                 };
                 let _ = reply.send(result);
             }
             PortMsg::GetSnapshot { id, reply } => {
-                let result = deps
-                    .data_manager
-                    .ask(|snap_reply| DataMsg::GetSnapshot {
+                let (data_reply_tx, data_reply_rx) = bounded(1);
+                let result = if deps
+                    .data_tx
+                    .send(DataMsg::GetSnapshot {
                         id,
-                        reply: snap_reply,
+                        reply: data_reply_tx,
                     })
-                    .ok()
-                    .flatten();
+                    .is_ok()
+                {
+                    data_reply_rx.recv().ok().flatten()
+                } else {
+                    None
+                };
                 let _ = reply.send(result);
             }
             PortMsg::ClearSnapshot { id } => {
-                let _ = deps.data_manager.dispatch(DataMsg::ClearSnapshot { id });
+                let _ = deps.data_tx.send(DataMsg::ClearSnapshot { id });
             }
         }
 
@@ -399,6 +424,7 @@ impl PortManager {
                     return;
                 }
 
+                Self::clear_runtime_data(model, deps);
                 Self::stop_runtime(model);
                 Self::set_state(
                     model,
@@ -411,6 +437,7 @@ impl PortManager {
                     return;
                 }
 
+                Self::clear_runtime_data(model, deps);
                 Self::stop_runtime(model);
                 if !matches!(model.state, PortState::Error(_)) {
                     Self::set_state(model, PortState::Disconnected, deps);
@@ -430,7 +457,35 @@ impl PortManager {
                 model.discovery_tracker.mark_discovered(route.clone());
                 model.discovery_tracker.mark_ready(route.clone());
 
-                let device = Self::build_ui_device(model, &route, metadata);
+                let mut device = Self::build_ui_device(model, &route, metadata);
+                if let Some(previous) = model.devices.get(&route) {
+                    device.rpcs = previous.rpcs.clone();
+                }
+
+                let mut rate_updates = HashMap::new();
+                for stream in &device.streams {
+                    let rate = stream.effective_sampling_rate;
+                    if rate > 0.0 {
+                        for col in &stream.columns {
+                            let key = crate::shared::UiColumnKey::new(
+                                route.clone(),
+                                stream.meta.stream_id,
+                                col.index,
+                            );
+                            let _ = deps.data_tx.send(DataMsg::SetSamplingRate {
+                                key: key.clone(),
+                                rate,
+                            });
+                            rate_updates.insert(key, rate);
+                        }
+                    }
+                }
+                if !rate_updates.is_empty() {
+                    let _ = deps.pipeline_tx.send(PipelineMsg::SamplingRatesChanged {
+                        rates: rate_updates,
+                    });
+                }
+
                 model.devices.insert(route.clone(), device);
                 Self::sync_devices_view(model, &deps.devices_view);
                 Self::emit_port_devices_discovered(&deps.app, model);
@@ -442,8 +497,40 @@ impl PortManager {
                     );
                 }
 
+                // Fetch initial values for all readable RPCs
+                let readable_names: Vec<String> = model
+                    .devices
+                    .get(&route)
+                    .map(|d| {
+                        d.rpcs
+                            .iter()
+                            .filter(|r| r.readable)
+                            .map(|r| r.name.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                for name in readable_names {
+                    match Self::execute_rpc_message(
+                        model,
+                        deps,
+                        route.clone(),
+                        name.clone(),
+                        Value::Null,
+                    ) {
+                        Ok(_) => {}
+                        Err(err) => {
+                            eprintln!(
+                                "[{}] Initial RPC read failed for {}/{}: {:?}",
+                                model.url, route, name, err
+                            );
+                        }
+                    }
+                }
+
                 if model.discovery_tracker.all_ready() {
-                    Self::set_state(model, PortState::Streaming, deps);
+                    Self::prune_stale_devices_after_discovery(model, deps);
+                    Self::set_state(model, PortState::Online, deps);
                 } else if matches!(
                     model.state,
                     PortState::Connecting | PortState::Reconnecting | PortState::Disconnected
@@ -453,11 +540,19 @@ impl PortManager {
             }
             DeviceEvent::Status(status) => match status {
                 ProxyStatus::SensorDisconnected => {
+                    model.discovery_tracker.clear();
+                    Self::clear_runtime_data(model, deps);
                     Self::set_state(model, PortState::Disconnected, deps);
                     Self::emit_all_device_updates(&deps.app, model);
                 }
                 ProxyStatus::SensorReconnected => {
-                    Self::set_state(model, PortState::Reconnecting, deps);
+                    model.discovery_tracker.clear();
+                    if model.devices.is_empty() {
+                        Self::set_state(model, PortState::Reconnecting, deps);
+                    } else {
+                        Self::set_state(model, PortState::Online, deps);
+                        Self::emit_all_device_updates(&deps.app, model);
+                    }
                     Self::emit_device_reconnected(&deps.app, model);
                 }
                 ProxyStatus::FailedToConnect => {
@@ -483,9 +578,8 @@ impl PortManager {
                 }
             },
             DeviceEvent::RpcInvalidated(method) => {
-                if let Some(updated_device) = Self::invalidate_rpc_cache(model, &route, &method) {
+                if Self::invalidate_rpc_cache(model, &route, &method).is_some() {
                     Self::sync_devices_view(model, &deps.devices_view);
-                    Self::emit_device_metadata_updated(&deps.app, updated_device);
                 }
 
                 let names_to_refetch: Vec<String> = match &method {
@@ -531,18 +625,42 @@ impl PortManager {
                     }
                 }
             }
-            DeviceEvent::Heartbeat { .. } => {}
+            DeviceEvent::Heartbeat { .. } => {
+                if !model.devices.is_empty()
+                    && matches!(
+                        model.state,
+                        PortState::Reconnecting | PortState::Discovery | PortState::Disconnected
+                    )
+                {
+                    Self::set_state(model, PortState::Online, deps);
+                    Self::emit_all_device_updates(&deps.app, model);
+                }
+            }
         }
     }
 
     fn connect_runtime(model: &mut PortModel, deps: &ActorDeps) {
+        let had_devices = !model.devices.is_empty();
         Self::stop_runtime(model);
-        model.devices.clear();
+        Self::clear_runtime_data(model, deps);
         model.discovery_tracker.clear();
-        Self::sync_devices_view(model, &deps.devices_view);
-        Self::set_state(model, PortState::Connecting, deps);
+        model.prune_to_discovered_on_ready = had_devices;
+        if !had_devices {
+            model.devices.clear();
+            Self::sync_devices_view(model, &deps.devices_view);
+        }
+        Self::set_state(
+            model,
+            if had_devices {
+                PortState::Reconnecting
+            } else {
+                PortState::Connecting
+            },
+            deps,
+        );
 
         if let Err(err) = Self::start_runtime(model, deps) {
+            model.prune_to_discovered_on_ready = false;
             Self::set_state(model, PortState::Error(err), deps);
         }
     }
@@ -590,13 +708,39 @@ impl PortManager {
         }
     }
 
+    fn clear_runtime_data(model: &PortModel, deps: &ActorDeps) {
+        if deps.data_tx.send(DataMsg::Clear).is_err() {
+            eprintln!("[{}] Failed to clear runtime data buffer", model.url);
+        }
+        if deps
+            .pipeline_tx
+            .send(PipelineMsg::ResetAllRuntimeState)
+            .is_err()
+        {
+            eprintln!("[{}] Failed to reset runtime pipelines", model.url);
+        }
+    }
+
+    fn prune_stale_devices_after_discovery(model: &mut PortModel, deps: &ActorDeps) {
+        if !model.prune_to_discovered_on_ready {
+            return;
+        }
+
+        model
+            .devices
+            .retain(|route, _| model.discovery_tracker.discovered.contains(route));
+        model.prune_to_discovered_on_ready = false;
+        Self::sync_devices_view(model, &deps.devices_view);
+        Self::emit_port_devices_discovered(&deps.app, model);
+    }
+
     fn execute_rpc_message(
         model: &mut PortModel,
         deps: &ActorDeps,
         route: DeviceRoute,
         name: String,
         args: Value,
-    ) -> Result<Value, RpcError> {
+    ) -> Result<Value, UiRpcError> {
         let result = deps
             .rpc_manager
             .ask(|reply| RpcMsg::Execute {
@@ -605,7 +749,7 @@ impl PortManager {
                 args,
                 reply,
             })
-            .map_err(RpcError::AppLogic)?;
+            .map_err(UiRpcError::AppLogic)?;
         let value = result?;
 
         let mut updated_device = None;
@@ -628,14 +772,14 @@ impl PortManager {
         model: &mut PortModel,
         deps: &ActorDeps,
         route: &DeviceRoute,
-    ) -> Result<(), RpcError> {
+    ) -> Result<(), UiRpcError> {
         let result = deps
             .rpc_manager
             .ask(|reply| RpcMsg::LoadSpecs {
                 route: route.clone(),
                 reply,
             })
-            .map_err(RpcError::AppLogic)?;
+            .map_err(UiRpcError::AppLogic)?;
         let specs = result?;
 
         if let Some(device) = model.devices.get_mut(route) {
@@ -713,9 +857,9 @@ impl PortManager {
                     .iter()
                     .map(|column| column.as_ref().clone().into())
                     .collect();
-                columns.sort_by_key(|column: &crate::shared::ColumnMeta| column.index);
+                columns.sort_by_key(|column: &crate::shared::UiColumnMeta| column.index);
 
-                let segment: crate::shared::SegmentMeta =
+                let segment: crate::shared::UiSegmentMeta =
                     stream_meta.segment.as_ref().clone().into();
                 let decimation = segment.decimation.max(1) as f64;
                 let effective_sampling_rate = (segment.sampling_rate as f64) / decimation;
@@ -833,7 +977,7 @@ impl PortManager {
         }
     }
 
-    fn to_ui_rpc_meta(meta: &TwinleafRpcMeta) -> UiRpcMeta {
+    fn to_ui_rpc_meta(meta: &RpcMeta) -> UiRpcMeta {
         UiRpcMeta {
             name: meta.full_name.clone(),
             size: meta.size_bytes().unwrap_or(0),
@@ -883,9 +1027,10 @@ impl PortManager {
         device_route: &str,
         name: &str,
         args: Option<Value>,
-    ) -> Result<Value, RpcError> {
-        let route = DeviceRoute::from_str(device_route)
-            .map_err(|_| RpcError::AppLogic(format!("Invalid device route '{}'.", device_route)))?;
+    ) -> Result<Value, UiRpcError> {
+        let route = DeviceRoute::from_str(device_route).map_err(|_| {
+            UiRpcError::AppLogic(format!("Invalid device route '{}'.", device_route))
+        })?;
 
         self.ask(|reply| PortMsg::ExecuteRpc {
             route,
@@ -893,15 +1038,15 @@ impl PortManager {
             args: args.unwrap_or(Value::Null),
             reply,
         })
-        .map_err(RpcError::AppLogic)?
+        .map_err(UiRpcError::AppLogic)?
     }
 
-    pub fn refresh_rpc_cache_for_routes(&self, routes: &[DeviceRoute]) -> Result<(), RpcError> {
+    pub fn refresh_rpc_cache_for_routes(&self, routes: &[DeviceRoute]) -> Result<(), UiRpcError> {
         self.ask(|reply| PortMsg::RefreshRpcCacheForRoutes {
             routes: routes.to_vec(),
             reply,
         })
-        .map_err(RpcError::AppLogic)?
+        .map_err(UiRpcError::AppLogic)?
     }
 }
 

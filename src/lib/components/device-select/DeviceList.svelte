@@ -8,7 +8,6 @@
     import DeviceInfoHoverCard from "$lib/components/device-select/DeviceInfoHoverCard.svelte";
     import type { UiDevice } from "$lib/bindings/UiDevice";
     import { deviceState } from "$lib/states/deviceState.svelte";
-    import { invoke } from "@tauri-apps/api/core";
     import { deviceDomId, capsForDevice } from "$lib/utils";
 
     type DeviceWithChildren = UiDevice & { children: UiDevice[] };
@@ -22,19 +21,11 @@
     } = $props();
 
     async function refreshParent(url: string) {
-        try {
-            await invoke("refresh_port", { portUrl: url });
-        } catch (e) {
-            console.error("refresh_port failed", e);
-        }
+        await deviceState.refreshPort(url);
     }
 
     async function disconnectParent(url: string) {
-        try {
-            await invoke("disconnect_port", { portUrl: url });
-        } catch (e) {
-            console.error("disconnect_port failed", e);
-        }
+        await deviceState.disconnectPort(url);
     }
 
     const filteredDevices = $derived(

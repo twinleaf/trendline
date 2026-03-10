@@ -1,4 +1,4 @@
-use crate::shared::RpcError;
+use crate::shared::UiRpcError;
 use crossbeam::channel::{bounded, unbounded, Receiver, Sender};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -14,18 +14,19 @@ pub enum RpcMsg {
     },
     LoadSpecs {
         route: DeviceRoute,
-        reply: Sender<Result<Vec<RpcMeta>, RpcError>>,
+        reply: Sender<Result<Vec<RpcMeta>, UiRpcError>>,
     },
     Execute {
         route: DeviceRoute,
         name: String,
         args: Value,
-        reply: Sender<Result<Value, RpcError>>,
+        reply: Sender<Result<Value, UiRpcError>>,
     },
     Shutdown,
 }
 
 struct RpcModel {
+    proxy: Option<Arc<proxy::Interface>>,
     rpc_client: Option<RpcClient>,
     registries: HashMap<DeviceRoute, RpcRegistry>,
 }
@@ -46,6 +47,7 @@ impl RpcManager {
             .name("rpc-manager".into())
             .spawn(move || {
                 let mut model = RpcModel {
+                    proxy: None,
                     rpc_client: None,
                     registries: HashMap::new(),
                 };
@@ -62,13 +64,8 @@ impl RpcManager {
     fn update(msg: RpcMsg, model: &mut RpcModel) -> bool {
         match msg {
             RpcMsg::SetProxy { proxy } => {
-                match RpcClient::open(&proxy, DeviceRoute::root()) {
-                    Ok(client) => model.rpc_client = Some(client),
-                    Err(e) => {
-                        eprintln!("[rpc] Failed to open RPC client: {:?}", e);
-                        model.rpc_client = None;
-                    }
-                }
+                model.proxy = Some(proxy);
+                model.rpc_client = None;
                 model.registries.clear();
             }
             RpcMsg::LoadSpecs { route, reply } => {
@@ -92,11 +89,8 @@ impl RpcManager {
     fn handle_load_specs(
         model: &mut RpcModel,
         route: &DeviceRoute,
-    ) -> Result<Vec<RpcMeta>, RpcError> {
-        let client = model
-            .rpc_client
-            .as_ref()
-            .ok_or_else(|| RpcError::AppLogic("RPC client is not initialized.".to_string()))?;
+    ) -> Result<Vec<RpcMeta>, UiRpcError> {
+        let client = Self::ensure_client(model)?;
 
         let nrpcs: u16 = client.get(route, "rpc.listinfo")?;
         let mut specs = Vec::with_capacity(nrpcs as usize);
@@ -112,30 +106,48 @@ impl RpcManager {
     }
 
     fn handle_execute(
-        model: &RpcModel,
+        model: &mut RpcModel,
         route: &DeviceRoute,
         name: &str,
         args: Value,
-    ) -> Result<Value, RpcError> {
-        let client = model
-            .rpc_client
-            .as_ref()
-            .ok_or_else(|| RpcError::AppLogic("RPC client is not initialized.".to_string()))?;
+    ) -> Result<Value, UiRpcError> {
+        Self::ensure_client(model)?;
 
         let registry = model.registries.get(route).ok_or_else(|| {
-            RpcError::AppLogic(format!("No RPC registry loaded for route '{}'.", route))
+            UiRpcError::AppLogic(format!("No RPC registry loaded for route '{}'.", route))
         })?;
 
         let meta = registry.find(name).ok_or_else(|| {
-            RpcError::AppLogic(format!("RPC '{}' not found for route '{}'.", name, route))
+            UiRpcError::AppLogic(format!("RPC '{}' not found for route '{}'.", name, route))
         })?;
 
         let arg_bytes = value_to_rpc_bytes(&args, &meta.data_kind)?;
+        let client = model
+            .rpc_client
+            .as_ref()
+            .ok_or_else(|| UiRpcError::AppLogic("RPC client is not initialized.".to_string()))?;
         let reply_bytes = client.raw_rpc(route, name, &arg_bytes)?;
         let rpc_value = tl_util::rpc_decode_reply(&reply_bytes, &meta.data_kind)
-            .map_err(|e| RpcError::AppLogic(format!("Failed to decode RPC reply: {:?}", e)))?;
+            .map_err(|e| UiRpcError::AppLogic(format!("Failed to decode RPC reply: {:?}", e)))?;
 
         Ok(rpc_value_to_json(rpc_value))
+    }
+
+    fn ensure_client(model: &mut RpcModel) -> Result<&RpcClient, UiRpcError> {
+        if model.rpc_client.is_none() {
+            let proxy = model
+                .proxy
+                .as_ref()
+                .ok_or_else(|| UiRpcError::AppLogic("RPC proxy is not initialized.".to_string()))?;
+            let client = RpcClient::open(proxy, DeviceRoute::root())
+                .map_err(|e| UiRpcError::AppLogic(format!("Failed to open RPC client: {:?}", e)))?;
+            model.rpc_client = Some(client);
+        }
+
+        model
+            .rpc_client
+            .as_ref()
+            .ok_or_else(|| UiRpcError::AppLogic("RPC client is not initialized.".to_string()))
     }
 
     pub fn dispatch(&self, msg: RpcMsg) -> Result<(), String> {
